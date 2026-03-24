@@ -481,7 +481,7 @@ QUEUED
        │    └─ RUNNING（Watcher が Pod 実行中を検知）
        │         ├─ SUCCEEDED
        │         └─ FAILED
-       ├─ QUEUED（再試行時：Dispatcher 再起動・requeue）
+       ├─ QUEUED（再試行時：Dispatcher 再起動・K8s 一時障害後の retry_after 差し戻し）
        └─ FAILED（バリデーションエラー・最大 retry 超過）
 CANCELLED（任意のタイミングでユーザーがキャンセル）
 DELETING（POST /v1/reset 受付後・Watcher による K8s Job 削除と DB クリーンアップ待ち）
@@ -643,7 +643,7 @@ spec:
       volumes:
         - name: workspace
           persistentVolumeClaim:
-            claimName: alice   # Dispatcher が message["user"] を動的に埋め込む
+            claimName: alice   # Dispatcher が DB から取得した user を動的に埋め込む
 ```
 
 ## 11. API 設計
@@ -943,7 +943,10 @@ CLI は `skipped` に含まれる job_id を表示し、先に `cjob cancel` す
 ユーザーの全ジョブ履歴をリセットし、job_id の採番を 1 に戻す。
 
 リセット可能条件：全ジョブが CANCELLED / SUCCEEDED / FAILED のいずれかであること。
-QUEUED / DISPATCHING / DISPATCHED / RUNNING のジョブが1件でも存在する場合は 409 を返す。
+以下のいずれかに該当する場合は 409 を返す。
+
+- QUEUED / DISPATCHING / DISPATCHED / RUNNING のジョブが1件でも存在する（未完了ジョブあり）
+- DELETING のジョブが1件でも存在する（前回の reset 処理がまだ完了していない）
 
 条件を満たした場合、Submit API は全ジョブのステータスを `DELETING` に変更して即座に返す。
 実際の K8s Job 削除・DB レコード削除・カウンターリセットは Watcher が非同期で実行する。
@@ -966,6 +969,14 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 {
   "message": "完了していないジョブがあるためリセットできません",
   "blocking_job_ids": [3, 7, 12]
+}
+```
+
+#### response（リセット処理進行中・409）
+
+```json
+{
+  "message": "リセット処理が進行中のため再実行できません。しばらく待ってから再試行してください"
 }
 ```
 
@@ -1021,6 +1032,7 @@ cjob logs --follow <job-id>
 | DISPATCHED / RUNNING | ファイル生成後に tail -f で追跡（`--follow` 時） |
 | SUCCEEDED / FAILED | ファイルを全量表示して終了 |
 | CANCELLED | ファイルがあれば表示、なければ "No logs available" |
+| DELETING | reset 処理中。ファイルがあれば表示、なければ "No logs available（reset 処理中）" を表示して終了 |
 
 ログファイルは PVC 上（`/home/jovyan/.cjob/logs/<job_id>/`）にあり、CLI が直接読む。API を経由しない。
 
@@ -1038,15 +1050,14 @@ $ cjob logs --follow 3
 
 #### `--follow` の終了条件
 
-`tail -f` は EOF で止まらないため、CLI が明示的に終了判断を行う。
+`--follow` モードは Ctrl-C によりユーザーが明示的に終了する。ジョブが `SUCCEEDED` / `FAILED` / `CANCELLED` に遷移しても自動終了しない。
 
-- ジョブが `SUCCEEDED` / `FAILED` に遷移した後、直近 3 秒間ログファイルへの書き込みが止まったことを確認してから追跡を終了する（状態遷移直後も tee バッファにデータが残っている可能性があるため両方を待つ）
-- ジョブが `CANCELLED` に遷移した時点で即終了する（ログが途中でも許容）
+ただし `--follow` 指定なし（通常の `cjob logs`）でジョブがすでに終了状態の場合は、ファイルを全量表示して終了する。
 
 ```
 $ cjob logs --follow 3
 <ログ出力中>
-ジョブ 3 が完了しました（SUCCEEDED）。
+^C      ← ユーザーが Ctrl-C で終了
 ```
 
 ### 12.5 `cjob list` の動作
@@ -1223,14 +1234,16 @@ DB クエリは `idx_jobs_namespace_status` インデックスにより効率化
 # ※ 概念説明のための擬似コードである。
 
 except TemporaryK8sError:
-    retry_count = db.increment_retry_count(namespace, job_id)
+    # retry_count・retry_after・status を1回のアトミックな UPDATE で更新する（§8.3 参照）
+    # 分割 UPDATE にすると途中クラッシュ時に不整合が生じるため必ずアトミックに行うこと
+    retry_count = db.increment_retry_and_set_queued(
+        namespace, job_id,
+        retry_after=now + int(os.environ["DISPATCH_RETRY_INTERVAL_SEC"])
+    )
     if retry_count >= max_retries:
         db.update_status(namespace, job_id, "FAILED", error="max retries exceeded")
-    else:
-        interval = int(os.environ["DISPATCH_RETRY_INTERVAL_SEC"])
-        db.set_retry_after(namespace, job_id, now + interval)
-        db.update_status(namespace, job_id, "QUEUED")
-        db.record_event(namespace, job_id, "RETRY", {"count": retry_count})
+        return
+    db.record_event(namespace, job_id, "RETRY", {"count": retry_count})
 ```
 
 `retry_after <= NOW()` になった時点で次回スキャン時に自動的に再 dispatch 対象となる。
@@ -1318,7 +1331,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    | 条件なし・Pod が Running 中 | `RUNNING` |
 
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
-4. DB 状態を更新
+4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
 6. DB の status が `DELETING` のジョブを処理する
    1. 対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
@@ -1394,7 +1407,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    | 条件なし・Pod が Running 中 | `RUNNING` |
 
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルで対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
-4. DB 状態を更新
+4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
 6. DB の status が `DELETING` のジョブを処理する
    1. 対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
