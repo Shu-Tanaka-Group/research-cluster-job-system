@@ -434,6 +434,7 @@ CREATE TABLE jobs (
     memory        TEXT NOT NULL,
     gpu           INTEGER NOT NULL DEFAULT 0,
     status        TEXT NOT NULL,
+    retry_count   INTEGER NOT NULL DEFAULT 0,
     k8s_job_name  TEXT,
     log_dir       TEXT,          -- /home/jovyan/.cjob/logs/<job_id>
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1174,13 +1175,14 @@ DB クエリは `idx_jobs_namespace_status` インデックスにより効率化
 
 ```python
 except TemporaryK8sError:
-    if job.retry_count >= job.max_retries:
-        db.update_status(job.id, "FAILED", error="max retries exceeded")
+    db.increment_retry_count(job.namespace, job.job_id)   # DB で retry_count をインクリメント
+    current_count = db.get_retry_count(job.namespace, job.job_id)
+    if current_count >= job.max_retries:
+        db.update_status(job.namespace, job.job_id, "FAILED", error="max retries exceeded")
         message.reject(requeue=False)   # DLQ へ転送（キューから除去）
     else:
-        job.retry_count += 1
         message.reject(requeue=False)   # retry Queue 経由で 30秒後に再投入
-        db.record_event(job.id, "RETRY", {"count": job.retry_count})
+        db.record_event(job.namespace, job.job_id, "RETRY", {"count": current_count})
 ```
 
 #### dispatch budget 不足の処理
@@ -1305,8 +1307,10 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 1. 待機リストの budget 再確認・再 dispatch
 2. RabbitMQ から 1 メッセージ取得（タイムアウト: 10秒）
+2.5. DB の status が `CANCELLED` ならば `ack` してスキップ（次のループへ）
 3. dispatch budget を確認（不足なら待機リストに追加して次のループへ）
 4. DB 上で `DISPATCHING` に更新
+4.5. DB の status が `CANCELLED` ならば `QUEUED` に戻して `ack` してスキップ
 5. Job を作成（`claimName` には message["user"] を使用）
 6. 成功なら `DISPATCHED` に更新して `ack`
 7. 一時障害なら retry_count をインクリメントして DLQ 経由で再投入

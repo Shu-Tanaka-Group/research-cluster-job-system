@@ -430,6 +430,7 @@ data:
         memory        TEXT NOT NULL,
         gpu           INTEGER NOT NULL DEFAULT 0,
         status        TEXT NOT NULL,
+        retry_count   INTEGER NOT NULL DEFAULT 0,
         k8s_job_name  TEXT,
         log_dir       TEXT,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),

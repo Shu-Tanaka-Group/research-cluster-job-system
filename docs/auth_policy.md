@@ -213,6 +213,7 @@ def verify_token(token: str) -> str:
 ### 7.2 namespace 照合（認可）
 
 JWT から確定した namespace とリクエスト対象ジョブの namespace を照合する。
+他ユーザーのジョブへのアクセスは、ジョブの存在自体を隠すことで情報漏洩を防ぐため 404 を返す。
 
 ```python
 @app.post("/v1/jobs/{job_id}/cancel")
@@ -220,8 +221,8 @@ def cancel_job(job_id: int, token: str = Depends(extract_bearer)):
     namespace = verify_token(token)   # K8s が保証した namespace
     job = db.get_job(job_id)
 
-    if job.namespace != namespace:    # 他ユーザーのジョブは弾く
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if job.namespace != namespace:    # 他ユーザーのジョブは存在を隠して 404 で返す
+        raise HTTPException(status_code=404, detail="Job not found")
 
     # キャンセル処理...
 ```
