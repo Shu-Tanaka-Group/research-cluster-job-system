@@ -1282,6 +1282,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
+6. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
 
 ## 15. 実装に使用するパッケージ / 技術
 
@@ -1342,6 +1343,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルで対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
+6. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
 
 ## 17. 実装手順
 
