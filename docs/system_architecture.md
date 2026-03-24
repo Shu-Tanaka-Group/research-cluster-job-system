@@ -389,11 +389,14 @@ RabbitMQ の DLQ・TTL は不要。
 
 ```sql
 -- 一時障害時: retry_after を設定して QUEUED に戻す
+-- AND status = 'DISPATCHING' により CANCELLED を上書きしない
 UPDATE jobs
 SET retry_count = retry_count + 1,
     retry_after = NOW() + INTERVAL '30 seconds',  -- DISPATCH_RETRY_INTERVAL_SEC 秒後
     status = 'QUEUED'
-WHERE namespace = :namespace AND job_id = :job_id;
+WHERE namespace = :namespace
+  AND job_id    = :job_id
+  AND status    = 'DISPATCHING';   -- CANCELLED を上書きしない
 ```
 
 `retry_after IS NULL OR retry_after <= NOW()` の条件で次回スキャン時に自動的に再試行される。
@@ -469,6 +472,7 @@ CREATE TABLE job_events (
     payload_json JSONB NOT NULL DEFAULT '{}',
     created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     FOREIGN KEY (namespace, job_id) REFERENCES jobs(namespace, job_id)
+        ON DELETE CASCADE   -- jobs レコード削除時に job_events も連動削除
 );
 ```
 
@@ -478,12 +482,14 @@ CREATE TABLE job_events (
 QUEUED
   └─ DISPATCHING（Dispatcher が DB スキャンで選択し DISPATCHING に更新した時点）
        ├─ DISPATCHED（Kubernetes Job 作成成功）
+       │    ├─ CANCELLED（ユーザーがキャンセル → Watcher が K8s Job を削除）
        │    └─ RUNNING（Watcher が Pod 実行中を検知）
        │         ├─ SUCCEEDED
-       │         └─ FAILED
+       │         ├─ FAILED
+       │         └─ CANCELLED（ユーザーがキャンセル → Watcher が K8s Job を削除）
        ├─ QUEUED（再試行時：Dispatcher 再起動・K8s 一時障害後の retry_after 差し戻し）
        └─ FAILED（バリデーションエラー・最大 retry 超過）
-CANCELLED（任意のタイミングでユーザーがキャンセル）
+CANCELLED（QUEUED / DISPATCHING / DISPATCHED / RUNNING の任意タイミングでユーザーがキャンセル）
 DELETING（POST /v1/reset 受付後・Watcher による K8s Job 削除と DB クリーンアップ待ち）
   └─ （削除完了後、Watcher が DB レコードを削除・カウンターをリセット）
 ```
@@ -857,6 +863,7 @@ GET /v1/jobs?status=FAILED&limit=10
 | `DISPATCHING` | DB を `CANCELLED` に更新する。CAS 更新の前にキャンセルが行われた場合は Dispatcher がスキップする。CAS 更新の後にキャンセルが行われた場合は K8s Job が作成されるが、Watcher が定期監視時に `CANCELLED` ジョブの K8s Job を削除する（`DISPATCHED` / `RUNNING` と同じ経路） |
 | `DISPATCHED` / `RUNNING` | DB を `CANCELLED` に更新する。Watcher が定期監視時に `CANCELLED` ジョブの K8s Job を削除する |
 | `SUCCEEDED` / `FAILED` / `CANCELLED` | 変更不要。`skipped` として返す |
+| `DELETING` | reset 処理中のため変更不要。`skipped` として返す |
 
 K8s Job 削除後、Watcher は DB の status が `CANCELLED` であることを確認した上で状態を維持する（`FAILED` に遷移させない）。
 
@@ -1028,8 +1035,8 @@ cjob logs --follow <job-id>
 
 | 状態 | 動作 |
 |---|---|
-| QUEUED / DISPATCHING | ログファイル未生成のため最大 5分待機（待機中は下記のメッセージを表示） |
-| DISPATCHED / RUNNING | ファイル生成後に tail -f で追跡（`--follow` 時） |
+| QUEUED / DISPATCHING / DISPATCHED | ログファイル未生成のため最大 5分待機（待機中は状態と経過時間を表示） |
+| RUNNING | ファイル生成後に tail -f で追跡（`--follow` 時） |
 | SUCCEEDED / FAILED | ファイルを全量表示して終了 |
 | CANCELLED | ファイルがあれば表示、なければ "No logs available" |
 | DELETING | reset 処理中。ファイルがあれば表示、なければ "No logs available（reset 処理中）" を表示して終了 |
@@ -1242,12 +1249,14 @@ except TemporaryK8sError:
         db.update_status(namespace, job_id, "FAILED", error="max retries exceeded")
         return
     # 上限内なら retry_count・retry_after・status をアトミックに更新する（§8.3 参照）
-    # 分割 UPDATE にすると途中クラッシュ時に不整合が生じるため必ずアトミックに行うこと
-    retry_count = db.increment_retry_and_set_queued(
+    # AND status='DISPATCHING' 条件により CANCELLED を上書きしない
+    updated_rows = db.increment_retry_and_set_queued(
         namespace, job_id,
         retry_after=now + int(os.environ["DISPATCH_RETRY_INTERVAL_SEC"])
     )
-    db.record_event(namespace, job_id, "RETRY", {"count": retry_count})
+    if updated_rows == 0:
+        return   # cancel API が CANCELLED に更新済み → スキップ
+    db.record_event(namespace, job_id, "RETRY", {"count": current_count + 1})
 ```
 
 `retry_after <= NOW()` になった時点で次回スキャン時に自動的に再 dispatch 対象となる。
@@ -1343,7 +1352,12 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
 
    **フェーズ 2（完了確認とクリーンアップ）：**
-   次以降のスキャンサイクルで、namespace 内の全 `DELETING` ジョブについて対応する K8s Job が K8s 上に存在しないことを確認する。全件の K8s Job が消滅していた場合のみ DB レコードを全件削除し、`user_job_counters` の `next_id` を 1 にリセットする。
+   次以降のスキャンサイクルで、namespace 内の全 `DELETING` ジョブについて対応する K8s Job が K8s 上に存在しないことを確認する。全件の K8s Job が消滅していた場合、以下を**単一トランザクション**で実行する。
+
+   1. `jobs` テーブルから該当 namespace の全レコードを削除する（`job_events` は `ON DELETE CASCADE` で連動削除される）
+   2. `user_job_counters` の `next_id` を 1 にリセットする
+
+   （トランザクション内で途中クラッシュした場合はすべてロールバックされ、次のサイクルで再実行される）
 
    （`propagation_policy="Background"` の削除は非同期で完結するため、フェーズ 1 と同一サイクルでフェーズ 2 を実行してはならない）
 
@@ -1425,7 +1439,12 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
 
    **フェーズ 2（完了確認とクリーンアップ）：**
-   次以降のスキャンサイクルで、namespace 内の全 `DELETING` ジョブについて対応する K8s Job が K8s 上に存在しないことを確認する。全件の K8s Job が消滅していた場合のみ DB レコードを全件削除し、`user_job_counters` の `next_id` を 1 にリセットする。
+   次以降のスキャンサイクルで、namespace 内の全 `DELETING` ジョブについて対応する K8s Job が K8s 上に存在しないことを確認する。全件の K8s Job が消滅していた場合、以下を**単一トランザクション**で実行する。
+
+   1. `jobs` テーブルから該当 namespace の全レコードを削除する（`job_events` は `ON DELETE CASCADE` で連動削除される）
+   2. `user_job_counters` の `next_id` を 1 にリセットする
+
+   （トランザクション内で途中クラッシュした場合はすべてロールバックされ、次のサイクルで再実行される）
 
    （`propagation_policy="Background"` の削除は非同期で完結するため、フェーズ 1 と同一サイクルでフェーズ 2 を実行してはならない）
 
