@@ -914,22 +914,7 @@ kubectl apply -f deployments/postgres.yaml
 # PostgreSQL 初回起動時に自動実行される。
 # IF NOT EXISTS を使用しているため再デプロイ時も安全に再実行できる。
 
-# 9. RabbitMQ のデプロイ
-kubectl apply -f deployments/rabbitmq.yaml
-
-# 10. Submit API のデプロイ
-kubectl apply -f deployments/submit-api.yaml
-
-# 11. Dispatcher のデプロイ
-kubectl apply -f deployments/dispatcher.yaml
-
-# 12. Watcher のデプロイ
-kubectl apply -f deployments/watcher.yaml
-
-# 13. NetworkPolicy の適用
-kubectl apply -f networkpolicies/allow-submit-api.yaml
-
-# 14. システムコンポーネント image のビルドと push
+# 9. システムコンポーネント image のビルドと push
 docker build -t yusekiya/cjob-submit-api:latest -f Dockerfile.submit-api .
 docker push yusekiya/cjob-submit-api:latest
 
@@ -940,6 +925,21 @@ docker build -t yusekiya/cjob-watcher:latest -f Dockerfile.watcher .
 docker push yusekiya/cjob-watcher:latest
 
 # Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
+
+# 10. RabbitMQ のデプロイ
+kubectl apply -f deployments/rabbitmq.yaml
+
+# 11. Submit API のデプロイ
+kubectl apply -f deployments/submit-api.yaml
+
+# 12. Dispatcher のデプロイ
+kubectl apply -f deployments/dispatcher.yaml
+
+# 13. Watcher のデプロイ
+kubectl apply -f deployments/watcher.yaml
+
+# 14. NetworkPolicy の適用
+kubectl apply -f networkpolicies/allow-submit-api.yaml
 
 # 15. 各ユーザーの namespace 作成
 ./scripts/create-user-namespace.sh alice
