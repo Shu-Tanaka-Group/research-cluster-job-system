@@ -480,7 +480,9 @@ CREATE TABLE job_events (
 
 ```text
 QUEUED
+  ├─ CANCELLED（ユーザーがキャンセル → Dispatcher が次回スキャン時にスキップ）
   └─ DISPATCHING（Dispatcher が DB スキャンで選択し DISPATCHING に更新した時点）
+       ├─ CANCELLED（ユーザーがキャンセル → CAS 前ならスキップ、CAS 後なら Watcher が K8s Job 削除）
        ├─ DISPATCHED（Kubernetes Job 作成成功）
        │    ├─ CANCELLED（ユーザーがキャンセル → Watcher が K8s Job を削除）
        │    └─ RUNNING（Watcher が Pod 実行中を検知）
@@ -906,7 +908,7 @@ K8s Job 削除後、Watcher は DB の status が `CANCELLED` であることを
 }
 ```
 
-`skipped` は対象ジョブがすでに SUCCEEDED / FAILED / CANCELLED の場合。
+`skipped` は対象ジョブがすでに SUCCEEDED / FAILED / CANCELLED / DELETING の場合。
 
 ### 11.7 POST /v1/jobs/delete
 
@@ -914,6 +916,7 @@ K8s Job 削除後、Watcher は DB の status が `CANCELLED` であることを
 
 CANCELLED / SUCCEEDED / FAILED 状態のジョブのみ削除対象とする。
 QUEUED / DISPATCHING / DISPATCHED / RUNNING 状態のジョブは削除せず `skipped` として返す。
+DELETING 状態のジョブは Watcher によるリセットクリーンアップが進行中のため削除せず `skipped` として返す。
 
 `job_ids` を省略した場合（`--all` 相当）は namespace 内の全完了済みジョブを削除対象とする。
 カウンタのリセットは行わない。
@@ -942,7 +945,7 @@ QUEUED / DISPATCHING / DISPATCHED / RUNNING 状態のジョブは削除せず `s
 }
 ```
 
-`skipped` は対象ジョブが QUEUED / DISPATCHING / DISPATCHED / RUNNING の場合。
+`skipped` は対象ジョブが QUEUED / DISPATCHING / DISPATCHED / RUNNING / DELETING の場合。
 CLI は `skipped` に含まれる job_id を表示し、先に `cjob cancel` するよう促す。
 
 ### 11.8 POST /v1/reset
@@ -1043,7 +1046,7 @@ cjob logs --follow <job-id>
 
 ログファイルは PVC 上（`/home/jovyan/.cjob/logs/<job_id>/`）にあり、CLI が直接読む。API を経由しない。
 
-#### QUEUED / DISPATCHING 中の待機フィードバック
+#### QUEUED / DISPATCHING / DISPATCHED 中の待機フィードバック
 
 待機中は `GET /v1/jobs/{job_id}` を数秒ごとにポーリングし、状態と経過時間を表示する。
 
@@ -1246,7 +1249,12 @@ except TemporaryK8sError:
     # これにより FAILED 遷移が先行し、QUEUED を経由しなくなる
     current_count = db.get_retry_count(namespace, job_id)
     if current_count + 1 >= max_retries:
-        db.update_status(namespace, job_id, "FAILED", error="max retries exceeded")
+        # AND status='DISPATCHING' 条件により CANCELLED を上書きしない
+        updated_rows = db.update_status(
+            namespace, job_id, "FAILED",
+            error="max retries exceeded", condition_status="DISPATCHING"
+        )
+        # updated_rows == 0 は cancel API が CANCELLED に更新済みのためスキップ
         return
     # 上限内なら retry_count・retry_after・status をアトミックに更新する（§8.3 参照）
     # AND status='DISPATCHING' 条件により CANCELLED を上書きしない
@@ -1300,7 +1308,11 @@ class Dispatcher:
             # §13.3 の再試行処理
             ...
         except PermanentK8sError:
-            db.update_status(job.namespace, job.job_id, "FAILED")
+            # AND status='DISPATCHING' 条件により CANCELLED を上書きしない
+            # updated_rows == 0 は cancel API が CANCELLED に更新済みのためスキップ
+            db.update_status(
+                job.namespace, job.job_id, "FAILED", condition_status="DISPATCHING"
+            )
 ```
 
 ### 13.5 起動時の初期化処理
