@@ -618,7 +618,7 @@ metadata:
   namespace: user-alice
   name: cjob-alice-1    # cjob-<username>-<job_id> 形式
   labels:
-    kueue.x-k8s.io/queue-name: default
+    kueue.x-k8s.io/queue-name: default   # Dispatcher が KUEUE_LOCAL_QUEUE_NAME の値を動的に設定
     cjob.io/job-id: "1"          # job_id（Dispatcher が動的に設定）
     cjob.io/namespace: user-alice  # namespace（Dispatcher が動的に設定）
 spec:
