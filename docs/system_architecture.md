@@ -369,7 +369,7 @@ retry Queue（遅延 requeue 用）:
 
 ```json
 {
-  "job_id": "01HXYZ...",
+  "job_id": 1,
   "user": "alice",
   "namespace": "user-alice",
   "cwd": "/home/jovyan/project-a/exp1",
@@ -406,9 +406,12 @@ RabbitMQ はジョブ状態の正本ではない。
 
 ### 9.1 `jobs` テーブル
 
+job_id はユーザー（namespace）ごとに 1 から始まる連番とする。
+グローバルな一意性は `(namespace, job_id)` の複合主キーで保証する。
+
 ```sql
 CREATE TABLE jobs (
-    job_id        TEXT PRIMARY KEY,
+    job_id        INTEGER NOT NULL,
     "user"        TEXT NOT NULL,
     namespace     TEXT NOT NULL,
     command       TEXT NOT NULL,
@@ -423,23 +426,48 @@ CREATE TABLE jobs (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     dispatched_at TIMESTAMPTZ,
     finished_at   TIMESTAMPTZ,
-    last_error    TEXT
+    last_error    TEXT,
+    PRIMARY KEY (namespace, job_id)
 );
 ```
 
-### 9.2 `job_events` テーブル
+### 9.2 `user_job_counters` テーブル
+
+ユーザーごとの job_id 採番カウンタ。reset 時に 1 に戻す。
+
+```sql
+CREATE TABLE user_job_counters (
+    namespace   TEXT PRIMARY KEY,
+    next_id     INTEGER NOT NULL DEFAULT 1
+);
+```
+
+採番は Submit API がアトミックに行う。
+
+```sql
+-- 採番クエリ（競合防止のため RETURNING で採番と increment を同時に行う）
+INSERT INTO user_job_counters (namespace, next_id)
+VALUES (:namespace, 2)
+ON CONFLICT (namespace) DO UPDATE
+    SET next_id = user_job_counters.next_id + 1
+RETURNING next_id - 1;   -- 発行された job_id
+```
+
+### 9.3 `job_events` テーブル
 
 ```sql
 CREATE TABLE job_events (
     id           BIGSERIAL PRIMARY KEY,
-    job_id       TEXT NOT NULL REFERENCES jobs(job_id),
+    namespace    TEXT NOT NULL,
+    job_id       INTEGER NOT NULL,
     event_type   TEXT NOT NULL,
     payload_json JSONB NOT NULL DEFAULT '{}',
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    FOREIGN KEY (namespace, job_id) REFERENCES jobs(namespace, job_id)
 );
 ```
 
-### 9.3 状態遷移
+### 9.4 状態遷移
 
 ```text
 QUEUED
@@ -549,7 +577,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   namespace: user-alice
-  name: cjob-01xyz
+  name: cjob-alice-1    # cjob-<username>-<job_id> 形式
   labels:
     kueue.x-k8s.io/queue-name: default
 spec:
@@ -564,7 +592,7 @@ spec:
           command: ["/bin/bash", "-lc"]
           args:
             - |
-              LOG_DIR=/home/jovyan/.cjob/logs/01xyz
+              LOG_DIR=/home/jovyan/.cjob/logs/1
               mkdir -p "${LOG_DIR}"
               exec > >(tee "${LOG_DIR}/stdout.log") \
                    2> >(tee "${LOG_DIR}/stderr.log" >&2)
@@ -625,7 +653,7 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 
 ```json
 {
-  "job_id": "01HXYZ...",
+  "job_id": 1,
   "status": "QUEUED"
 }
 ```
@@ -663,6 +691,7 @@ parameter sweep を投入する。
 ```json
 {
   "submission_id": "subm_01...",
+  "job_ids": [1, 2, 3, 4, 5, 6],
   "job_count": 6,
   "status": "QUEUED"
 }
@@ -678,7 +707,7 @@ parameter sweep を投入する。
 {
   "jobs": [
     {
-      "job_id": "01HXYZ...",
+      "job_id": 1,
       "status": "RUNNING",
       "command": "python main.py --alpha 0.1 --beta 16",
       "created_at": "2026-03-23T12:34:56Z"
@@ -695,13 +724,13 @@ parameter sweep を投入する。
 
 ```json
 {
-  "job_id": "01HXYZ...",
+  "job_id": 1,
   "status": "SUCCEEDED",
   "namespace": "user-alice",
   "command": "python main.py --alpha 0.1 --beta 16",
   "cwd": "/home/jovyan/project-a/exp1",
-  "k8s_job_name": "cjob-01xyz",
-  "log_dir": "/home/jovyan/.cjob/logs/01HXYZ...",
+  "k8s_job_name": "cjob-alice-1",
+  "log_dir": "/home/jovyan/.cjob/logs/1",
   "created_at": "2026-03-23T12:34:56Z",
   "dispatched_at": "2026-03-23T12:35:02Z",
   "finished_at": "2026-03-23T12:37:10Z"
@@ -716,8 +745,56 @@ parameter sweep を投入する。
 
 ```json
 {
-  "job_id": "01HXYZ...",
+  "job_id": 1,
   "status": "CANCELLED"
+}
+```
+
+### 11.6 POST /v1/jobs/cancel
+
+複数ジョブを一括キャンセルする。範囲指定・個別複数指定はCLI側で展開してから送る。
+
+#### request
+
+```json
+{
+  "job_ids": [1, 2, 3, 4, 5]
+}
+```
+
+#### response
+
+```json
+{
+  "cancelled":  [1, 2, 3],
+  "skipped":    [4, 5],
+  "not_found":  []
+}
+```
+
+`skipped` は対象ジョブがすでに SUCCEEDED / FAILED / CANCELLED の場合。
+
+### 11.7 POST /v1/reset
+
+ユーザーの全ジョブ履歴をリセットし、job_id の採番を 1 に戻す。
+
+リセット可能条件：全ジョブが CANCELLED / SUCCEEDED / FAILED のいずれかであること。
+QUEUED / DISPATCHING / DISPATCHED / RUNNING のジョブが1件でも存在する場合は 409 を返す。
+
+#### response（成功時）
+
+```json
+{
+  "status": "ok"
+}
+```
+
+#### response（実行中ジョブあり・409）
+
+```json
+{
+  "message": "完了していないジョブがあるためリセットできません",
+  "blocking_job_ids": [3, 7, 12]
 }
 ```
 
@@ -730,7 +807,11 @@ cjob add -- <command...>
 cjob sweep -- <command with placeholders...> --grid key=v1,v2,...
 cjob list
 cjob status <job-id>
-cjob cancel <job-id>
+cjob cancel <job-id>              # 単体指定
+cjob cancel <start>-<end>         # 範囲指定（例: 1-10）
+cjob cancel <id>,<id>,...         # 個別複数指定（例: 1,3,5）
+cjob cancel <start>-<end>,<id>,.. # 組み合わせ（例: 1-5,8,10-12）
+cjob reset
 cjob logs <job-id>
 cjob logs --follow <job-id>
 cjob logs --delete <job-id>
@@ -775,6 +856,44 @@ SUBMIT_API_URL = os.environ.get(
     "CJOB_API_URL",
     "http://submit-api.cjob-system.svc.cluster.local:8080"
 )
+```
+
+### 12.6 `cjob cancel` の動作
+
+job_id の指定形式をパースして job_id のリストに展開し、`POST /v1/jobs/cancel` を呼ぶ。
+
+```python
+def parse_job_ids(expr: str) -> list[int]:
+    """
+    "1-5,8,10-12" → [1, 2, 3, 4, 5, 8, 10, 11, 12]
+    """
+    ids = set()
+    for part in expr.split(","):
+        part = part.strip()
+        if "-" in part:
+            start, end = part.split("-")
+            ids.update(range(int(start), int(end) + 1))
+        else:
+            ids.add(int(part))
+    return sorted(ids)
+```
+
+### 12.7 `cjob reset` の動作
+
+1. `POST /v1/reset` を呼び出す
+2. 409 が返った場合は blocking_job_ids を表示して中止する
+3. 200 が返った場合はユーザーに確認プロンプトを表示する
+4. 確認後に `POST /v1/reset/confirm` を呼び出す
+5. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する
+
+```
+$ cjob reset
+完了していないジョブがあるためリセットできません。
+完了待ちのジョブ: 3, 7, 12
+
+$ cjob reset   # 全ジョブ完了後
+全 15 件のジョブとログを削除します。よろしいですか？ [y/N] y
+リセット完了しました。次のジョブは ID 1 から始まります。
 ```
 
 ## 13. Dispatcher 設計
@@ -1085,11 +1204,15 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - **前段キュー**: RabbitMQ（通常 Queue + retry Queue）
 - **メッセージライブラリ**: Kombu
 - **状態管理**: PostgreSQL
+- **job_id 採番**: ユーザー（namespace）ごとの連番（1, 2, 3...）
+- **K8s Job 名**: `cjob-<username>-<job_id>`（グローバルに一意）
 - **実行制御**: Dispatcher + Kueue
 - **実行基盤**: Kubernetes Job
 - **実行環境**: fixed image（Ubuntu 24.04 / DockerHub）+ namespace PVC mounted at `/home/jovyan`
 - **再現対象**: submit 時の `cwd` / exported env（仮想環境 PATH 含む）/ command
 - **ログ保存**: PVC 上の `/home/jovyan/.cjob/logs/<job_id>/`
 - **ログ取得**: CLI が PVC を直接読む（API 経由なし）
+- **キャンセル**: 単体・範囲指定（1-10）・個別複数指定（1,3,5）・組み合わせに対応
+- **リセット**: `cjob reset` で全ジョブ履歴・ログを削除し job_id を 1 から採番し直す（全ジョブ完了時のみ実行可能）
 - **認証・認可**: ServiceAccount JWT + TokenReview（詳細は auth_policy.md 参照）
 - **大量投入対応**: 前段 MQ + dispatch budget により Job materialization を抑制する

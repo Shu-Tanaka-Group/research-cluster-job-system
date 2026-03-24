@@ -216,7 +216,7 @@ JWT から確定した namespace とリクエスト対象ジョブの namespace 
 
 ```python
 @app.post("/v1/jobs/{job_id}/cancel")
-def cancel_job(job_id: str, token: str = Depends(extract_bearer)):
+def cancel_job(job_id: int, token: str = Depends(extract_bearer)):
     namespace = verify_token(token)   # K8s が保証した namespace
     job = db.get_job(job_id)
 
