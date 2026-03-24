@@ -97,6 +97,21 @@ cjob logs <job-id>
 cjob logs --follow <job-id>
 ```
 
+### 3.8 完了済みジョブの削除
+
+```bash
+# 単体指定
+cjob delete 5
+
+# 範囲指定・複数指定
+cjob delete 1-5
+cjob delete 1,3,5
+cjob delete 1-5,8,10-12
+
+# 完了済みジョブを全て削除（実行中ジョブはスキップ）
+cjob delete --all
+```
+
 ## 4. ジョブキューを動かす環境の前提
 
 ### 4.1 インフラ前提
@@ -148,6 +163,8 @@ cjob logs --follow <job-id>
 - `cjob list`
 - `cjob status`
 - `cjob cancel`
+- `cjob delete`
+- `cjob reset`
 - `cjob logs`（`--follow` オプション含む）
 
 ### 5.2 submit 機能
@@ -776,7 +793,44 @@ parameter sweep を投入する。
 
 `skipped` は対象ジョブがすでに SUCCEEDED / FAILED / CANCELLED の場合。
 
-### 11.7 POST /v1/reset
+### 11.7 POST /v1/jobs/delete
+
+完了済みジョブを削除する。範囲指定・個別複数指定は CLI 側で展開してから送る。
+
+CANCELLED / SUCCEEDED / FAILED 状態のジョブのみ削除対象とする。
+QUEUED / DISPATCHING / DISPATCHED / RUNNING 状態のジョブは削除せず `skipped` として返す。
+
+`job_ids` を省略した場合（`--all` 相当）は namespace 内の全完了済みジョブを削除対象とする。
+カウンタのリセットは行わない。
+
+#### request（個別指定）
+
+```json
+{
+  "job_ids": [1, 2, 3]
+}
+```
+
+#### request（全件削除）
+
+```json
+{}
+```
+
+#### response
+
+```json
+{
+  "deleted":   [1, 2],
+  "skipped":   [3],
+  "not_found": []
+}
+```
+
+`skipped` は対象ジョブが QUEUED / DISPATCHING / DISPATCHED / RUNNING の場合。
+CLI は `skipped` に含まれる job_id を表示し、先に `cjob cancel` するよう促す。
+
+### 11.8 POST /v1/reset
 
 ユーザーの全ジョブ履歴をリセットし、job_id の採番を 1 に戻す。
 
@@ -813,6 +867,11 @@ cjob cancel <job-id>              # 単体指定
 cjob cancel <start>-<end>         # 範囲指定（例: 1-10）
 cjob cancel <id>,<id>,...         # 個別複数指定（例: 1,3,5）
 cjob cancel <start>-<end>,<id>,.. # 組み合わせ（例: 1-5,8,10-12）
+cjob delete <job-id>              # 単体指定
+cjob delete <start>-<end>         # 範囲指定（例: 1-10）
+cjob delete <id>,<id>,...         # 個別複数指定（例: 1,3,5）
+cjob delete <start>-<end>,<id>,.. # 組み合わせ（例: 1-5,8,10-12）
+cjob delete --all                 # 完了済みジョブを全て削除
 cjob reset
 cjob logs <job-id>
 cjob logs --follow <job-id>
@@ -835,7 +894,7 @@ cjob logs --follow <job-id>
 
 ### 12.4 `cjob logs` の動作
 
-`cjob logs` はログの閲覧に特化する。ログの削除は `cjob reset` が担う。
+`cjob logs` はログの閲覧に特化する。ログの削除は `cjob delete` または `cjob reset` が担う。
 
 ジョブ状態によって以下のように動作する。
 
@@ -880,7 +939,41 @@ def parse_job_ids(expr: str) -> list[int]:
     return sorted(ids)
 ```
 
-### 12.7 `cjob reset` の動作
+### 12.7 `cjob delete` の動作
+
+`--all` フラグがある場合は job_ids を省略して `POST /v1/jobs/delete` を呼ぶ。
+それ以外は job_id の指定形式をパースして job_id のリストに展開してから呼ぶ。
+
+```python
+def cmd_delete(expr: str = None, all: bool = False):
+    if all:
+        # --all: job_ids を省略して全完了済みジョブを削除対象にする
+        response = api.post("/v1/jobs/delete", {})
+    else:
+        job_ids = parse_job_ids(expr)   # cancel と同じパース処理を共用
+        response = api.post("/v1/jobs/delete", {"job_ids": job_ids})
+
+    result = response.json()
+
+    # 削除成功したジョブのログを PVC 上から削除
+    for job_id in result["deleted"]:
+        log_dir = Path(f"/home/jovyan/.cjob/logs/{job_id}")
+        if log_dir.exists():
+            shutil.rmtree(log_dir)
+
+    if result["deleted"]:
+        print(f"削除しました: {result['deleted']}")
+
+    # 実行中のジョブは削除できない旨を警告
+    if result["skipped"]:
+        print(f"以下のジョブは実行中のため削除できませんでした: {result['skipped']}")
+        print("先に `cjob cancel <job-id>` を実行してください。")
+
+    if result["not_found"]:
+        print(f"見つかりませんでした: {result['not_found']}")
+```
+
+### 12.8 `cjob reset` の動作
 
 1. `POST /v1/reset` を呼び出す
 2. 409 が返った場合は blocking_job_ids を表示して中止する
@@ -1212,8 +1305,9 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - **実行環境**: fixed image（Ubuntu 24.04 / DockerHub）+ namespace PVC mounted at `/home/jovyan`
 - **再現対象**: submit 時の `cwd` / exported env（仮想環境 PATH 含む）/ command
 - **ログ保存**: PVC 上の `/home/jovyan/.cjob/logs/<job_id>/`
-- **ログ取得**: CLI が PVC を直接読む（API 経由なし）・閲覧のみ・削除は reset が担う
+- **ログ取得**: CLI が PVC を直接読む（API 経由なし）・閲覧のみ・削除は delete / reset が担う
 - **キャンセル**: 単体・範囲指定（1-10）・個別複数指定（1,3,5）・組み合わせに対応
+- **削除**: `cjob delete` で完了済みジョブを個別削除（実行中ジョブは削除不可・cancel を促す）
 - **リセット**: `cjob reset` で全ジョブ履歴・ログを削除し job_id を 1 から採番し直す（全ジョブ完了時のみ実行可能）
 - **認証・認可**: ServiceAccount JWT + TokenReview（詳細は auth_policy.md 参照）
 - **大量投入対応**: 前段 MQ + dispatch budget により Job materialization を抑制する
