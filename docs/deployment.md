@@ -108,7 +108,7 @@ data:
   DISPATCH_BUDGET_CHECK_INTERVAL_SEC: "10"
   KUEUE_LOCAL_QUEUE_NAME: default
   JOB_NAMESPACE_PREFIX: user-
-  RUNTIME_IMAGE: <dockerhub-repo>/lab-runtime:latest
+  RUNTIME_IMAGE: yusekiya/stg-jupyter:2.1.0
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
 ```
@@ -300,6 +300,10 @@ roleRef:
 
 ## 10. NetworkPolicy
 
+前提：このクラスタには default-deny NetworkPolicy は存在しない。
+`cjob-system` namespace 内の Pod 間通信（Submit API ↔ PostgreSQL / RabbitMQ など）は制限しない。
+User namespace 以外からの Submit API へのアクセスのみを NetworkPolicy で制限する。
+
 User namespace から Submit API への通信のみを許可する。
 
 ```yaml
@@ -399,7 +403,488 @@ hub:
 
 ---
 
-## 13. 初期セットアップ手順
+## 13. Deployment / StatefulSet YAML
+
+### 13.1 PostgreSQL StatefulSet
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: cjob-system
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      initContainers:
+        - name: schema-init
+          image: postgres:16
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              until pg_isready -h localhost -U ${POSTGRES_USER}; do sleep 1; done
+              psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} <<'SQL'
+              CREATE TABLE IF NOT EXISTS jobs (
+                  job_id        INTEGER NOT NULL,
+                  "user"        TEXT NOT NULL,
+                  namespace     TEXT NOT NULL,
+                  command       TEXT NOT NULL,
+                  cwd           TEXT NOT NULL,
+                  env_json      JSONB NOT NULL DEFAULT '{}',
+                  cpu           TEXT NOT NULL,
+                  memory        TEXT NOT NULL,
+                  gpu           INTEGER NOT NULL DEFAULT 0,
+                  status        TEXT NOT NULL,
+                  k8s_job_name  TEXT,
+                  log_dir       TEXT,
+                  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                  dispatched_at TIMESTAMPTZ,
+                  finished_at   TIMESTAMPTZ,
+                  last_error    TEXT,
+                  PRIMARY KEY (namespace, job_id)
+              );
+              CREATE TABLE IF NOT EXISTS user_job_counters (
+                  namespace   TEXT PRIMARY KEY,
+                  next_id     INTEGER NOT NULL DEFAULT 1
+              );
+              CREATE TABLE IF NOT EXISTS job_events (
+                  id           BIGSERIAL PRIMARY KEY,
+                  namespace    TEXT NOT NULL,
+                  job_id       INTEGER NOT NULL,
+                  event_type   TEXT NOT NULL,
+                  payload_json JSONB NOT NULL DEFAULT '{}',
+                  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                  FOREIGN KEY (namespace, job_id) REFERENCES jobs(namespace, job_id)
+              );
+              CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
+              CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ON jobs (namespace, status);
+              SQL
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      containers:
+        - name: postgres
+          image: postgres:16
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_DB
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "cjob"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: managed-nfs-storage
+        resources:
+          requests:
+            storage: 20Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: cjob-system
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  clusterIP: None   # Headless Service（StatefulSet 用）
+```
+
+### 13.2 RabbitMQ StatefulSet
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: rabbitmq
+  namespace: cjob-system
+spec:
+  serviceName: rabbitmq
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rabbitmq
+  template:
+    metadata:
+      labels:
+        app: rabbitmq
+    spec:
+      containers:
+        - name: rabbitmq
+          image: rabbitmq:3.13-management
+          env:
+            - name: RABBITMQ_DEFAULT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQ_DEFAULT_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: RABBITMQ_DEFAULT_PASS
+          ports:
+            - containerPort: 5672   # AMQP
+            - containerPort: 15672  # Management UI
+          volumeMounts:
+            - name: rabbitmq-data
+              mountPath: /var/lib/rabbitmq
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            exec:
+              command: ["rabbitmq-diagnostics", "ping"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: rabbitmq-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: managed-nfs-storage
+        resources:
+          requests:
+            storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq
+  namespace: cjob-system
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - name: amqp
+      port: 5672
+      targetPort: 5672
+    - name: management
+      port: 15672
+      targetPort: 15672
+  clusterIP: None
+```
+
+### 13.3 Submit API Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: submit-api
+  namespace: cjob-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: submit-api
+  template:
+    metadata:
+      labels:
+        app: submit-api
+    spec:
+      serviceAccountName: submit-api-sa
+      containers:
+        - name: submit-api
+          image: yusekiya/cjob-submit-api:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: RABBITMQ_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_HOST
+            - name: RABBITMQ_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_PORT
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: RABBITMQ_DEFAULT_PASS
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: submit-api
+  namespace: cjob-system
+spec:
+  selector:
+    app: submit-api
+  ports:
+    - port: 8080
+      targetPort: 8080
+```
+
+### 13.4 Dispatcher Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dispatcher
+  namespace: cjob-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dispatcher
+  template:
+    metadata:
+      labels:
+        app: dispatcher
+    spec:
+      serviceAccountName: dispatcher-sa
+      containers:
+        - name: dispatcher
+          image: yusekiya/cjob-dispatcher:latest
+          env:
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: RABBITMQ_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_HOST
+            - name: RABBITMQ_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_PORT
+            - name: RABBITMQ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: RABBITMQ_DEFAULT_USER
+            - name: RABBITMQ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-secret
+                  key: RABBITMQ_DEFAULT_PASS
+            - name: DISPATCH_BUDGET_PER_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_BUDGET_PER_NAMESPACE
+            - name: RUNTIME_IMAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RUNTIME_IMAGE
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import os; os.kill(1, 0)"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+```
+
+### 13.5 Watcher Deployment
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: watcher
+  namespace: cjob-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: watcher
+  template:
+    metadata:
+      labels:
+        app: watcher
+    spec:
+      serviceAccountName: dispatcher-sa   # dispatcher-sa を共用
+      containers:
+        - name: watcher
+          image: yusekiya/cjob-watcher:latest
+          env:
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+          livenessProbe:
+            exec:
+              command: ["python", "-c", "import os; os.kill(1, 0)"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+```
+
+---
+
+## 14. 初期セットアップ手順
 
 新規クラスタへの初回セットアップ手順。
 
@@ -419,7 +904,7 @@ kubectl apply -f rbac/submit-api-sa.yaml
 kubectl apply -f rbac/dispatcher-sa.yaml
 
 # 5. Kueue のインストール
-kubectl apply -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.x.x/manifests.yaml
+kubectl apply -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.16.4/manifests.yaml
 
 # 6. Kueue リソースの作成
 kubectl apply -f kueue/resource-flavor.yaml
@@ -428,26 +913,45 @@ kubectl apply -f kueue/cluster-queue.yaml
 # 7. PostgreSQL のデプロイ
 kubectl apply -f deployments/postgres.yaml
 
-# 8. RabbitMQ のデプロイ
+# 8. DB スキーマの初期化
+# PostgreSQL StatefulSet の initContainer で自動実行される。
+# initContainer は postgres コンテナ起動前に以下を実行する：
+#   CREATE TABLE IF NOT EXISTS jobs (...)
+#   CREATE TABLE IF NOT EXISTS user_job_counters (...)
+#   CREATE TABLE IF NOT EXISTS job_events (...)
+#   CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ...
+#   CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ...
+# initContainer が完了するまで postgres コンテナは起動しない。
+# 冪等性のため IF NOT EXISTS を使用し、再デプロイ時に安全に再実行できる。
+
+# 9. RabbitMQ のデプロイ
 kubectl apply -f deployments/rabbitmq.yaml
 
-# 9. Submit API のデプロイ
+# 10. Submit API のデプロイ
 kubectl apply -f deployments/submit-api.yaml
 
-# 10. Dispatcher のデプロイ
+# 11. Dispatcher のデプロイ
 kubectl apply -f deployments/dispatcher.yaml
 
-# 11. Watcher のデプロイ
+# 12. Watcher のデプロイ
 kubectl apply -f deployments/watcher.yaml
 
-# 12. NetworkPolicy の適用
+# 13. NetworkPolicy の適用
 kubectl apply -f networkpolicies/allow-submit-api.yaml
 
-# 13. fixed image のビルドと push
-docker build -t <dockerhub-repo>/lab-runtime:latest .
-docker push <dockerhub-repo>/lab-runtime:latest
+# 14. システムコンポーネント image のビルドと push
+docker build -t yusekiya/cjob-submit-api:latest -f Dockerfile.submit-api .
+docker push yusekiya/cjob-submit-api:latest
 
-# 14. 各ユーザーの namespace 作成
+docker build -t yusekiya/cjob-dispatcher:latest -f Dockerfile.dispatcher .
+docker push yusekiya/cjob-dispatcher:latest
+
+docker build -t yusekiya/cjob-watcher:latest -f Dockerfile.watcher .
+docker push yusekiya/cjob-watcher:latest
+
+# Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
+
+# 15. 各ユーザーの namespace 作成
 ./scripts/create-user-namespace.sh alice
 ./scripts/create-user-namespace.sh bob
 ```

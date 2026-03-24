@@ -612,7 +612,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: worker
-          image: <dockerhub-repo>/lab-runtime:latest
+          image: yusekiya/stg-jupyter:2.1.0
           workingDir: /home/jovyan/project-a/exp1
           command: ["/bin/bash", "-lc"]
           args:
@@ -652,6 +652,20 @@ spec:
 CLI はこの API を呼ぶ薄いクライアントとして実装する。  
 全エンドポイントで ServiceAccount JWT による認証・認可を行う（詳細は auth_policy.md 参照）。
 
+### 11.0 共通エラーレスポンス仕様
+
+全エンドポイントで共通して発生しうるエラーを以下に定義する。
+
+| HTTP ステータス | 発生条件 | レスポンスボディ例 |
+|---|---|---|
+| 401 | JWT が無効・期限切れ・存在しない | `{ "detail": "Unauthorized" }` |
+| 404 | 存在しない job_id、または他ユーザーの job_id | `{ "detail": "Job not found" }` |
+| 503 | RabbitMQ publish 失敗など内部サービス一時不可 | `{ "detail": "Service temporarily unavailable" }` |
+
+**404 の方針**：他ユーザーのジョブへのアクセスも 404 を返す。ジョブの存在自体を隠すことで情報漏洩を防ぐ。
+
+**401 の方針**：TokenReview が失敗した場合（JWT 無効・期限切れ）に返す。レスポンスボディは固定文字列とし、詳細なエラー原因は含めない。
+
 ### 11.1 POST /v1/jobs
 
 ジョブを1件投入する。
@@ -689,10 +703,16 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 将来 GPU 対応を追加する際にこのバリデーションを外す。
 
 ```json
-{
-  "detail": "GPU ジョブは現在サポートされていません"
-}
+{ "detail": "GPU ジョブは現在サポートされていません" }
 ```
+
+`command` が空文字の場合は 400 を返す。
+
+```json
+{ "detail": "command は空にできません" }
+```
+
+### 11.2 POST /v1/jobs/sweep
 
 parameter sweep を投入する。
 
@@ -730,7 +750,13 @@ parameter sweep を投入する。
 }
 ```
 
-### 11.3 GET /v1/jobs
+#### エラーレスポンス
+
+`command_template` が空文字の場合、または `sweep.parameters` が空の場合は 400 を返す。
+
+```json
+{ "detail": "command_template は空にできません" }
+```
 
 ジョブ一覧を取得する。JWT の namespace に属するジョブのみ返す。
 
@@ -770,9 +796,26 @@ parameter sweep を投入する。
 }
 ```
 
-### 11.5 POST /v1/jobs/{job_id}/cancel
+#### エラーレスポンス
+
+存在しない job_id または他ユーザーの job_id の場合は 404 を返す。
+
+```json
+{ "detail": "Job not found" }
+```
 
 ジョブをキャンセルする。
+
+状態ごとの処理は以下の通り。
+
+| 状態 | API の処理 |
+|---|---|
+| `QUEUED` | DB を `CANCELLED` に更新する。Dispatcher がメッセージ取得時に DB を確認して `CANCELLED` ならスキップして `ack` する |
+| `DISPATCHING` | DB を `CANCELLED` に更新する。Dispatcher が Job 作成直前に DB を再確認し `CANCELLED` ならスキップする |
+| `DISPATCHED` / `RUNNING` | DB を `CANCELLED` に更新する。Watcher が定期監視時に `CANCELLED` ジョブの K8s Job を削除する |
+| `SUCCEEDED` / `FAILED` / `CANCELLED` | 変更不要。`skipped` として返す |
+
+K8s Job 削除後、Watcher は DB の status が `CANCELLED` であることを確認した上で状態を維持する（`FAILED` に遷移させない）。
 
 #### response
 
@@ -783,7 +826,13 @@ parameter sweep を投入する。
 }
 ```
 
-### 11.6 POST /v1/jobs/cancel
+#### エラーレスポンス
+
+存在しない job_id または他ユーザーの job_id の場合は 404 を返す。
+
+```json
+{ "detail": "Job not found" }
+```
 
 複数ジョブを一括キャンセルする。範囲指定・個別複数指定はCLI側で展開してから送る。
 
@@ -921,7 +970,57 @@ cjob logs --follow <job-id>
 
 ログファイルは PVC 上（`/home/jovyan/.cjob/logs/<job_id>/`）にあり、CLI が直接読む。API を経由しない。
 
-### 12.5 CLI の設定
+### 12.5 `cjob list` の動作
+
+`GET /v1/jobs` を呼び出し、結果を表形式で表示する。
+
+```
+$ cjob list
+JOB_ID  STATUS      COMMAND                                    CREATED
+1       SUCCEEDED   python main.py --alpha 0.1 --beta 16       2026-03-23 12:34
+2       RUNNING     python main.py --alpha 0.2 --beta 16       2026-03-23 12:35
+3       QUEUED      python main.py --alpha 0.5 --beta 16       2026-03-23 12:35
+```
+
+オプション：
+
+- `--status <status>`：指定したステータスのジョブのみ表示（例: `--status RUNNING`）
+- `--limit <n>`：表示件数を n 件に制限する。省略時は全件表示
+
+```bash
+cjob list                    # 全件表示
+cjob list --status RUNNING   # 実行中のみ表示
+cjob list --status FAILED    # 失敗したもののみ表示
+cjob list --limit 10         # 最新 10 件のみ表示
+```
+
+command は長い場合に末尾を省略して表示する（例: 40文字で切り捨て）。
+
+### 12.6 `cjob status` の動作
+
+`GET /v1/jobs/{job_id}` を呼び出し、主要フィールドを整形して表示する。
+
+```
+$ cjob status 2
+job_id:       2
+status:       RUNNING
+command:      python main.py --alpha 0.2 --beta 16
+cwd:          /home/jovyan/project-a/exp1
+created_at:   2026-03-23 12:35:00
+dispatched_at: 2026-03-23 12:35:05
+finished_at:  -
+k8s_job_name: cjob-alice-2
+log_dir:      /home/jovyan/.cjob/logs/2
+```
+
+存在しない job_id を指定した場合はエラーメッセージを表示して終了する。
+
+```
+$ cjob status 999
+エラー: job_id 999 が見つかりません。
+```
+
+### 12.7 CLI の設定
 
 Submit API のエンドポイントは image に埋め込まれた設定ファイルから読む。環境変数でオーバーライド可能。
 
@@ -933,7 +1032,7 @@ SUBMIT_API_URL = os.environ.get(
 )
 ```
 
-### 12.6 `cjob cancel` の動作
+### 12.8 `cjob cancel` の動作
 
 job_id の指定形式をパースして job_id のリストに展開し、`POST /v1/jobs/cancel` を呼ぶ。
 
@@ -953,7 +1052,7 @@ def parse_job_ids(expr: str) -> list[int]:
     return sorted(ids)
 ```
 
-### 12.7 `cjob delete` の動作
+### 12.9 `cjob delete` の動作
 
 `--all` フラグがある場合は job_ids を省略して `POST /v1/jobs/delete` を呼ぶ。
 それ以外は job_id の指定形式をパースして job_id のリストに展開してから呼ぶ。
@@ -987,7 +1086,7 @@ def cmd_delete(expr: str = None, all: bool = False):
         print(f"見つかりませんでした: {result['not_found']}")
 ```
 
-### 12.8 `cjob reset` の動作
+### 12.10 `cjob reset` の動作
 
 1. `GET /v1/jobs` でジョブ一覧を取得し、ブロッキングジョブ（QUEUED / DISPATCHING / DISPATCHED / RUNNING）の有無を確認する
 2. ブロッキングジョブがある場合は job_id を表示して中止する
@@ -1104,6 +1203,7 @@ class Dispatcher:
 | 状況 | 処理 |
 |---|---|
 | Job 作成成功 | `ack` |
+| メッセージ取得時に DB が `CANCELLED` | `ack`（Job を作成せずスキップ） |
 | K8s API 一時障害（retry_count < max_retries） | `reject(requeue=False)` → retry Queue 経由で再投入 |
 | K8s API 一時障害（retry_count >= max_retries） | `reject(requeue=False)` + DB を `FAILED` |
 | バリデーションエラー | `reject(requeue=False)` + DB を `FAILED` |
@@ -1128,6 +1228,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - Job 状態の監視
 - Pod 状態の監視
 - `RUNNING` / `SUCCEEDED` / `FAILED` への遷移
+- `CANCELLED` ジョブの K8s Job 削除
 - orphan Job 検出
 - DB と Kubernetes のズレ修正
 
@@ -1142,6 +1243,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 2. Job の `status.conditions` を解釈
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
+5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
 
 ## 15. 実装に使用するパッケージ / 技術
 
