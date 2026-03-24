@@ -175,6 +175,7 @@ cjob delete --all
 
 - 現在の作業ディレクトリ取得
 - export 済み環境変数取得
+- コンテナイメージ名取得（`JUPYTER_IMAGE` 環境変数から取得）
 - コマンド文字列の保存
 - ユーザー namespace 解決（ServiceAccount の namespace ファイルから取得）
 - namespace ごとのアクティブジョブ数上限チェック（QUEUED + 実行中の合計）
@@ -202,7 +203,7 @@ cjob delete --all
 
 ### 5.5 Kubernetes 実行機能
 
-- fixed image で Job を作成
+- submit 時に取得した image（`JUPYTER_IMAGE`）で Job を作成
 - PVC を `/home/jovyan` に mount
 - `workingDir` に submit 時の cwd を設定
 - `env` に submit 時の環境変数を注入
@@ -1316,7 +1317,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 ジョブ投入時は次の順で行う。
 
-1. CLI が `cwd`、`env`、`command` を集める
+1. CLI が `cwd`、`env`、`command`、および `JUPYTER_IMAGE` 環境変数から `image` を集める
 2. CLI が ServiceAccount JWT と namespace を固定パスから読み取る
 3. API が `job_id` を発行する
 4. PostgreSQL に `QUEUED` で保存する（`log_dir` も同時に設定）
