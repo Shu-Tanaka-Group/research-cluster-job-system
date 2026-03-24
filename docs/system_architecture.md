@@ -378,9 +378,9 @@ Dispatcher と Watcher は Replica 複数にすると二重 dispatch・二重更
 
 retry Queue（遅延 requeue 用）:
 
-- x-message-ttl: 30000（30秒後に通常 Queue へ戻す）
-- x-dead-letter-exchange: `cjob`
-- x-dead-letter-routing-key: `submit`
+- x-message-ttl: `RABBITMQ_RETRY_TTL_MS`（デフォルト 30000 ms = 30秒後に通常 Queue へ戻す）
+- x-dead-letter-exchange: `RABBITMQ_EXCHANGE`（デフォルト `cjob`）
+- x-dead-letter-routing-key: `RABBITMQ_ROUTING_KEY`（デフォルト `submit`）
 
 ### 8.3 メッセージ内容
 
@@ -1186,8 +1186,8 @@ DB クエリは `idx_jobs_namespace_status` インデックスにより効率化
 
 | シナリオ | 対処 | 再試行間隔 | 上限 |
 |---|---|---|---|
-| K8s API 一時障害 | DLQ + TTL で遅延 requeue | 30秒 | 5回 |
-| dispatch budget 不足 | 待機リストに保留・定期再確認 | 10秒ごと | なし（budget 回復まで） |
+| K8s API 一時障害 | DLQ + TTL で遅延 requeue | `RABBITMQ_RETRY_TTL_MS` ms | `RABBITMQ_MAX_RETRIES` 回 |
+| dispatch budget 不足 | 待機リストに保留・定期再確認 | `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒ごと | なし（budget 回復まで） |
 | バリデーションエラー | 即 FAILED | なし | なし |
 | 永続的 K8s エラー | 即 FAILED | なし | なし |
 
@@ -1201,7 +1201,7 @@ except TemporaryK8sError:
         db.update_status(job.namespace, job.job_id, "FAILED", error="max retries exceeded")
         message.reject(requeue=False)   # DLQ へ転送（キューから除去）
     else:
-        message.reject(requeue=False)   # retry Queue 経由で 30秒後に再投入
+        message.reject(requeue=False)   # retry Queue 経由で RABBITMQ_RETRY_TTL_MS ms 後に再投入
         db.record_event(job.namespace, job.job_id, "RETRY", {"count": current_count})
 ```
 
@@ -1213,7 +1213,7 @@ budget 不足の namespace のメッセージを保留しつつ、他 namespace 
 class Dispatcher:
     def __init__(self):
         self.pending: dict[str, list] = {}  # namespace → 待機メッセージリスト
-        self.check_interval = 10            # 秒
+        self.check_interval = int(os.environ["DISPATCH_BUDGET_CHECK_INTERVAL_SEC"])  # ConfigMap から注入
 
     def run(self):
         while True:
@@ -1341,7 +1341,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 メインループ:
 
 1. 待機リストの budget 再確認・再 dispatch
-2. RabbitMQ から 1 メッセージ取得（タイムアウト: 10秒）
+2. RabbitMQ から 1 メッセージ取得（タイムアウト: `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒）
 2.5. DB の status が `CANCELLED` ならば `ack` してスキップ（次のループへ）
 3. dispatch budget を確認（不足なら待機リストに追加して次のループへ）
 4. DB 上で `DISPATCHING` に更新
