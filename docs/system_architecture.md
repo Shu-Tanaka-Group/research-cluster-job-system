@@ -1225,7 +1225,8 @@ class Dispatcher:
 | 状況 | 処理 |
 |---|---|
 | Job 作成成功 | `ack` |
-| メッセージ取得時に DB が `CANCELLED` | `ack`（Job を作成せずスキップ） |
+| メッセージ取得時に DB が `CANCELLED`（Step 2.5） | `ack`（Job を作成せずスキップ） |
+| `DISPATCHING` 更新後に DB が `CANCELLED`（Step 4.5） | DB を `CANCELLED` に戻して `ack`（Job を作成せずスキップ） |
 | K8s API 一時障害（retry_count < max_retries） | `reject(requeue=False)` → retry Queue 経由で再投入 |
 | K8s API 一時障害（retry_count >= max_retries） | `reject(requeue=False)` + DB を `FAILED` |
 | バリデーションエラー | `reject(requeue=False)` + DB を `FAILED` |
