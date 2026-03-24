@@ -104,7 +104,7 @@ data:
   RABBITMQ_MAX_RETRIES: "5"
   SUBMIT_API_HOST: submit-api.cjob-system.svc.cluster.local
   SUBMIT_API_PORT: "8080"
-  DISPATCH_BUDGET_PER_NAMESPACE: "30"
+  DISPATCH_BUDGET_PER_NAMESPACE: "256"
   DISPATCH_BUDGET_CHECK_INTERVAL_SEC: "10"
   KUEUE_LOCAL_QUEUE_NAME: default
   JOB_NAMESPACE_PREFIX: user-
@@ -371,11 +371,11 @@ metadata:
   namespace: user-${USERNAME}
 spec:
   hard:
-    count/jobs.batch: "50"
-    requests.cpu: "12"
-    requests.memory: "50Gi"
-    limits.cpu: "12"
-    limits.memory: "50Gi"
+    count/jobs.batch: "300"
+    requests.cpu: "256"
+    requests.memory: "1000Gi"
+    limits.cpu: "256"
+    limits.memory: "1000Gi"
 EOF
 
 echo "Done: user-${USERNAME}"

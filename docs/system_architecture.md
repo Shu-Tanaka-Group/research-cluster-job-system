@@ -567,10 +567,12 @@ spec:
 
 各 user namespace に作成する安全網。
 
-計算根拠：
-- CPU: 256 core ÷ 20 user = 12.8 → 12 core
-- memory: 1000 GiB ÷ 20 user = 50 GiB
-- Job 数: dispatch_budget(30) より大きく設定 → 50
+空きリソースがあれば1ユーザーが全コアを使える方針とし、Kueue に公平性の調整を委ねる。
+ResourceQuota はリソースを均等分配するためではなく、バグ等による意図しない無制限消費を防ぐための安全網として機能する。
+
+設定根拠：
+- CPU / memory：クラスタ総量と同値に設定し、Kueue の admission 制御に任せる
+- Job 数：dispatch_limit(256) より大きく設定 → 300
 
 ```yaml
 apiVersion: v1
@@ -580,14 +582,15 @@ metadata:
   namespace: user-alice
 spec:
   hard:
-    count/jobs.batch: "50"
-    requests.cpu: "12"
-    requests.memory: "50Gi"
-    limits.cpu: "12"
-    limits.memory: "50Gi"
+    count/jobs.batch: "300"
+    requests.cpu: "256"
+    requests.memory: "1000Gi"
+    limits.cpu: "256"
+    limits.memory: "1000Gi"
 ```
 
-cohort により空きがあれば上限を超えて借り入れできる。ResourceQuota はあくまで安全網として機能する。
+cohort + preemption なしの設定により、空きリソースは他ユーザーが借りて使えるが
+実行中のジョブは強制終了されない。
 
 ### 10.5 Kubernetes Job テンプレート
 
@@ -1007,15 +1010,27 @@ Dispatcher は前段 MQ と Kubernetes Job 実行基盤の橋渡しを担う。
 ### 13.2 dispatch budget
 
 ```text
-dispatch_budget = namespace_dispatch_limit - active_k8s_jobs(namespace)
+dispatch_budget = namespace_dispatch_limit - active_jobs_in_db(namespace)
 
-namespace_dispatch_limit = 30（ConfigMap で設定）
+namespace_dispatch_limit = 256（ConfigMap で設定）
 
-active_k8s_jobs(namespace) には以下を含む:
-  - Kueue 待ち Job
-  - admitted Job
-  - running Job
+active_jobs_in_db(namespace) は PostgreSQL から取得する。
+K8s API は参照しない。
+
+対象ステータス:
+  - DISPATCHING（Dispatcher が処理中）
+  - DISPATCHED（K8s Job 作成済み・Kueue 待ち）
+  - RUNNING（Pod 実行中）
 ```
+
+**DB ベースを採用する理由：**
+
+- Dispatcher が budget 計算のたびに K8s API を叩くと、K8s API の障害が Dispatcher 全体に波及するリスクがある
+- Dispatcher 自身が DISPATCHING に更新してから Job を作るため、自分が投入したジョブは必ず DB に反映される
+- Watcher の同期遅延により DB の状態が実態と数件ズレる場合があるが、研究計算の実行時間（数分〜数時間）に対して数秒〜10秒のズレは実用上無視できる
+- ズレの方向は常に budget の過小評価（控えめに投入）であり、過大評価（投入しすぎ）にはならない
+
+DB クエリは `idx_jobs_namespace_status` インデックスにより効率化される。
 
 ### 13.3 再試行ポリシー
 
