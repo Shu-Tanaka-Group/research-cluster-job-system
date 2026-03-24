@@ -10,7 +10,7 @@
 - ユーザー操作は `cjob add <job command>` を基本とする
 - 実行環境は Kubernetes 上に構築する
 - 実行単位は **1コマンド = 1 Kubernetes Job**
-- ジョブ投入数が非常に多くなることを想定し、**前段メッセージキュー**を導入する
+- ジョブ投入数が非常に多くなることを想定し、**DB スキャン型 Dispatcher** により dispatch を制御する
 - Kubernetes 上の実行制御には **Kueue** を用いる
 - ユーザーの作業ディレクトリと環境変数を可能な範囲でそのまま再現してジョブを実行する
 - 将来的に Prefect 等の上位 orchestration 層を追加可能な構成とする
@@ -652,6 +652,7 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 |---|---|---|
 | 401 | JWT が無効・期限切れ・存在しない | `{ "detail": "Unauthorized" }` |
 | 404 | 存在しない job_id、または他ユーザーの job_id | `{ "detail": "Job not found" }` |
+| 409 | リセット処理中（`DELETING` ジョブが存在する namespace への投入） | `{ "detail": "リセット処理中のためジョブを投入できません。しばらく待ってから再試行してください" }` |
 | 503 | DB 書き込み失敗など内部サービス一時不可 | `{ "detail": "Service temporarily unavailable" }` |
 
 **404 の方針**：他ユーザーのジョブへのアクセスも 404 を返す。ジョブの存在自体を隠すことで情報漏洩を防ぐ。
@@ -712,6 +713,12 @@ namespace のアクティブジョブ数（QUEUED / DISPATCHING / DISPATCHED / R
 { "detail": "投入可能なジョブ数の上限（2000件）に達しています" }
 ```
 
+namespace に `DELETING` 状態のジョブが1件でも存在する場合は 409 を返す（リセット処理中）。
+
+```json
+{ "detail": "リセット処理中のためジョブを投入できません。しばらく待ってから再試行してください" }
+```
+
 ### 11.2 POST /v1/jobs/sweep
 
 parameter sweep を投入する。
@@ -764,6 +771,12 @@ parameter sweep を投入する。
 
 ```json
 { "detail": "投入後の合計が上限を超えます（現在 1950 件 / 上限 2000 件）" }
+```
+
+namespace に `DELETING` 状態のジョブが1件でも存在する場合は 409 を返す（リセット処理中）。
+
+```json
+{ "detail": "リセット処理中のためジョブを投入できません。しばらく待ってから再試行してください" }
 ```
 
 ### 11.3 GET /v1/jobs
@@ -1112,7 +1125,7 @@ fn cmd_delete(expr, all: bool):
 6. リセット開始メッセージを表示して終了する（完了を待たない）
 
 実際の K8s Job 削除・DB クリーンアップ・カウンターリセットは Watcher が非同期で処理する。
-リセット完了前に `cjob add` を実行すると、Submit API はアクティブジョブが残っているとして投入を受け付けない。
+リセット完了前に `cjob add` を実行すると、Submit API は `DELETING` ジョブが存在するとして 409 を返し投入を拒否する。
 
 ```
 $ cjob reset
@@ -1207,11 +1220,21 @@ class Dispatcher:
             time.sleep(self.check_interval)
 
     def dispatch(self, job):
-        db.update_status(job.namespace, job.job_id, "DISPATCHING")
-        # CANCELLED チェック
-        if db.get_status(job.namespace, job.job_id) == "CANCELLED":
-            db.update_status(job.namespace, job.job_id, "CANCELLED")
+        # WHERE status='QUEUED' 条件付き UPDATE で CAS（Compare And Swap）
+        # スキャン後・UPDATE 前に cancel API が CANCELLED に更新していた場合、
+        # WHERE status='QUEUED' にマッチしないため updated_rows=0 となりスキップできる
+        updated_rows = db.execute("""
+            UPDATE jobs SET status = 'DISPATCHING'
+            WHERE namespace = :namespace
+              AND job_id    = :job_id
+              AND status    = 'QUEUED'
+        """, namespace=job.namespace, job_id=job.job_id)
+
+        if updated_rows == 0:
+            # cancel API が先に CANCELLED に更新していた → スキップ
             return
+
+        # DISPATCHING への更新が確定したので続行
         try:
             k8s.create_job(job)
             db.update_status(job.namespace, job.job_id, "DISPATCHED")
@@ -1319,8 +1342,8 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    - `retry_after IS NULL OR retry_after <= NOW()` の条件を満たすジョブのみ
    - 各 namespace 最古の QUEUED ジョブを1件ずつ（`created_at` 昇順）
 2. 取得したジョブを順に dispatch する
-2.1. DB 上で `DISPATCHING` に更新
-2.5. DB の status が `CANCELLED` ならば `CANCELLED` に戻してスキップ
+2.1. `WHERE status='QUEUED'` 条件付き UPDATE で `DISPATCHING` に CAS 更新する
+2.5. 更新行数が 0（スキャン後に cancel API が先に `CANCELLED` へ更新済み）ならスキップ
 3. Job を作成（`claimName` には job の user を使用）
 4. 成功なら `DISPATCHED` に更新
 5. 一時障害なら `retry_count` をインクリメントして `retry_after` を設定して `QUEUED` に戻す
