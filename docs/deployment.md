@@ -159,12 +159,12 @@ env:
 
 ### 7.1 image の役割
 
-同一の fixed image が2つの用途で使われる。
+同一の fixed image が2つの用途で使われる。`cjob` CLI は image には含めず、ユーザーが各自でインストールする。
 
-| 用途 | Pod | cjob CLI の使用 |
+| 用途 | Pod | 備考 |
 |---|---|---|
-| ユーザー作業環境 | User Pod（JupyterHub） | 使う |
-| ジョブ実行環境 | Job Pod（Kubernetes Job） | 使わない |
+| ユーザー作業環境 | User Pod（JupyterHub） | ユーザーが cjob CLI を別途インストール |
+| ジョブ実行環境 | Job Pod（Kubernetes Job） | CLI は不要 |
 
 ### 7.2 image の内容
 
@@ -176,10 +176,8 @@ env:
 | 科学計算系ライブラリ | libopenblas-dev liblapack-dev | numpy 等の依存 |
 | HPC 系ツール | openmpi-bin | MPI ジョブへの対応 |
 | 基本ツール | git curl wget vim | 作業用 |
-| cjob CLI | `/usr/local/bin/cjob` | User Pod での使用 |
-| CLI 設定ファイル | `/etc/cjob/config.yaml` | Submit API エンドポイント等 |
 
-含めないもの：ユーザーの Python パッケージ（各自が `/home/jovyan` 配下で venv を管理）・CUDA / GPU ドライバ（初期スコープ外）・Jupyter 本体（JupyterHub 側が管理）。
+含めないもの：`cjob` CLI（GitHub Releases で個別配布）・ユーザーの Python パッケージ（各自が `/home/jovyan` 配下で venv を管理）・CUDA / GPU ドライバ（初期スコープ外）・Jupyter 本体（JupyterHub 側が管理）。
 
 ### 7.3 Dockerfile
 
@@ -201,23 +199,23 @@ RUN apt-get update && apt-get install -y \
     wget \
     vim \
     && rm -rf /var/lib/apt/lists/*
-
-# cjob CLI のインストール
-COPY cjob /usr/local/bin/cjob
-RUN chmod +x /usr/local/bin/cjob
-
-# CLI のデフォルト設定
-COPY cjob-config.yaml /etc/cjob/config.yaml
 ```
 
-### 7.4 CLI 設定ファイル（image 埋め込み）
+### 7.4 cjob CLI の配布
 
-```yaml
-# /etc/cjob/config.yaml
-submit_api_url: http://submit-api.cjob-system.svc.cluster.local:8080
+`cjob` CLI は Rust 製シングルバイナリとして GitHub Releases で配布する。
+ユーザーは User Pod 内で以下のようにインストールする。
+
+```bash
+# GitHub Releases から最新バイナリをダウンロードして配置する例
+mkdir -p /home/jovyan/.local/bin
+curl -L https://github.com/<org>/cjob/releases/latest/download/cjob-x86_64-unknown-linux-gnu \
+  -o /home/jovyan/.local/bin/cjob
+chmod +x /home/jovyan/.local/bin/cjob
 ```
 
-環境変数 `CJOB_API_URL` でオーバーライド可能。
+Submit API のエンドポイントは環境変数 `CJOB_API_URL` で設定する。
+未設定時はデフォルト値（`http://submit-api.cjob-system.svc.cluster.local:8080`）を使用する。
 
 ---
 

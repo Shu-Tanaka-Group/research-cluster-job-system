@@ -135,6 +135,9 @@ cjob delete --all
 - **ジョブ投入を行う Pod とジョブを実行する Pod は同じ image を使う**
 - image は User Pod の環境変数 `JUPYTER_IMAGE` から自動取得する（ユーザーが明示的に指定しない）
 - JupyterHub の User Pod には `JUPYTER_IMAGE` に現在のコンテナイメージ名が設定されている
+- `cjob` CLI は Rust で実装したシングルバイナリとして GitHub Releases で配布する
+- ユーザーは CLI バイナリを各自のホームディレクトリ（例: `/home/jovyan/.local/bin/`）に配置する
+- CLI は image には含めない
 - ベース OS：Ubuntu 24.04
 - PVC 名はユーザー名と一致している
 - mount path は `/home/jovyan` に固定する
@@ -1310,7 +1313,6 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - **psycopg**: PostgreSQL ドライバ
 - **kubernetes**: Kubernetes Job 作成 / 状態監視用
 - **Pydantic**: API リクエスト / レスポンス定義用
-- **Typer**: `cjob` CLI 実装用
 
 ### 15.2 ミドルウェア
 
@@ -1318,6 +1320,13 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - **PostgreSQL**
 - **Kubernetes**
 - **Kueue**
+
+### 15.3 Rust クレート（cjob CLI）
+
+- **clap**: CLI 引数パース
+- **reqwest**: HTTP クライアント（Submit API との通信）
+- **tokio**: 非同期ランタイム（`--follow` のリアルタイムログ追跡）
+- **serde / serde_json**: JSON シリアライズ・デシリアライズ
 
 ## 16. 実装方針の詳細
 
@@ -1488,6 +1497,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 本システムは、以下の構成を採用する。
 
 - **ジョブ投入 UX**: `cjob add <job command>`
+- **CLI 実装言語**: Rust（シングルバイナリ・GitHub Releases で配布）
 - **実行単位**: 1コマンド = 1 Kubernetes Job
 - **前段キュー**: RabbitMQ（通常 Queue + retry Queue）
 - **メッセージライブラリ**: Kombu
