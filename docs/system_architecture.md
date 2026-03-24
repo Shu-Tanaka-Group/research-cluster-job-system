@@ -374,7 +374,7 @@ Dispatcher と Watcher は Replica 複数にすると二重 dispatch・二重更
 - message persistent
 - manual ack
 - prefetch_count = 1
-- dead-letter-exchange: `cjob.retry`（失敗時の転送先）
+- dead-letter-exchange: `RABBITMQ_RETRY_EXCHANGE`（デフォルト `cjob.retry`、失敗時の転送先）
 
 retry Queue（遅延 requeue 用）:
 
