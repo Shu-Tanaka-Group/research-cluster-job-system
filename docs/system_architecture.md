@@ -758,7 +758,22 @@ parameter sweep を投入する。
 { "detail": "command_template は空にできません" }
 ```
 
+### 11.3 GET /v1/jobs
+
 ジョブ一覧を取得する。JWT の namespace に属するジョブのみ返す。
+
+#### クエリパラメータ
+
+| パラメータ | 型 | 省略時の挙動 |
+|---|---|---|
+| `status` | 文字列（任意） | 全ステータスを返す |
+| `limit` | 整数（任意） | 全件返す |
+
+```
+GET /v1/jobs
+GET /v1/jobs?status=RUNNING
+GET /v1/jobs?status=FAILED&limit=10
+```
 
 #### response
 
@@ -804,9 +819,9 @@ parameter sweep を投入する。
 { "detail": "Job not found" }
 ```
 
-ジョブをキャンセルする。
+### 11.5 POST /v1/jobs/{job_id}/cancel
 
-状態ごとの処理は以下の通り。
+ジョブをキャンセルする。
 
 | 状態 | API の処理 |
 |---|---|
@@ -833,6 +848,8 @@ K8s Job 削除後、Watcher は DB の status が `CANCELLED` であることを
 ```json
 { "detail": "Job not found" }
 ```
+
+### 11.6 POST /v1/jobs/cancel
 
 複数ジョブを一括キャンセルする。範囲指定・個別複数指定はCLI側で展開してから送る。
 
@@ -1301,6 +1318,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 2. Job 状態を解釈
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルで対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
+5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
 
 ## 17. 実装手順
 

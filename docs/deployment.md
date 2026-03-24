@@ -405,7 +405,57 @@ hub:
 
 ## 13. Deployment / StatefulSet YAML
 
-### 13.1 PostgreSQL StatefulSet
+### 13.1 PostgreSQL ConfigMap（スキーマ定義）
+
+スキーマ SQL を ConfigMap に定義する。PostgreSQL 公式 image は初回起動時に
+`/docker-entrypoint-initdb.d/` 内の `.sql` ファイルを自動実行する。
+`IF NOT EXISTS` を使用しているため再デプロイ時も安全に再実行できる。
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-schema
+  namespace: cjob-system
+data:
+  schema.sql: |
+    CREATE TABLE IF NOT EXISTS jobs (
+        job_id        INTEGER NOT NULL,
+        "user"        TEXT NOT NULL,
+        namespace     TEXT NOT NULL,
+        command       TEXT NOT NULL,
+        cwd           TEXT NOT NULL,
+        env_json      JSONB NOT NULL DEFAULT '{}',
+        cpu           TEXT NOT NULL,
+        memory        TEXT NOT NULL,
+        gpu           INTEGER NOT NULL DEFAULT 0,
+        status        TEXT NOT NULL,
+        k8s_job_name  TEXT,
+        log_dir       TEXT,
+        created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        dispatched_at TIMESTAMPTZ,
+        finished_at   TIMESTAMPTZ,
+        last_error    TEXT,
+        PRIMARY KEY (namespace, job_id)
+    );
+    CREATE TABLE IF NOT EXISTS user_job_counters (
+        namespace   TEXT PRIMARY KEY,
+        next_id     INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE TABLE IF NOT EXISTS job_events (
+        id           BIGSERIAL PRIMARY KEY,
+        namespace    TEXT NOT NULL,
+        job_id       INTEGER NOT NULL,
+        event_type   TEXT NOT NULL,
+        payload_json JSONB NOT NULL DEFAULT '{}',
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        FOREIGN KEY (namespace, job_id) REFERENCES jobs(namespace, job_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
+    CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ON jobs (namespace, status);
+```
+
+### 13.2 PostgreSQL StatefulSet
 
 ```yaml
 apiVersion: apps/v1
@@ -424,68 +474,6 @@ spec:
       labels:
         app: postgres
     spec:
-      initContainers:
-        - name: schema-init
-          image: postgres:16
-          env:
-            - name: POSTGRES_USER
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_USER
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_PASSWORD
-            - name: POSTGRES_DB
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: POSTGRES_DB
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              until pg_isready -h localhost -U ${POSTGRES_USER}; do sleep 1; done
-              psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} <<'SQL'
-              CREATE TABLE IF NOT EXISTS jobs (
-                  job_id        INTEGER NOT NULL,
-                  "user"        TEXT NOT NULL,
-                  namespace     TEXT NOT NULL,
-                  command       TEXT NOT NULL,
-                  cwd           TEXT NOT NULL,
-                  env_json      JSONB NOT NULL DEFAULT '{}',
-                  cpu           TEXT NOT NULL,
-                  memory        TEXT NOT NULL,
-                  gpu           INTEGER NOT NULL DEFAULT 0,
-                  status        TEXT NOT NULL,
-                  k8s_job_name  TEXT,
-                  log_dir       TEXT,
-                  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                  dispatched_at TIMESTAMPTZ,
-                  finished_at   TIMESTAMPTZ,
-                  last_error    TEXT,
-                  PRIMARY KEY (namespace, job_id)
-              );
-              CREATE TABLE IF NOT EXISTS user_job_counters (
-                  namespace   TEXT PRIMARY KEY,
-                  next_id     INTEGER NOT NULL DEFAULT 1
-              );
-              CREATE TABLE IF NOT EXISTS job_events (
-                  id           BIGSERIAL PRIMARY KEY,
-                  namespace    TEXT NOT NULL,
-                  job_id       INTEGER NOT NULL,
-                  event_type   TEXT NOT NULL,
-                  payload_json JSONB NOT NULL DEFAULT '{}',
-                  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                  FOREIGN KEY (namespace, job_id) REFERENCES jobs(namespace, job_id)
-              );
-              CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
-              CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ON jobs (namespace, status);
-              SQL
-          volumeMounts:
-            - name: postgres-data
-              mountPath: /var/lib/postgresql/data
       containers:
         - name: postgres
           image: postgres:16
@@ -510,6 +498,8 @@ spec:
           volumeMounts:
             - name: postgres-data
               mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d/
           resources:
             requests:
               cpu: "250m"
@@ -522,6 +512,10 @@ spec:
               command: ["pg_isready", "-U", "cjob"]
             initialDelaySeconds: 30
             periodSeconds: 10
+      volumes:
+        - name: initdb
+          configMap:
+            name: postgres-schema
   volumeClaimTemplates:
     - metadata:
         name: postgres-data
@@ -546,7 +540,7 @@ spec:
   clusterIP: None   # Headless Service（StatefulSet 用）
 ```
 
-### 13.2 RabbitMQ StatefulSet
+### 13.3 RabbitMQ StatefulSet
 
 ```yaml
 apiVersion: apps/v1
@@ -625,7 +619,7 @@ spec:
   clusterIP: None
 ```
 
-### 13.3 Submit API Deployment
+### 13.4 Submit API Deployment
 
 ```yaml
 apiVersion: apps/v1
@@ -728,7 +722,7 @@ spec:
       targetPort: 8080
 ```
 
-### 13.4 Dispatcher Deployment
+### 13.5 Dispatcher Deployment
 
 ```yaml
 apiVersion: apps/v1
@@ -820,7 +814,7 @@ spec:
             periodSeconds: 30
 ```
 
-### 13.5 Watcher Deployment
+### 13.6 Watcher Deployment
 
 ```yaml
 apiVersion: apps/v1
@@ -898,6 +892,7 @@ kubectl apply -f secrets/rabbitmq-secret.yaml
 
 # 3. ConfigMap の作成
 kubectl apply -f configmaps/cjob-config.yaml
+kubectl apply -f configmaps/postgres-schema.yaml
 
 # 4. RBAC の作成
 kubectl apply -f rbac/submit-api-sa.yaml
@@ -914,15 +909,9 @@ kubectl apply -f kueue/cluster-queue.yaml
 kubectl apply -f deployments/postgres.yaml
 
 # 8. DB スキーマの初期化
-# PostgreSQL StatefulSet の initContainer で自動実行される。
-# initContainer は postgres コンテナ起動前に以下を実行する：
-#   CREATE TABLE IF NOT EXISTS jobs (...)
-#   CREATE TABLE IF NOT EXISTS user_job_counters (...)
-#   CREATE TABLE IF NOT EXISTS job_events (...)
-#   CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ...
-#   CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ...
-# initContainer が完了するまで postgres コンテナは起動しない。
-# 冪等性のため IF NOT EXISTS を使用し、再デプロイ時に安全に再実行できる。
+# postgres-schema ConfigMap の schema.sql が /docker-entrypoint-initdb.d/ にマウントされ、
+# PostgreSQL 初回起動時に自動実行される。
+# IF NOT EXISTS を使用しているため再デプロイ時も安全に再実行できる。
 
 # 9. RabbitMQ のデプロイ
 kubectl apply -f deployments/rabbitmq.yaml
