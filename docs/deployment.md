@@ -109,8 +109,8 @@ data:
   KUEUE_LOCAL_QUEUE_NAME: default
   JOB_NAMESPACE_PREFIX: user-
   RUNTIME_IMAGE: <dockerhub-repo>/lab-runtime:latest
-  WORKSPACE_MOUNT_PATH: /workspace
-  LOG_BASE_DIR: /workspace/.cjob/logs
+  WORKSPACE_MOUNT_PATH: /home/jovyan
+  LOG_BASE_DIR: /home/jovyan/.cjob/logs
 ```
 
 ### 6.2 各コンポーネントへの注入パターン
@@ -179,7 +179,7 @@ env:
 | cjob CLI | `/usr/local/bin/cjob` | User Pod での使用 |
 | CLI 設定ファイル | `/etc/cjob/config.yaml` | Submit API エンドポイント等 |
 
-含めないもの：ユーザーの Python パッケージ（各自が `/workspace` 配下で venv を管理）・CUDA / GPU ドライバ（初期スコープ外）・Jupyter 本体（JupyterHub 側が管理）。
+含めないもの：ユーザーの Python パッケージ（各自が `/home/jovyan` 配下で venv を管理）・CUDA / GPU ドライバ（初期スコープ外）・Jupyter 本体（JupyterHub 側が管理）。
 
 ### 7.3 Dockerfile
 
@@ -217,7 +217,7 @@ COPY cjob-config.yaml /etc/cjob/config.yaml
 submit_api_url: http://submit-api.cjob-system.svc.cluster.local:8080
 ```
 
-環境変数 `LABJOB_API_URL` でオーバーライド可能。
+環境変数 `CJOB_API_URL` でオーバーライド可能。
 
 ---
 
