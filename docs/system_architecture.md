@@ -854,7 +854,7 @@ GET /v1/jobs?status=FAILED&limit=10
 | 状態 | API の処理 |
 |---|---|
 | `QUEUED` | DB を `CANCELLED` に更新する。Dispatcher が次回スキャン時に `CANCELLED` ならスキップする |
-| `DISPATCHING` | DB を `CANCELLED` に更新する。Dispatcher が Job 作成直前に DB を再確認し `CANCELLED` ならスキップする |
+| `DISPATCHING` | DB を `CANCELLED` に更新する。CAS 更新の前にキャンセルが行われた場合は Dispatcher がスキップする。CAS 更新の後にキャンセルが行われた場合は K8s Job が作成されるが、Watcher が定期監視時に `CANCELLED` ジョブの K8s Job を削除する（`DISPATCHED` / `RUNNING` と同じ経路） |
 | `DISPATCHED` / `RUNNING` | DB を `CANCELLED` に更新する。Watcher が定期監視時に `CANCELLED` ジョブの K8s Job を削除する |
 | `SUCCEEDED` / `FAILED` / `CANCELLED` | 変更不要。`skipped` として返す |
 
@@ -1160,12 +1160,13 @@ fn cmd_delete(expr, all: bool):
 
 ### 12.10 `cjob reset` の動作
 
-1. `GET /v1/jobs` でジョブ一覧を取得し、ブロッキングジョブ（QUEUED / DISPATCHING / DISPATCHED / RUNNING）の有無を確認する
-2. ブロッキングジョブがある場合は job_id を表示して中止する
-3. 全ジョブが完了済みの場合はユーザーに確認プロンプトを表示する
-4. y の場合のみ `POST /v1/reset` を呼び出す（202 Accepted が返る）
-5. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する
-6. リセット開始メッセージを表示して終了する（完了を待たない）
+1. `GET /v1/jobs` でジョブ一覧を取得し、以下の順で確認する
+   - `DELETING` のジョブが1件でも存在する場合は「前回のリセット処理がまだ完了していません。しばらく待ってから再試行してください。」を表示して中止する
+   - `QUEUED` / `DISPATCHING` / `DISPATCHED` / `RUNNING` のジョブが1件でも存在する場合は job_id を表示して中止する
+2. 全ジョブが完了済みの場合はユーザーに確認プロンプトを表示する
+3. y の場合のみ `POST /v1/reset` を呼び出す（202 Accepted が返る）
+4. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する
+5. リセット開始メッセージを表示して終了する（完了を待たない）
 
 実際の K8s Job 削除・DB クリーンアップ・カウンターリセットは Watcher が非同期で処理する。
 リセット完了前に `cjob add` を実行すると、Submit API は `DELETING` ジョブが存在するとして 409 を返し投入を拒否する。
@@ -1234,15 +1235,18 @@ DB クエリは `idx_jobs_namespace_status` インデックスにより効率化
 # ※ 概念説明のための擬似コードである。
 
 except TemporaryK8sError:
-    # retry_count・retry_after・status を1回のアトミックな UPDATE で更新する（§8.3 参照）
+    # 現在の retry_count を取得して上限チェック（アトミック UPDATE の前に判断）
+    # これにより FAILED 遷移が先行し、QUEUED を経由しなくなる
+    current_count = db.get_retry_count(namespace, job_id)
+    if current_count + 1 >= max_retries:
+        db.update_status(namespace, job_id, "FAILED", error="max retries exceeded")
+        return
+    # 上限内なら retry_count・retry_after・status をアトミックに更新する（§8.3 参照）
     # 分割 UPDATE にすると途中クラッシュ時に不整合が生じるため必ずアトミックに行うこと
     retry_count = db.increment_retry_and_set_queued(
         namespace, job_id,
         retry_after=now + int(os.environ["DISPATCH_RETRY_INTERVAL_SEC"])
     )
-    if retry_count >= max_retries:
-        db.update_status(namespace, job_id, "FAILED", error="max retries exceeded")
-        return
     db.record_event(namespace, job_id, "RETRY", {"count": retry_count})
 ```
 
@@ -1333,10 +1337,16 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
-6. DB の status が `DELETING` のジョブを処理する
-   1. 対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
-   2. namespace 内の全 `DELETING` ジョブの K8s Job 削除が完了したら DB レコードを全件削除する
-   3. `user_job_counters` の `next_id` を 1 にリセットする
+6. DB の status が `DELETING` のジョブを二フェーズで処理する
+
+   **フェーズ 1（削除要求）：**
+   対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
+
+   **フェーズ 2（完了確認とクリーンアップ）：**
+   次以降のスキャンサイクルで、namespace 内の全 `DELETING` ジョブについて対応する K8s Job が K8s 上に存在しないことを確認する。全件の K8s Job が消滅していた場合のみ DB レコードを全件削除し、`user_job_counters` の `next_id` を 1 にリセットする。
+
+   （`propagation_policy="Background"` の削除は非同期で完結するため、フェーズ 1 と同一サイクルでフェーズ 2 を実行してはならない）
+
 7. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
 
 ## 15. 実装に使用するパッケージ / 技術
@@ -1409,10 +1419,16 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルで対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
-6. DB の status が `DELETING` のジョブを処理する
-   1. 対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
-   2. namespace 内の全 `DELETING` ジョブの K8s Job 削除が完了したら DB レコードを全件削除する
-   3. `user_job_counters` の `next_id` を 1 にリセットする
+6. DB の status が `DELETING` のジョブを二フェーズで処理する
+
+   **フェーズ 1（削除要求）：**
+   対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
+
+   **フェーズ 2（完了確認とクリーンアップ）：**
+   次以降のスキャンサイクルで、namespace 内の全 `DELETING` ジョブについて対応する K8s Job が K8s 上に存在しないことを確認する。全件の K8s Job が消滅していた場合のみ DB レコードを全件削除し、`user_job_counters` の `next_id` を 1 にリセットする。
+
+   （`propagation_policy="Background"` の削除は非同期で完結するため、フェーズ 1 と同一サイクルでフェーズ 2 を実行してはならない）
+
 7. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
 
 ## 17. 実装手順
