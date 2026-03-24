@@ -1283,7 +1283,14 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 ### 14.3 最小アルゴリズム
 
 1. Kubernetes Job 一覧を定期監視（または watch API を使用）
-2. Job の `status.conditions` を解釈
+2. Job の `status.conditions` を以下のルールで解釈する
+
+   | K8s Job の `status.conditions` | DB status |
+   |---|---|
+   | `type: Complete, status: True` | `SUCCEEDED` |
+   | `type: Failed, status: True` | `FAILED`（Pod の exit code 非0・起動失敗を含む） |
+   | 条件なし・Pod が Running 中 | `RUNNING` |
+
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
@@ -1344,7 +1351,14 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 ### 16.3 Watcher の最小アルゴリズム
 
 1. Kubernetes Job 一覧を監視
-2. Job 状態を解釈
+2. Job の `status.conditions` を以下のルールで解釈する
+
+   | K8s Job の `status.conditions` | DB status |
+   |---|---|
+   | `type: Complete, status: True` | `SUCCEEDED` |
+   | `type: Failed, status: True` | `FAILED`（Pod の exit code 非0・起動失敗を含む） |
+   | 条件なし・Pod が Running 中 | `RUNNING` |
+
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルで対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
