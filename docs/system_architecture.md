@@ -173,6 +173,7 @@ cjob delete --all
 - export 済み環境変数取得
 - コマンド文字列の保存
 - ユーザー namespace 解決（ServiceAccount の namespace ファイルから取得）
+- namespace ごとのアクティブジョブ数上限チェック（QUEUED + 実行中の合計）
 - ジョブ ID 発行
 - 内部 DB へのジョブ登録
 - RabbitMQ へのメッセージ publish
@@ -716,6 +717,13 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 { "detail": "command は空にできません" }
 ```
 
+namespace のアクティブジョブ数（QUEUED / DISPATCHING / DISPATCHED / RUNNING の合計）が
+`MAX_QUEUED_JOBS_PER_NAMESPACE`（デフォルト 2000）に達している場合は 429 を返す。
+
+```json
+{ "detail": "投入可能なジョブ数の上限（2000件）に達しています" }
+```
+
 ### 11.2 POST /v1/jobs/sweep
 
 parameter sweep を投入する。
@@ -760,6 +768,13 @@ parameter sweep を投入する。
 
 ```json
 { "detail": "command_template は空にできません" }
+```
+
+投入後のアクティブジョブ数合計（現在のアクティブ数 + sweep 展開件数）が
+`MAX_QUEUED_JOBS_PER_NAMESPACE`（2000）を超える場合は 429 を返す。
+
+```json
+{ "detail": "投入後の合計が上限を超えます（現在 1950 件 / 上限 2000 件）" }
 ```
 
 ### 11.3 GET /v1/jobs
