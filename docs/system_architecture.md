@@ -124,7 +124,6 @@ cjob delete --all
 - ユーザー Pod はその PVC を `/home/jovyan` に mount している
 - 認証基盤として Keycloak + JupyterHub が既にある
 - Kueue を Kubernetes クラスタに導入する
-- RabbitMQ を前段メッセージキューとして導入する（新規デプロイ）
 - 状態管理用に PostgreSQL を使用する（新規デプロイ）
 - NFS subdir external provisioner を導入済み
 - ジョブキューシステム専用ノードには `role=parallel-computing` ラベルと `role=computing:NoSchedule` Taint が付与されている
@@ -153,8 +152,7 @@ cjob delete --all
 - Kubernetes Job が実行単位である
 - Kueue は admission / queueing / fairness を担う
 - ResourceQuota は namespace ごとの aggregate resource usage 制御に用いる
-- ジョブ数が多くなるため、Kueue の前段にメッセージキューを置く
-- Kueue に流す Job 数は dispatcher が制御する
+- Kueue に流す Job 数は Dispatcher が制御する
 
 ## 5. 提供したい機能を実現するために必要な機能の一覧
 
@@ -180,25 +178,16 @@ cjob delete --all
 - ユーザー namespace 解決（ServiceAccount の namespace ファイルから取得）
 - namespace ごとのアクティブジョブ数上限チェック（QUEUED + 実行中の合計）
 - ジョブ ID 発行
-- 内部 DB へのジョブ登録
-- RabbitMQ へのメッセージ publish
+- 内部 DB へのジョブ登録（QUEUED 状態で保存）
 
-### 5.3 前段 MQ 機能
+### 5.3 Dispatcher 機能
 
-- ジョブメッセージの永続化
-- producer からの publish 確認
-- dispatcher への配送
-- manual ack / reject / requeue
-- Dead Letter Queue による遅延 requeue
-
-### 5.4 dispatcher 機能
-
-- メッセージ consume
+- 定期的に DB をスキャンして QUEUED ジョブを取得
 - dispatch budget の計算
+- namespace 間の公平なスケジューリング（各 namespace の最古の QUEUED ジョブを優先）
 - Kubernetes Job 生成
-- Job 作成成功時 ack
-- Job 作成失敗時の再試行 / requeue / fail
-- DB 状態更新
+- Job 作成成功・失敗時の DB 状態更新
+- K8s 一時障害時の遅延再試行（`retry_after` タイムスタンプで管理）
 - 起動時の DISPATCHING 状態リセット
 
 ### 5.5 Kubernetes 実行機能
@@ -229,47 +218,41 @@ cjob delete --all
 
 ### 6.1 全体方針
 
-前段 MQ + dispatcher + Kueue + Kubernetes Job の構成を採用する。  
+DB スキャン型 Dispatcher + Kueue + Kubernetes Job の構成を採用する。  
 Argo Workflows は今回は採用しない。理由は以下の通り。
 
 - 目的は workflow engine ではなく job queue system の構築である
 - Argo は queued workflow を持てるが、Kubernetes CR を大量に作る点は変わらない
-- 「提出済みだが未 materialize」の軽量保管には前段 MQ の方が適する
-- 将来 Prefect を導入する場合も、前段 MQ + Job 実行基盤の方が組み合わせやすい
 
-### 6.2 前段 MQ の実装方針
+### 6.2 Dispatcher の実装方針
 
-前段 MQ には **RabbitMQ** を採用する。  
-Python からのアクセスには **Kombu** を用いる。
+Dispatcher は PostgreSQL を定期的にスキャンして QUEUED ジョブを選択し、Kubernetes Job を作成する。
+RabbitMQ は使用しない。
 
 採用理由は以下の通り。
 
-- durable queue を使える
-- persistent message を使える
-- publisher confirm がある
-- consumer ack / nack / requeue がある
-- Dead Letter Queue による遅延 requeue が実現できる
-- Python 実装が安定している
-- Celery のような高レベル task queue をそのまま使うより、今回の用途に適している
+- 全ユーザーのジョブを常に俯瞰してスケジューリングできる（Slurm と同様の方式）
+- budget 不足のユーザーのジョブが他ユーザーをブロックしない
+- 各ユーザーの投入順（`created_at` 昇順）を保証したまま公平にスケジューリングできる
+- DLQ・ack/nack・prefetch_count などの複雑な MQ 設定が不要になる
+- K8s エラー時の再試行も DB の `retry_after` タイムスタンプで管理できる
+- 想定規模（20ユーザー・数千件）では DB ポーリングの負荷は問題ない
 
 ### 6.3 状態管理の実装方針
 
-ジョブ状態の正本は **PostgreSQL** に保存する。  
-RabbitMQ はメッセージ配送用であり、ジョブ状態の正本としては使わない。
+ジョブ状態の正本は **PostgreSQL** に保存する。
 
 理由:
 
 - `list/status/cancel/logs` を実装しやすい
-- RabbitMQ のみでは user-facing state 管理が難しい
 - dispatch budget 判定に DB 状態を使える
 - 再起動時の再整合がしやすい
 
 ### 6.4 実行制御の実装方針
 
-dispatcher が DB と RabbitMQ を見ながら Job を materialize する。
+Dispatcher が DB をスキャンして Job を materialize する。
 
-- RabbitMQ: 新着通知
-- PostgreSQL: pending / queued / dispatched の正本
+- PostgreSQL: 全ジョブ状態の正本・スケジューリングの判断基盤
 - Kubernetes Job: 実行単位
 - Kueue: 実行 admission 制御
 
@@ -292,7 +275,7 @@ Indexed Job は採用しない。
 - 各ジョブの状態・キャンセル・再試行を個別に扱いやすい
 - ログ・課金・進捗管理の粒度を揃えやすい
 
-大量投入による Kueue / Job オブジェクト増加は、前段 MQ と dispatcher により制御する。
+大量投入による Kueue / Job オブジェクト増加は、dispatch budget により制御する。
 
 ### 6.7 ログ取得方針
 
@@ -312,12 +295,10 @@ User Pod (namespace: user-alice)
   └─ cjob CLI
        └─ HTTP + ServiceAccount JWT
             └─ Submit API (namespace: cjob-system)
-                 ├─ PostgreSQL
-                 └─ RabbitMQ
+                 └─ PostgreSQL（QUEUED 状態で登録）
 
 Dispatcher (namespace: cjob-system)
-  ├─ RabbitMQ Consumer
-  ├─ PostgreSQL
+  ├─ PostgreSQL（QUEUED ジョブをスキャン）
   └─ Kubernetes API
        └─ Job + Kueue LocalQueue (namespace: user-alice)
 
@@ -336,7 +317,7 @@ Kubernetes Job Pod (namespace: user-alice)
 ### 7.2 namespace 構成
 
 ```text
-cjob-system      : Submit API / Dispatcher / Watcher / RabbitMQ / PostgreSQL
+cjob-system      : Submit API / Dispatcher / Watcher / PostgreSQL
 user-<username>    : User Pod / Job Pod / LocalQueue / ResourceQuota / PVC
 ```
 
@@ -347,83 +328,70 @@ user-<username>    : User Pod / Job Pod / LocalQueue / ResourceQuota / PVC
 | Submit API | Deployment | 1 | cjob-system |
 | Dispatcher | Deployment | 1 | cjob-system |
 | Watcher / Reconciler | Deployment | 1 | cjob-system |
-| RabbitMQ | StatefulSet | 1 | cjob-system |
 | PostgreSQL | StatefulSet | 1 | cjob-system |
 | Kubernetes Job | Job | - | user-\<username\> |
 
 Dispatcher と Watcher は Replica 複数にすると二重 dispatch・二重更新が発生するため、1 固定とする。
 
-## 8. RabbitMQ 設計
+## 8. Dispatcher スケジューリング設計
 
-### 8.1 採用構成
+### 8.1 スケジューリング方針
 
-以下の Exchange と Queue を使用する。
+Dispatcher は PostgreSQL を定期的にスキャンし、以下の基準で dispatch するジョブを選択する。
 
-- Exchange（通常）: `cjob`（type: direct）
-- Exchange（retry）: `cjob.retry`（type: direct）
-- Queue（通常）: `cjob.submit`
-- Queue（retry）: `cjob.retry`
-- Routing key（通常）: `submit`
-- Routing key（retry）: `retry`
+1. **budget に余裕のある namespace のみ対象とする**（DISPATCHING + DISPATCHED + RUNNING < dispatch_limit）
+2. **対象 namespace の中から各 namespace 最古の QUEUED ジョブを1件ずつ取得する**（`created_at` 昇順）
+3. **各 namespace を Round-robin で処理する**
 
-### 8.2 Queue 設定
+この方式により：
+- budget を使い切ったユーザーのジョブが他ユーザーをブロックしない
+- 同一ユーザーの投入順（`created_at` 昇順）は常に保証される
+- 複数ユーザーが同時に QUEUED 状態でも公平に処理される
 
-通常 Queue:
+### 8.2 DB スキャンのクエリ方針
 
-- durable = true
-- message persistent
-- manual ack
-- prefetch_count = 1
-- dead-letter-exchange: `RABBITMQ_RETRY_EXCHANGE`（デフォルト `cjob.retry`、失敗時の転送先）
-
-retry Queue（遅延 requeue 用）:
-
-- x-message-ttl: `RABBITMQ_RETRY_TTL_MS`（デフォルト 30000 ms = 30秒後に通常 Queue へ戻す）
-- x-dead-letter-exchange: `RABBITMQ_EXCHANGE`（デフォルト `cjob`）
-- x-dead-letter-routing-key: `RABBITMQ_ROUTING_KEY`（デフォルト `submit`）
-
-### 8.3 メッセージ内容
-
-1メッセージ = 1 logical job とする。
-
-```json
-{
-  "job_id": 1,
-  "user": "alice",
-  "namespace": "user-alice",
-  "image": "yusekiya/stg-jupyter:2.1.0",
-  "cwd": "/home/jovyan/project-a/exp1",
-  "command": "python main.py --alpha 0.1 --beta 16",
-  "env": {
-    "OMP_NUM_THREADS": "4",
-    "PYTHONPATH": "/home/jovyan/project-a",
-    "VIRTUAL_ENV": "/home/jovyan/myenv",
-    "PATH": "/home/jovyan/myenv/bin:/usr/local/bin:/usr/bin"
-  },
-  "resources": {
-    "cpu": "2",
-    "memory": "4Gi",
-    "gpu": 0
-  },
-  "max_retries": 5,
-  "submitted_at": "2026-03-23T12:34:56Z"
-}
+```sql
+-- 各 namespace の最古の QUEUED ジョブを取得（budget に余裕がある namespace のみ）
+SELECT DISTINCT ON (namespace) *
+FROM jobs
+WHERE status = 'QUEUED'
+  AND (retry_after IS NULL OR retry_after <= NOW())
+  AND namespace IN (
+    -- budget に余裕がある namespace を抽出
+    SELECT namespace FROM jobs
+    WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')
+    GROUP BY namespace
+    HAVING COUNT(*) < :dispatch_limit
+    -- QUEUED ジョブが存在するが budget 計算対象に含まれない namespace も含める
+    UNION
+    SELECT DISTINCT namespace FROM jobs
+    WHERE status = 'QUEUED'
+      AND namespace NOT IN (
+        SELECT namespace FROM jobs
+        WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')
+        GROUP BY namespace HAVING COUNT(*) >= :dispatch_limit
+      )
+  )
+ORDER BY namespace, created_at ASC;
 ```
 
-`retry_count` はメッセージではなく DB（`jobs.retry_count` カラム）で管理する。
-DLQ 経由で再投入されたメッセージでも `retry_count` の正本は常に DB を参照する。
-`max_retries` はジョブ投入時に確定する設定値のため、メッセージに含める。
+このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。
 
-### 8.4 RabbitMQ の役割
+### 8.3 再試行の管理
 
-RabbitMQ は以下のみを担う。
+K8s API 一時障害時の再試行は `jobs.retry_after` タイムスタンプで管理する。
+RabbitMQ の DLQ・TTL は不要。
 
-- 新規ジョブの一時保管
-- dispatcher への配送
-- ack / nack による配送制御
-- Dead Letter Queue による遅延 requeue
+```sql
+-- 一時障害時: retry_after を設定して QUEUED に戻す
+UPDATE jobs
+SET retry_count = retry_count + 1,
+    retry_after = NOW() + INTERVAL '30 seconds',  -- DISPATCH_RETRY_INTERVAL_SEC 秒後
+    status = 'QUEUED'
+WHERE namespace = :namespace AND job_id = :job_id;
+```
 
-RabbitMQ はジョブ状態の正本ではない。
+`retry_after IS NULL OR retry_after <= NOW()` の条件で次回スキャン時に自動的に再試行される。
 
 ## 9. PostgreSQL 設計
 
@@ -445,6 +413,7 @@ CREATE TABLE jobs (
     gpu           INTEGER NOT NULL DEFAULT 0,
     status        TEXT NOT NULL,
     retry_count   INTEGER NOT NULL DEFAULT 0,
+    retry_after   TIMESTAMPTZ,              -- K8s 一時障害時の再試行解禁時刻（NULL = 即時対象）
     k8s_job_name  TEXT,
     log_dir       TEXT,          -- /home/jovyan/.cjob/logs/<job_id>
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -683,7 +652,7 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 |---|---|---|
 | 401 | JWT が無効・期限切れ・存在しない | `{ "detail": "Unauthorized" }` |
 | 404 | 存在しない job_id、または他ユーザーの job_id | `{ "detail": "Job not found" }` |
-| 503 | RabbitMQ publish 失敗など内部サービス一時不可 | `{ "detail": "Service temporarily unavailable" }` |
+| 503 | DB 書き込み失敗など内部サービス一時不可 | `{ "detail": "Service temporarily unavailable" }` |
 
 **404 の方針**：他ユーザーのジョブへのアクセスも 404 を返す。ジョブの存在自体を隠すことで情報漏洩を防ぐ。
 
@@ -864,7 +833,7 @@ GET /v1/jobs?status=FAILED&limit=10
 
 | 状態 | API の処理 |
 |---|---|
-| `QUEUED` | DB を `CANCELLED` に更新する。Dispatcher がメッセージ取得時に DB を確認して `CANCELLED` ならスキップして `ack` する |
+| `QUEUED` | DB を `CANCELLED` に更新する。Dispatcher が次回スキャン時に `CANCELLED` ならスキップする |
 | `DISPATCHING` | DB を `CANCELLED` に更新する。Dispatcher が Job 作成直前に DB を再確認し `CANCELLED` ならスキップする |
 | `DISPATCHED` / `RUNNING` | DB を `CANCELLED` に更新する。Watcher が定期監視時に `CANCELLED` ジョブの K8s Job を削除する |
 | `SUCCEEDED` / `FAILED` / `CANCELLED` | 変更不要。`skipped` として返す |
@@ -1159,21 +1128,20 @@ $ cjob reset   # 全ジョブ完了後
 
 ### 13.1 役割
 
-Dispatcher は前段 MQ と Kubernetes Job 実行基盤の橋渡しを担う。
+Dispatcher は PostgreSQL をスキャンして QUEUED ジョブを選択し、Kubernetes Job を作成する。
 
-- RabbitMQ からメッセージを受け取る
-- namespace ごとの dispatch budget を確認する
-- Job を作成できる場合のみ Kubernetes Job を作る
-- 成功時 ack
-- 失敗時 reject / requeue / fail
-- DB 状態を更新する
+- DB を定期スキャンして dispatch 対象ジョブを選択する
+- namespace 間の公平なスケジューリングを行う
+- dispatch budget を確認して K8s Job を作成する
+- 成功・失敗時に DB 状態を更新する
+- 起動時の DISPATCHING 状態リセット
 
 ### 13.2 dispatch budget
 
 ```text
 dispatch_budget = namespace_dispatch_limit - active_jobs_in_db(namespace)
 
-namespace_dispatch_limit = 256（ConfigMap で設定）
+namespace_dispatch_limit = 256（ConfigMap: DISPATCH_BUDGET_PER_NAMESPACE で設定）
 
 active_jobs_in_db(namespace) は PostgreSQL から取得する。
 K8s API は参照しない。
@@ -1199,75 +1167,60 @@ DB クエリは `idx_jobs_namespace_status` インデックスにより効率化
 
 | シナリオ | 対処 | 再試行間隔 | 上限 |
 |---|---|---|---|
-| K8s API 一時障害 | DLQ + TTL で遅延 requeue | `RABBITMQ_RETRY_TTL_MS` ms | `RABBITMQ_MAX_RETRIES` 回 |
-| dispatch budget 不足 | `skip_namespaces` に追加して `nack(requeue=True)`・インターバル後に再試行 | `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒ごと | なし（budget 回復まで） |
+| K8s API 一時障害 | `retry_after` を設定して `QUEUED` に戻す | `DISPATCH_RETRY_INTERVAL_SEC` 秒後 | `DISPATCH_MAX_RETRIES` 回 |
+| dispatch budget 不足 | 次回スキャンで再評価（自然に再試行） | `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒ごと | なし（budget 回復まで） |
 | バリデーションエラー | 即 FAILED | なし | なし |
 | 永続的 K8s エラー | 即 FAILED | なし | なし |
 
 #### K8s API 一時障害の処理
 
 ```python
+# ※ CLI の実装は Rust で行う。以下は概念説明のための擬似コードである。
+
 except TemporaryK8sError:
-    db.increment_retry_count(job.namespace, job.job_id)   # DB で retry_count をインクリメント
-    current_count = db.get_retry_count(job.namespace, job.job_id)
-    if current_count >= job.max_retries:
-        db.update_status(job.namespace, job.job_id, "FAILED", error="max retries exceeded")
-        message.reject(requeue=False)   # DLQ へ転送（キューから除去）
+    retry_count = db.increment_retry_count(namespace, job_id)
+    if retry_count >= max_retries:
+        db.update_status(namespace, job_id, "FAILED", error="max retries exceeded")
     else:
-        message.reject(requeue=False)   # retry Queue 経由で RABBITMQ_RETRY_TTL_MS ms 後に再投入
-        db.record_event(job.namespace, job.job_id, "RETRY", {"count": current_count})
+        interval = int(os.environ["DISPATCH_RETRY_INTERVAL_SEC"])
+        db.set_retry_after(namespace, job_id, now + interval)
+        db.update_status(namespace, job_id, "QUEUED")
+        db.record_event(namespace, job_id, "RETRY", {"count": retry_count})
 ```
 
-#### dispatch budget 不足の処理
+`retry_after <= NOW()` になった時点で次回スキャン時に自動的に再 dispatch 対象となる。
 
-budget 不足の namespace をスキップリストで管理し、同一インターバル内で再取得しないよう制御する。
-`self.pending` による in-memory 保留は廃止し、`nack(requeue=True)` でメッセージをキューに戻す。
+### 13.4 dispatch ループ
 
 ```python
+# ※ 概念説明のための擬似コードである。
+
 class Dispatcher:
     def __init__(self):
-        self.skip_namespaces: set[str] = set()   # budget 不足 namespace のスキップリスト
-        self.check_interval = int(os.environ["DISPATCH_BUDGET_CHECK_INTERVAL_SEC"])  # ConfigMap から注入
+        self.check_interval = int(os.environ["DISPATCH_BUDGET_CHECK_INTERVAL_SEC"])
 
     def run(self):
         while True:
-            self.skip_namespaces.clear()          # インターバルごとにスキップリストをリセット
-            deadline = time.monotonic() + self.check_interval
-            while time.monotonic() < deadline:
-                message = self.consume_one(timeout=1)
-                if message:
-                    self.dispatch(message)
+            candidates = db.fetch_dispatchable_jobs()   # §8.2 のクエリ
+            for job in candidates:
+                self.dispatch(job)
+            time.sleep(self.check_interval)
 
-    def dispatch(self, message):
-        job = parse(message)
-        if job.namespace in self.skip_namespaces:
-            message.nack(requeue=True)            # スキップ対象は即キューに戻す
+    def dispatch(self, job):
+        db.update_status(job.namespace, job.job_id, "DISPATCHING")
+        # CANCELLED チェック
+        if db.get_status(job.namespace, job.job_id) == "CANCELLED":
+            db.update_status(job.namespace, job.job_id, "CANCELLED")
             return
-        if calc_budget(job.namespace) <= 0:
-            self.skip_namespaces.add(job.namespace)
-            message.nack(requeue=True)            # budget 不足もキューに戻す
-            return
-        # Job 作成処理...
-
-    def retry_pending(self):
-        pass   # self.pending 廃止のため不要
+        try:
+            k8s.create_job(job)
+            db.update_status(job.namespace, job.job_id, "DISPATCHED")
+        except TemporaryK8sError:
+            # §13.3 の再試行処理
+            ...
+        except PermanentK8sError:
+            db.update_status(job.namespace, job.job_id, "FAILED")
 ```
-
-`nack(requeue=True)` を使うため、budget 不足が続くと同一メッセージが短時間に繰り返し配信される可能性がある。
-これを防ぐために `consume_one` の timeout を 1 秒に設定し、スキップリストのクリア間隔（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`）を 10〜30 秒程度に設定すること。
-
-### 13.4 ack / reject ルール
-
-| 状況 | 処理 |
-|---|---|
-| Job 作成成功 | `ack` |
-| メッセージ取得時に DB が `CANCELLED`（Step 2.5） | `ack`（Job を作成せずスキップ） |
-| `DISPATCHING` 更新後に DB が `CANCELLED`（Step 4.5） | DB を `CANCELLED` に戻して `ack`（Job を作成せずスキップ） |
-| K8s API 一時障害（retry_count < max_retries） | `reject(requeue=False)` → retry Queue 経由で再投入 |
-| K8s API 一時障害（retry_count >= max_retries） | `reject(requeue=False)` + DB を `FAILED` |
-| バリデーションエラー | `reject(requeue=False)` + DB を `FAILED` |
-| dispatch budget 不足（初回検出） | `skip_namespaces` に追加して `nack(requeue=True)`（キューに戻す） |
-| dispatch budget 不足（スキップリスト済み） | `nack(requeue=True)`（キューに戻す） |
 
 ### 13.5 起動時の初期化処理
 
@@ -1276,7 +1229,7 @@ Dispatcher 再起動時に `DISPATCHING` で止まっているジョブを `QUEU
 ```python
 def on_startup():
     db.reset_stale_dispatching_jobs()
-    # UPDATE jobs SET status = 'QUEUED' WHERE status = 'DISPATCHING'
+    # UPDATE jobs SET status = 'QUEUED', retry_after = NULL WHERE status = 'DISPATCHING'
 ```
 
 ## 14. Watcher / Reconciler 設計
@@ -1295,8 +1248,8 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 ### 14.2 必要性
 
-前段 MQ を導入すると、submission state と execution state が分かれる。  
-そのため dispatcher だけでなく watcher が必要である。
+Dispatcher が DB スキャンで Job を作成しても、その後の実行状態（RUNNING / SUCCEEDED / FAILED）は Kubernetes 側でのみ確定する。
+Dispatcher だけでは K8s Job の完了・失敗を検知できないため、Watcher が必要である。
 
 ### 14.3 最小アルゴリズム
 
@@ -1322,7 +1275,6 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 ### 15.1 Python パッケージ
 
-- **Kombu**: RabbitMQ producer / consumer 実装用
 - **FastAPI**: Submit API 実装用
 - **SQLAlchemy**: PostgreSQL ORM / DB access
 - **psycopg**: PostgreSQL ドライバ
@@ -1331,7 +1283,6 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 ### 15.2 ミドルウェア
 
-- **RabbitMQ**
 - **PostgreSQL**
 - **Kubernetes**
 - **Kueue**
@@ -1353,9 +1304,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 2. CLI が ServiceAccount JWT と namespace を固定パスから読み取る
 3. API が `job_id` を発行する
 4. PostgreSQL に `QUEUED` で保存する（`log_dir` も同時に設定）
-5. RabbitMQ に publish する
-6. publisher confirm を待つ
-7. 成功を返す
+5. 成功を返す
 
 ### 16.2 Dispatcher の動作アルゴリズム
 
@@ -1363,21 +1312,20 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 1. `DISPATCHING` 状態のジョブを `QUEUED` に戻す（再起動時の整合）
 
-メインループ（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒ごとに `skip_namespaces` をリセット）:
+メインループ（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒ごとにスキャン）:
 
-1. `skip_namespaces` をクリアし、deadline を `now + DISPATCH_BUDGET_CHECK_INTERVAL_SEC` に設定
-2. deadline までの間、以下を繰り返す（`consume_one` タイムアウト: 1秒）
-2.1. RabbitMQ から 1 メッセージ取得
-2.2. メッセージがなければ次の取得へ
-2.5. DB の status が `CANCELLED` ならば `ack` してスキップ（次のループへ）
-3. namespace が `skip_namespaces` に含まれるなら `nack(requeue=True)` してスキップ
-3.5. dispatch budget を確認（不足なら `skip_namespaces` に追加して `nack(requeue=True)` し次のループへ）
-4. DB 上で `DISPATCHING` に更新
-4.5. DB の status が `CANCELLED` ならば `DISPATCHING` を `CANCELLED` に戻して `ack` してスキップ
-5. Job を作成（`claimName` には message["user"] を使用）
-6. 成功なら `DISPATCHED` に更新して `ack`
-7. 一時障害なら retry_count をインクリメントして DLQ 経由で再投入
-8. 永続障害・バリデーションエラーなら `FAILED` に更新して `reject`
+1. DB から dispatch 対象ジョブを取得する（§8.2 のクエリ）
+   - budget に余裕がある namespace のみ対象
+   - `retry_after IS NULL OR retry_after <= NOW()` の条件を満たすジョブのみ
+   - 各 namespace 最古の QUEUED ジョブを1件ずつ（`created_at` 昇順）
+2. 取得したジョブを順に dispatch する
+2.1. DB 上で `DISPATCHING` に更新
+2.5. DB の status が `CANCELLED` ならば `CANCELLED` に戻してスキップ
+3. Job を作成（`claimName` には job の user を使用）
+4. 成功なら `DISPATCHED` に更新
+5. 一時障害なら `retry_count` をインクリメントして `retry_after` を設定して `QUEUED` に戻す
+6. 永続障害・バリデーションエラーなら `FAILED` に更新
+7. `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒スリープして次のスキャンへ
 
 ### 16.3 Watcher の最小アルゴリズム
 
@@ -1405,7 +1353,6 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 ### Step 1: 基本インフラ準備
 
-- RabbitMQ をデプロイする（StatefulSet + PVC）
 - PostgreSQL をデプロイする（StatefulSet + PVC）
 - Kueue を導入する
 - ResourceFlavor / ClusterQueue を作成する
@@ -1430,45 +1377,36 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 併せて PostgreSQL スキーマを作成する。
 
-### Step 4: RabbitMQ Producer 実装
-
-- Submit API 内で Kombu を用いた publish を実装する
-- publisher confirm を有効にする
-- durable queue・retry queue を宣言する
-
-### Step 5: Dispatcher 実装
+### Step 4: Dispatcher 実装
 
 - 起動時初期化（DISPATCHING → QUEUED）
-- RabbitMQ consumer 実装（prefetch_count=1）
-- DB から状態を読み書き
+- DB スキャン実装（§8.2 のクエリ）
 - dispatch budget 計算
 - Kubernetes Job 作成（tee ラップコマンド含む）
-- 再試行ポリシー実装（DLQ・待機リスト）
-- ack / reject 実装
+- 再試行ポリシー実装（`retry_after` タイムスタンプ方式）
 
-### Step 6: Watcher / Reconciler 実装
+### Step 5: Watcher / Reconciler 実装
 
 - Job 状態監視
 - Pod 状態監視
 - DB 更新
 - 失敗理由反映
 
-### Step 7: ログ取得実装
+### Step 6: ログ取得実装
 
-- Job Pod のコマンドに tee ラップを追加（Step 5 で実施済み）
+- Job Pod のコマンドに tee ラップを追加（Step 4 で実施済み）
 - `cjob logs`（完了後表示）
 - `cjob logs --follow`（リアルタイム追跡）
 
-### Step 8: parameter sweep 実装
+### Step 7: parameter sweep 実装
 
-- 複数 logical job を DB + RabbitMQ に投入
+- 複数 logical job を DB に一括登録
 - 一括投入時の UX 改善
 
-### Step 9: 運用機能追加
+### Step 8: 運用機能追加
 
 - metrics
 - tracing
-- dead-letter queue の監視
 - cleanup policy
 
 ## 18. 初期実装のスコープ
@@ -1482,7 +1420,6 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - `cjob cancel`
 - `cjob logs`（`--follow` 含む）
 - 単純な `grid` sweep
-- RabbitMQ 1 queue + retry queue
 - PostgreSQL 1 DB
 - namespace ごとの LocalQueue
 - 1種類の runtime image
@@ -1519,8 +1456,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - **ジョブ投入 UX**: `cjob add <job command>`
 - **CLI 実装言語**: Rust（シングルバイナリ・GitHub Releases で配布）
 - **実行単位**: 1コマンド = 1 Kubernetes Job
-- **前段キュー**: RabbitMQ（通常 Queue + retry Queue）
-- **メッセージライブラリ**: Kombu
+- **スケジューリング**: DB スキャン型 Dispatcher（公平スケジューリング・投入順保証）
 - **状態管理**: PostgreSQL
 - **job_id 採番**: ユーザー（namespace）ごとの連番（1, 2, 3...）
 - **K8s Job 名**: `cjob-<username>-<job_id>`（グローバルに一意）
@@ -1534,4 +1470,4 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - **削除**: `cjob delete` で完了済みジョブを個別削除（実行中ジョブは削除不可・cancel を促す）
 - **リセット**: `cjob reset` で全ジョブ履歴・ログを削除し job_id を 1 から採番し直す（全ジョブ完了時のみ実行可能）
 - **認証・認可**: ServiceAccount JWT + TokenReview（詳細は auth_policy.md 参照）
-- **大量投入対応**: 前段 MQ + dispatch budget により Job materialization を抑制する
+- **大量投入対応**: dispatch budget + DB スキャン型スケジューリングにより Job materialization を抑制する
