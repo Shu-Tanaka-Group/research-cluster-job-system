@@ -398,11 +398,14 @@ retry Queue（遅延 requeue 用）:
     "memory": "4Gi",
     "gpu": 0
   },
-  "retry_count": 0,
   "max_retries": 5,
   "submitted_at": "2026-03-23T12:34:56Z"
 }
 ```
+
+`retry_count` はメッセージではなく DB（`jobs.retry_count` カラム）で管理する。
+DLQ 経由で再投入されたメッセージでも `retry_count` の正本は常に DB を参照する。
+`max_retries` はジョブ投入時に確定する設定値のため、メッセージに含める。
 
 ### 8.4 RabbitMQ の役割
 
@@ -1310,7 +1313,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 2.5. DB の status が `CANCELLED` ならば `ack` してスキップ（次のループへ）
 3. dispatch budget を確認（不足なら待機リストに追加して次のループへ）
 4. DB 上で `DISPATCHING` に更新
-4.5. DB の status が `CANCELLED` ならば `QUEUED` に戻して `ack` してスキップ
+4.5. DB の status が `CANCELLED` ならば `DISPATCHING` を `CANCELLED` に戻して `ack` してスキップ
 5. Job を作成（`claimName` には message["user"] を使用）
 6. 成功なら `DISPATCHED` に更新して `ack`
 7. 一時障害なら retry_count をインクリメントして DLQ 経由で再投入
