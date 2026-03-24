@@ -326,7 +326,7 @@ Watcher / Reconciler (namespace: cjob-system)
   └─ PostgreSQL
 
 Kubernetes Job Pod (namespace: user-alice)
-  ├─ fixed image (DockerHub)
+  ├─ image = JUPYTER_IMAGE（User Pod と同一）
   ├─ PVC mounted at /home/jovyan
   ├─ workingDir = cwd
   ├─ env = submit-time env
