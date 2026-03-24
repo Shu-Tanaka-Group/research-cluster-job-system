@@ -109,7 +109,6 @@ data:
   MAX_QUEUED_JOBS_PER_NAMESPACE: "2000"
   KUEUE_LOCAL_QUEUE_NAME: default
   JOB_NAMESPACE_PREFIX: user-
-  RUNTIME_IMAGE: yusekiya/stg-jupyter:2.1.0
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
 ```
@@ -797,11 +796,6 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DISPATCH_BUDGET_PER_NAMESPACE
-            - name: RUNTIME_IMAGE
-              valueFrom:
-                configMapKeyRef:
-                  name: cjob-config
-                  key: RUNTIME_IMAGE
           resources:
             requests:
               cpu: "100m"

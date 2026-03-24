@@ -133,7 +133,8 @@ cjob delete --all
 ### 4.2 実行環境前提
 
 - **ジョブ投入を行う Pod とジョブを実行する Pod は同じ image を使う**
-- image は固定し、ユーザーが指定しない（DockerHub に public push）
+- image は User Pod の環境変数 `JUPYTER_IMAGE` から自動取得する（ユーザーが明示的に指定しない）
+- JupyterHub の User Pod には `JUPYTER_IMAGE` に現在のコンテナイメージ名が設定されている
 - ベース OS：Ubuntu 24.04
 - PVC 名はユーザー名と一致している
 - mount path は `/home/jovyan` に固定する
@@ -386,6 +387,7 @@ retry Queue（遅延 requeue 用）:
   "job_id": 1,
   "user": "alice",
   "namespace": "user-alice",
+  "image": "yusekiya/stg-jupyter:2.1.0",
   "cwd": "/home/jovyan/project-a/exp1",
   "command": "python main.py --alpha 0.1 --beta 16",
   "env": {
@@ -622,7 +624,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: worker
-          image: yusekiya/stg-jupyter:2.1.0
+          image: yusekiya/stg-jupyter:2.1.0   # Dispatcher が message["image"] を動的に設定
           workingDir: /home/jovyan/project-a/exp1
           command: ["/bin/bash", "-lc"]
           args:
@@ -685,6 +687,7 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 ```json
 {
   "command": "python main.py --alpha 0.1 --beta 16",
+  "image": "yusekiya/stg-jupyter:2.1.0",
   "cwd": "/home/jovyan/project-a/exp1",
   "env": {
     "OMP_NUM_THREADS": "4",
@@ -985,10 +988,11 @@ cjob logs --follow <job-id>
 
 1. `pwd` を取得する
 2. export 済み環境変数を収集する（`PATH` / `VIRTUAL_ENV` を含む）
-3. `--` 以降の argv を shell-safe に連結して command を生成する
-4. ServiceAccount JWT と namespace を固定パスから読み取る
-5. API にジョブ投入を行う
-6. `job_id` を表示する
+3. `JUPYTER_IMAGE` 環境変数からコンテナイメージ名を取得する
+4. `--` 以降の argv を shell-safe に連結して command を生成する
+5. ServiceAccount JWT と namespace を固定パスから読み取る
+6. API にジョブ投入を行う（`image` フィールドを含む）
+7. `job_id` を表示する
 
 ### 12.3 `cjob sweep` の動作
 
