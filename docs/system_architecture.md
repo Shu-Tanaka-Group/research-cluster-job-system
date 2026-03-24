@@ -526,6 +526,11 @@ metadata:
 spec:
   nodeLabels:
     role: parallel-computing
+  tolerations:
+    - key: "role"
+      operator: "Equal"
+      value: "computing"
+      effect: "NoSchedule"
 ```
 
 ### 10.2 ClusterQueue
@@ -1371,7 +1376,6 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - Kueue を導入する
 - ResourceFlavor / ClusterQueue を作成する
 - namespace 作成スクリプトを整備する（LocalQueue / ResourceQuota / ServiceAccount 含む）
-- fixed runtime image をビルドして DockerHub に push する
 
 ### Step 2: `cjob` CLI の最小実装
 
@@ -1489,7 +1493,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - **K8s Job 名**: `cjob-<username>-<job_id>`（グローバルに一意）
 - **実行制御**: Dispatcher + Kueue
 - **実行基盤**: Kubernetes Job
-- **実行環境**: fixed image（Ubuntu 24.04 / DockerHub）+ namespace PVC mounted at `/home/jovyan`
+- **実行環境**: `JUPYTER_IMAGE` 環境変数で指定された image（User Pod と同一）+ namespace PVC mounted at `/home/jovyan`
 - **再現対象**: submit 時の `cwd` / exported env（仮想環境 PATH 含む）/ command
 - **ログ保存**: PVC 上の `/home/jovyan/.cjob/logs/<job_id>/`
 - **ログ取得**: CLI が PVC を直接読む（API 経由なし）・閲覧のみ・削除は delete / reset が担う
