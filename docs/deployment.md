@@ -722,6 +722,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: MAX_QUEUED_JOBS_PER_NAMESPACE
+            - name: LOG_BASE_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: LOG_BASE_DIR
           resources:
             requests:
               cpu: "100m"
