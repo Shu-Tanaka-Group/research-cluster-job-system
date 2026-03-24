@@ -750,6 +750,7 @@ parameter sweep を投入する。
 ```json
 {
   "command_template": "python main.py --alpha '{{alpha}}' --beta '{{beta}}'",
+  "image": "yusekiya/stg-jupyter:2.1.0",
   "cwd": "/home/jovyan/project-a/exp1",
   "env": {
     "OMP_NUM_THREADS": "4"
@@ -1006,8 +1007,9 @@ cjob logs --follow <job-id>
 ### 12.3 `cjob sweep` の動作
 
 1. command template を受け取る
-2. grid 展開を行う
-3. logical job 群として API に送る
+2. `JUPYTER_IMAGE` 環境変数からコンテナイメージ名を取得する
+3. grid 展開を行う
+4. logical job 群として API に送る（`image` フィールドを含む）
 
 ### 12.4 `cjob logs` の動作
 

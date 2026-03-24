@@ -399,6 +399,13 @@ hub:
       service_account: cjob-user
 ```
 
+### `JUPYTER_IMAGE` 環境変数について
+
+`cjob` CLI は Job Pod に使用する image 名を User Pod の環境変数 `JUPYTER_IMAGE` から取得する。
+この環境変数は既存の JupyterHub 環境においてすでに設定済みであり、User Pod 起動時に
+現在のコンテナイメージ名（例: `yusekiya/stg-jupyter:2.1.0`）が自動的に注入される。
+追加の設定変更は不要である。
+
 ---
 
 ## 13. Deployment / StatefulSet YAML
