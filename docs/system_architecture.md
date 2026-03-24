@@ -443,7 +443,8 @@ CREATE TABLE jobs (
     PRIMARY KEY (namespace, job_id)
 );
 
--- Watcher が K8s Job 名からジョブを特定するためのインデックス
+-- k8s_job_name による高速検索用インデックス（orphan Job 検出・API レスポンス等で使用）
+-- ※ Watcher のジョブ特定には cjob.io/job-id ラベルを使用する（k8s_job_name 照合は使用しない）
 CREATE INDEX idx_jobs_k8s_job_name ON jobs (k8s_job_name);
 
 -- Dispatcher の dispatch budget 計算を効率化するためのインデックス
@@ -682,7 +683,16 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 }
 ```
 
-### 11.2 POST /v1/jobs/sweep
+#### バリデーション
+
+`resources.gpu > 0` の場合は 400 を返す。GPU 対応は初期スコープ外（§18 参照）であり、
+将来 GPU 対応を追加する際にこのバリデーションを外す。
+
+```json
+{
+  "detail": "GPU ジョブは現在サポートされていません"
+}
+```
 
 parameter sweep を投入する。
 
@@ -714,7 +724,6 @@ parameter sweep を投入する。
 
 ```json
 {
-  "submission_id": "subm_01...",
   "job_ids": [1, 2, 3, 4, 5, 6],
   "job_count": 6,
   "status": "QUEUED"
@@ -980,10 +989,10 @@ def cmd_delete(expr: str = None, all: bool = False):
 
 ### 12.8 `cjob reset` の動作
 
-1. `POST /v1/reset` を呼び出す（ブロッキングジョブの確認のみ・副作用なし）
-2. 409 が返った場合は blocking_job_ids を表示して中止する
-3. 200 が返った場合はユーザーに確認プロンプトを表示する
-4. y の場合のみ `POST /v1/reset` を再度呼び出してリセットを実行する
+1. `GET /v1/jobs` でジョブ一覧を取得し、ブロッキングジョブ（QUEUED / DISPATCHING / DISPATCHED / RUNNING）の有無を確認する
+2. ブロッキングジョブがある場合は job_id を表示して中止する
+3. 全ジョブが完了済みの場合はユーザーに確認プロンプトを表示する
+4. y の場合のみ `POST /v1/reset` を呼び出してリセットを実行する
 5. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する
 
 ```

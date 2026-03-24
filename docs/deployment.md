@@ -260,6 +260,8 @@ roleRef:
 ## 9. Dispatcher / Watcher の ServiceAccount と RBAC
 
 Dispatcher と Watcher が Kubernetes Job / Pod を操作するために必要な RBAC リソース。
+Watcher は Dispatcher と同一の権限を必要とするため、`dispatcher-sa` を共用する。
+Watcher の Deployment には `serviceAccountName: dispatcher-sa` を指定する。
 
 ```yaml
 apiVersion: v1
