@@ -157,20 +157,20 @@ kubectl label namespace user-${USERNAME} cjob.io/user-namespace=true
 JWT と namespace は Pod 内の固定パスから取得する。
 K8s API への問い合わせは不要である。
 
-```python
-JWT_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+※ CLI の実際の実装は Rust（`std::fs`・`reqwest` クレート等）で行う。以下は概念説明のための擬似コードである。
+
+```
+JWT_PATH       = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 NAMESPACE_PATH = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
-def get_token() -> str:
-    with open(JWT_PATH) as f:
-        return f.read().strip()
+fn get_token() -> String:
+    JWT_PATH のファイルを読んでトリムして返す
 
-def get_namespace() -> str:
-    with open(NAMESPACE_PATH) as f:
-        return f.read().strip()
+fn get_namespace() -> String:
+    NAMESPACE_PATH のファイルを読んでトリムして返す
 
-# API リクエスト時
-headers = {"Authorization": f"Bearer {get_token()}"}
+// API リクエスト時
+Authorization: Bearer <get_token() の返り値>
 ```
 
 ---

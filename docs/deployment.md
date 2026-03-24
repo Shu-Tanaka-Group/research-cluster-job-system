@@ -151,7 +151,7 @@ env:
 | Watcher | `cjob-config` | `postgres-secret` |
 | PostgreSQL | - | `postgres-secret` |
 | RabbitMQ | - | `rabbitmq-secret` |
-| CLI（fixed image 埋め込み） | image 内の設定ファイル | - |
+| CLI（GitHub Releases で配布） | - | - |
 
 ---
 
@@ -688,6 +688,11 @@ spec:
                 secretKeyRef:
                   name: rabbitmq-secret
                   key: RABBITMQ_DEFAULT_PASS
+            - name: MAX_QUEUED_JOBS_PER_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: MAX_QUEUED_JOBS_PER_NAMESPACE
           resources:
             requests:
               cpu: "100m"

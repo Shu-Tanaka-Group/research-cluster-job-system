@@ -1070,34 +1070,28 @@ $ cjob status 999
 
 ### 12.7 CLI の設定
 
-Submit API のエンドポイントは image に埋め込まれた設定ファイルから読む。環境変数でオーバーライド可能。
+Submit API のエンドポイントは環境変数 `CJOB_API_URL` から読む。未設定時はデフォルト値を使用する。
 
-```python
-# 優先順位: 環境変数 > 設定ファイル
-SUBMIT_API_URL = os.environ.get(
-    "CJOB_API_URL",
-    "http://submit-api.cjob-system.svc.cluster.local:8080"
-)
+```
+# ※ CLI の実装は Rust（reqwest クレート等）で行う。以下は概念説明のための擬似コードである。
+
+SUBMIT_API_URL = env("CJOB_API_URL")
+              ?? "http://submit-api.cjob-system.svc.cluster.local:8080"
 ```
 
 ### 12.8 `cjob cancel` の動作
 
 job_id の指定形式をパースして job_id のリストに展開し、`POST /v1/jobs/cancel` を呼ぶ。
 
-```python
-def parse_job_ids(expr: str) -> list[int]:
-    """
-    "1-5,8,10-12" → [1, 2, 3, 4, 5, 8, 10, 11, 12]
-    """
-    ids = set()
-    for part in expr.split(","):
-        part = part.strip()
-        if "-" in part:
-            start, end = part.split("-")
-            ids.update(range(int(start), int(end) + 1))
-        else:
-            ids.add(int(part))
-    return sorted(ids)
+```
+# ※ CLI の実装は Rust で行う。以下は概念説明のための擬似コードである。
+
+fn parse_job_ids(expr) -> Vec<u32>:
+    // "1-5,8,10-12" → [1, 2, 3, 4, 5, 8, 10, 11, 12]
+    expr を ',' で分割して各パートを処理する
+        '-' を含む場合: start..=end の連番を追加
+        それ以外: その数値を追加
+    重複除去して昇順ソートして返す
 ```
 
 ### 12.9 `cjob delete` の動作
@@ -1105,33 +1099,21 @@ def parse_job_ids(expr: str) -> list[int]:
 `--all` フラグがある場合は job_ids を省略して `POST /v1/jobs/delete` を呼ぶ。
 それ以外は job_id の指定形式をパースして job_id のリストに展開してから呼ぶ。
 
-```python
-def cmd_delete(expr: str = None, all: bool = False):
+```
+# ※ CLI の実装は Rust で行う。以下は概念説明のための擬似コードである。
+
+fn cmd_delete(expr, all: bool):
     if all:
-        # --all: job_ids を省略して全完了済みジョブを削除対象にする
-        response = api.post("/v1/jobs/delete", {})
+        POST /v1/jobs/delete に空のリクエストを送る
     else:
-        job_ids = parse_job_ids(expr)   # cancel と同じパース処理を共用
-        response = api.post("/v1/jobs/delete", {"job_ids": job_ids})
+        job_ids = parse_job_ids(expr)   // cancel と同じパース処理を共用
+        POST /v1/jobs/delete に job_ids を送る
 
-    result = response.json()
-
-    # 削除成功したジョブのログを PVC 上から削除
-    for job_id in result["deleted"]:
-        log_dir = Path(f"/home/jovyan/.cjob/logs/{job_id}")
-        if log_dir.exists():
-            shutil.rmtree(log_dir)
-
-    if result["deleted"]:
-        print(f"削除しました: {result['deleted']}")
-
-    # 実行中のジョブは削除できない旨を警告
-    if result["skipped"]:
-        print(f"以下のジョブは実行中のため削除できませんでした: {result['skipped']}")
-        print("先に `cjob cancel <job-id>` を実行してください。")
-
-    if result["not_found"]:
-        print(f"見つかりませんでした: {result['not_found']}")
+    result を受け取り:
+        deleted の各 job_id に対応するログディレクトリ（/home/jovyan/.cjob/logs/<job_id>/）を削除する
+        deleted があれば "削除しました" を表示する
+        skipped があれば "実行中のため削除できませんでした" + cancel を促すメッセージを表示する
+        not_found があれば "見つかりませんでした" を表示する
 ```
 
 ### 12.10 `cjob reset` の動作
