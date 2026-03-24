@@ -127,7 +127,7 @@ cjob delete --all
 - RabbitMQ を前段メッセージキューとして導入する（新規デプロイ）
 - 状態管理用に PostgreSQL を使用する（新規デプロイ）
 - NFS subdir external provisioner を導入済み
-- ジョブキューシステム専用ノードには `role=parallel-computing` ラベルが付与されている
+- ジョブキューシステム専用ノードには `role=parallel-computing` ラベルと `role=computing:NoSchedule` Taint が付与されている
 - 想定規模：ユーザー数 20人・同時実行ジョブ数 300程度
 
 ### 4.2 実行環境前提
@@ -615,6 +615,11 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      tolerations:
+        - key: "role"
+          operator: "Equal"
+          value: "computing"
+          effect: "NoSchedule"
       containers:
         - name: worker
           image: yusekiya/stg-jupyter:2.1.0
