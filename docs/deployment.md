@@ -806,6 +806,16 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DISPATCH_BUDGET_PER_NAMESPACE
+            - name: KUEUE_LOCAL_QUEUE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: KUEUE_LOCAL_QUEUE_NAME
+            - name: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
           resources:
             requests:
               cpu: "100m"
