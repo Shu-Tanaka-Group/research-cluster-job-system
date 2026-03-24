@@ -15,6 +15,7 @@ CJob は、オンプレ Kubernetes 環境上で動作するユーザー向けジ
 - **DB**: PostgreSQL（SQLAlchemy + psycopg）
 - **メッセージキュー**: RabbitMQ（Kombu）
 - **実行基盤**: Kubernetes Job + Kueue
+- **実行環境**: fixed image（Ubuntu 24.04）+ namespace PVC（`/home/jovyan`）
 - **認証**: ServiceAccount JWT + TokenReview（Keycloak は JupyterHub ログイン時のみ）
 
 ### アーキテクチャ
@@ -29,7 +30,21 @@ User Pod (JupyterHub) → cjob CLI → Submit API → PostgreSQL + RabbitMQ
 
 - システムコンポーネントは `cjob-system` namespace に配置
 - ユーザーごとに `user-<username>` namespace が分離されている
-- ジョブログは PVC 上（`/workspace/.cjob/logs/<job_id>/`）に保存し、CLI が直接読む
+- job_id はユーザー（namespace）ごとの連番（1, 2, 3...）
+- ジョブログは PVC 上（`/home/jovyan/.cjob/logs/<job_id>/`）に保存し、CLI が直接読む
+- submit 時の `cwd`・export 済み環境変数（`PATH` / `VIRTUAL_ENV` 含む）・コマンドを Job Pod で再現
+
+### CLI コマンド
+
+```bash
+cjob add -- <command>                # ジョブ投入
+cjob sweep -- <command> --grid ...   # parameter sweep
+cjob list                            # 一覧表示
+cjob status <job-id>                 # 状態確認
+cjob cancel <job-id>                 # キャンセル（範囲: 1-10, 複数: 1,3,5, 組み合わせ対応）
+cjob logs <job-id>                   # ログ表示（--follow / --delete / --delete-all）
+cjob reset                           # 全ジョブ履歴・ログ削除、job_id を 1 に戻す
+```
 
 ## プロジェクト情報管理の基本方針
 
