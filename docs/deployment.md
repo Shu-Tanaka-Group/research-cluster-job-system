@@ -422,6 +422,7 @@ data:
         payload_json JSONB NOT NULL DEFAULT '{}',
         created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         FOREIGN KEY (namespace, job_id) REFERENCES jobs(namespace, job_id)
+            ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
     CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ON jobs (namespace, status);
