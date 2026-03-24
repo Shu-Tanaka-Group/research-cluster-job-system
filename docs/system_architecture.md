@@ -1164,7 +1164,10 @@ fn cmd_delete(expr, all: bool):
     result を受け取り:
         deleted の各 job_id に対応するログディレクトリ（/home/jovyan/.cjob/logs/<job_id>/）を削除する
         deleted があれば "削除しました" を表示する
-        skipped があれば "実行中のため削除できませんでした" + cancel を促すメッセージを表示する
+        skipped があれば:
+            QUEUED / DISPATCHING / DISPATCHED / RUNNING のジョブ → "実行中のため削除できませんでした。先に cjob cancel を実行してください"
+            DELETING のジョブ → "リセット処理中のため削除できませんでした"
+            （CLI 側で事前に各 job_id の状態を確認して分岐する）
         not_found があれば "見つかりませんでした" を表示する
 ```
 
@@ -1303,7 +1306,12 @@ class Dispatcher:
         # DISPATCHING への更新が確定したので続行
         try:
             k8s.create_job(job)
-            db.update_status(job.namespace, job.job_id, "DISPATCHED")
+            # AND status='DISPATCHING' 条件により CANCELLED を上書きしない
+            # updated_rows == 0 の場合は status が CANCELLED のまま維持され、
+            # Watcher が次のサイクルで CANCELLED ジョブの K8s Job を削除する（§14.3 Step 5）
+            db.update_status(
+                job.namespace, job.job_id, "DISPATCHED", condition_status="DISPATCHING"
+            )
         except TemporaryK8sError:
             # §13.3 の再試行処理
             ...
@@ -1426,7 +1434,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 2.1. `WHERE status='QUEUED'` 条件付き UPDATE で `DISPATCHING` に CAS 更新する
 2.5. 更新行数が 0（スキャン後に cancel API が先に `CANCELLED` へ更新済み）ならスキップ
 3. Job を作成（`claimName` には job の user を使用）
-4. 成功なら `DISPATCHED` に更新
+4. 成功なら `DISPATCHED` に更新（`AND status='DISPATCHING'` 条件付き）
 5. 一時障害なら `retry_count` をインクリメントして `retry_after` を設定して `QUEUED` に戻す
 6. 永続障害・バリデーションエラーなら `FAILED` に更新
 7. `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒スリープして次のスキャンへ
