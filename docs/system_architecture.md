@@ -1443,7 +1443,6 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 初期実装では、以下に絞る。
 
-- fixed image のみ
 - CPU / memory ジョブのみ
 - `cjob add`
 - `cjob list`

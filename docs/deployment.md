@@ -155,11 +155,11 @@ env:
 
 ---
 
-## 7. Fixed Image 設計
+## 7. Runtime Image 設計
 
 ### 7.1 image の役割
 
-同一の fixed image が2つの用途で使われる。`cjob` CLI は image には含めず、ユーザーが各自でインストールする。
+同一の image（`JUPYTER_IMAGE` 環境変数で指定されたもの）が2つの用途で使われる。`cjob` CLI は image には含めず、ユーザーが各自でインストールする。
 
 | 用途 | Pod | 備考 |
 |---|---|---|
