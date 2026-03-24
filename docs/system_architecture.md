@@ -510,6 +510,8 @@ QUEUED
        ├─ QUEUED（再試行時：Dispatcher 再起動・requeue）
        └─ FAILED（バリデーションエラー・最大 retry 超過）
 CANCELLED（任意のタイミングでユーザーがキャンセル）
+DELETING（POST /v1/reset 受付後・Watcher による K8s Job 削除と DB クリーンアップ待ち）
+  └─ （削除完了後、Watcher が DB レコードを削除・カウンターをリセット）
 ```
 
 ## 10. Kueue 設計
@@ -954,11 +956,18 @@ CLI は `skipped` に含まれる job_id を表示し、先に `cjob cancel` す
 リセット可能条件：全ジョブが CANCELLED / SUCCEEDED / FAILED のいずれかであること。
 QUEUED / DISPATCHING / DISPATCHED / RUNNING のジョブが1件でも存在する場合は 409 を返す。
 
-#### response（成功時）
+条件を満たした場合、Submit API は全ジョブのステータスを `DELETING` に変更して即座に返す。
+実際の K8s Job 削除・DB レコード削除・カウンターリセットは Watcher が非同期で実行する。
+そのため、レスポンスが返った時点ではリセットはまだ完了していない。
+
+job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELETING` レコードの処理を完了した後に行う。
+これにより reset 完了前に新規ジョブを投入しても job_id=1 は発行されず、K8s Job 名の衝突が起きない。
+
+#### response（成功時・202 Accepted）
 
 ```json
 {
-  "status": "ok"
+  "status": "accepted"
 }
 ```
 
@@ -1129,8 +1138,12 @@ fn cmd_delete(expr, all: bool):
 1. `GET /v1/jobs` でジョブ一覧を取得し、ブロッキングジョブ（QUEUED / DISPATCHING / DISPATCHED / RUNNING）の有無を確認する
 2. ブロッキングジョブがある場合は job_id を表示して中止する
 3. 全ジョブが完了済みの場合はユーザーに確認プロンプトを表示する
-4. y の場合のみ `POST /v1/reset` を呼び出してリセットを実行する
+4. y の場合のみ `POST /v1/reset` を呼び出す（202 Accepted が返る）
 5. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する
+6. リセット開始メッセージを表示して終了する（完了を待たない）
+
+実際の K8s Job 削除・DB クリーンアップ・カウンターリセットは Watcher が非同期で処理する。
+リセット完了前に `cjob add` を実行すると、Submit API はアクティブジョブが残っているとして投入を受け付けない。
 
 ```
 $ cjob reset
@@ -1139,7 +1152,7 @@ $ cjob reset
 
 $ cjob reset   # 全ジョブ完了後
 全 15 件のジョブとログを削除します。よろしいですか？ [y/N] y
-リセット完了しました。次のジョブは ID 1 から始まります。
+リセットを開始しました。バックグラウンドでクリーンアップが完了するまでお待ちください。
 ```
 
 ## 13. Dispatcher 設計
@@ -1187,7 +1200,7 @@ DB クエリは `idx_jobs_namespace_status` インデックスにより効率化
 | シナリオ | 対処 | 再試行間隔 | 上限 |
 |---|---|---|---|
 | K8s API 一時障害 | DLQ + TTL で遅延 requeue | `RABBITMQ_RETRY_TTL_MS` ms | `RABBITMQ_MAX_RETRIES` 回 |
-| dispatch budget 不足 | 待機リストに保留・定期再確認 | `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒ごと | なし（budget 回復まで） |
+| dispatch budget 不足 | `skip_namespaces` に追加して `nack(requeue=True)`・インターバル後に再試行 | `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒ごと | なし（budget 回復まで） |
 | バリデーションエラー | 即 FAILED | なし | なし |
 | 永続的 K8s エラー | 即 FAILED | なし | なし |
 
@@ -1207,35 +1220,41 @@ except TemporaryK8sError:
 
 #### dispatch budget 不足の処理
 
-budget 不足の namespace のメッセージを保留しつつ、他 namespace のジョブを処理し続ける。
+budget 不足の namespace をスキップリストで管理し、同一インターバル内で再取得しないよう制御する。
+`self.pending` による in-memory 保留は廃止し、`nack(requeue=True)` でメッセージをキューに戻す。
 
 ```python
 class Dispatcher:
     def __init__(self):
-        self.pending: dict[str, list] = {}  # namespace → 待機メッセージリスト
+        self.skip_namespaces: set[str] = set()   # budget 不足 namespace のスキップリスト
         self.check_interval = int(os.environ["DISPATCH_BUDGET_CHECK_INTERVAL_SEC"])  # ConfigMap から注入
 
     def run(self):
         while True:
-            self.retry_pending()
-            message = self.consume_one(timeout=self.check_interval)
-            if message:
-                self.dispatch(message)
+            self.skip_namespaces.clear()          # インターバルごとにスキップリストをリセット
+            deadline = time.monotonic() + self.check_interval
+            while time.monotonic() < deadline:
+                message = self.consume_one(timeout=1)
+                if message:
+                    self.dispatch(message)
 
     def dispatch(self, message):
         job = parse(message)
+        if job.namespace in self.skip_namespaces:
+            message.nack(requeue=True)            # スキップ対象は即キューに戻す
+            return
         if calc_budget(job.namespace) <= 0:
-            self.pending.setdefault(job.namespace, []).append(message)
+            self.skip_namespaces.add(job.namespace)
+            message.nack(requeue=True)            # budget 不足もキューに戻す
             return
         # Job 作成処理...
 
     def retry_pending(self):
-        for namespace, messages in list(self.pending.items()):
-            budget = calc_budget(namespace)
-            for message in messages[:budget]:
-                self.dispatch(message)
-                messages.remove(message)
+        pass   # self.pending 廃止のため不要
 ```
+
+`nack(requeue=True)` を使うため、budget 不足が続くと同一メッセージが短時間に繰り返し配信される可能性がある。
+これを防ぐために `consume_one` の timeout を 1 秒に設定し、スキップリストのクリア間隔（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`）を 10〜30 秒程度に設定すること。
 
 ### 13.4 ack / reject ルール
 
@@ -1247,7 +1266,8 @@ class Dispatcher:
 | K8s API 一時障害（retry_count < max_retries） | `reject(requeue=False)` → retry Queue 経由で再投入 |
 | K8s API 一時障害（retry_count >= max_retries） | `reject(requeue=False)` + DB を `FAILED` |
 | バリデーションエラー | `reject(requeue=False)` + DB を `FAILED` |
-| dispatch budget 不足 | ack も reject もしない（unacked のまま保留） |
+| dispatch budget 不足（初回検出） | `skip_namespaces` に追加して `nack(requeue=True)`（キューに戻す） |
+| dispatch budget 不足（スキップリスト済み） | `nack(requeue=True)`（キューに戻す） |
 
 ### 13.5 起動時の初期化処理
 
@@ -1269,6 +1289,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - Pod 状態の監視
 - `RUNNING` / `SUCCEEDED` / `FAILED` への遷移
 - `CANCELLED` ジョブの K8s Job 削除
+- `DELETING` ジョブの K8s Job 削除・DB レコード削除・カウンターリセット
 - orphan Job 検出
 - DB と Kubernetes のズレ修正
 
@@ -1291,7 +1312,11 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
-6. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
+6. DB の status が `DELETING` のジョブを処理する
+   1. 対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
+   2. namespace 内の全 `DELETING` ジョブの K8s Job 削除が完了したら DB レコードを全件削除する
+   3. `user_job_counters` の `next_id` を 1 にリセットする
+7. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
 
 ## 15. 実装に使用するパッケージ / 技術
 
@@ -1338,12 +1363,15 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 1. `DISPATCHING` 状態のジョブを `QUEUED` に戻す（再起動時の整合）
 
-メインループ:
+メインループ（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒ごとに `skip_namespaces` をリセット）:
 
-1. 待機リストの budget 再確認・再 dispatch
-2. RabbitMQ から 1 メッセージ取得（タイムアウト: `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒）
+1. `skip_namespaces` をクリアし、deadline を `now + DISPATCH_BUDGET_CHECK_INTERVAL_SEC` に設定
+2. deadline までの間、以下を繰り返す（`consume_one` タイムアウト: 1秒）
+2.1. RabbitMQ から 1 メッセージ取得
+2.2. メッセージがなければ次の取得へ
 2.5. DB の status が `CANCELLED` ならば `ack` してスキップ（次のループへ）
-3. dispatch budget を確認（不足なら待機リストに追加して次のループへ）
+3. namespace が `skip_namespaces` に含まれるなら `nack(requeue=True)` してスキップ
+3.5. dispatch budget を確認（不足なら `skip_namespaces` に追加して `nack(requeue=True)` し次のループへ）
 4. DB 上で `DISPATCHING` に更新
 4.5. DB の status が `CANCELLED` ならば `DISPATCHING` を `CANCELLED` に戻して `ack` してスキップ
 5. Job を作成（`claimName` には message["user"] を使用）
@@ -1365,7 +1393,11 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルで対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
-6. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
+6. DB の status が `DELETING` のジョブを処理する
+   1. 対応する K8s Job が存在する場合は削除する（`propagation_policy="Background"` で Pod も連動削除）
+   2. namespace 内の全 `DELETING` ジョブの K8s Job 削除が完了したら DB レコードを全件削除する
+   3. `user_job_counters` の `next_id` を 1 にリセットする
+7. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
 
 ## 17. 実装手順
 
