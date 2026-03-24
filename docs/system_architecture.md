@@ -362,13 +362,8 @@ FROM jobs
 WHERE status = 'QUEUED'
   AND (retry_after IS NULL OR retry_after <= NOW())
   AND namespace IN (
-    -- budget に余裕がある namespace を抽出
-    SELECT namespace FROM jobs
-    WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')
-    GROUP BY namespace
-    HAVING COUNT(*) < :dispatch_limit
-    -- QUEUED ジョブが存在するが budget 計算対象に含まれない namespace も含める
-    UNION
+    -- QUEUED ジョブがあり、active ジョブが dispatch_limit 未満の namespace
+    -- (active が 0 件の namespace も NOT IN により正しく含まれる)
     SELECT DISTINCT namespace FROM jobs
     WHERE status = 'QUEUED'
       AND namespace NOT IN (
@@ -492,8 +487,9 @@ QUEUED
        ├─ QUEUED（再試行時：Dispatcher 再起動・K8s 一時障害後の retry_after 差し戻し）
        └─ FAILED（バリデーションエラー・最大 retry 超過）
 CANCELLED（QUEUED / DISPATCHING / DISPATCHED / RUNNING の任意タイミングでユーザーがキャンセル）
-DELETING（POST /v1/reset 受付後・Watcher による K8s Job 削除と DB クリーンアップ待ち）
-  └─ （削除完了後、Watcher が DB レコードを削除・カウンターをリセット）
+CANCELLED / SUCCEEDED / FAILED
+  └─ DELETING（POST /v1/reset 受付後、これら3状態から一括で遷移する・Watcher による K8s Job 削除と DB クリーンアップ待ち）
+       └─ （削除完了後、Watcher が DB レコードを削除・カウンターをリセット）
 ```
 
 ## 10. Kueue 設計
@@ -1597,7 +1593,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 - **ログ保存**: PVC 上の `/home/jovyan/.cjob/logs/<job_id>/`
 - **ログ取得**: CLI が PVC を直接読む（API 経由なし）・閲覧のみ・削除は delete / reset が担う
 - **キャンセル**: 単体・範囲指定（1-10）・個別複数指定（1,3,5）・組み合わせに対応
-- **削除**: `cjob delete` で完了済みジョブを個別削除（実行中ジョブは削除不可・cancel を促す）
+- **削除**: `cjob delete` で完了済みジョブを個別削除（実行中ジョブは削除不可・cancel を促す。reset 処理中の DELETING ジョブも削除不可）
 - **リセット**: `cjob reset` で全ジョブ履歴・ログを削除し job_id を 1 から採番し直す（全ジョブ完了時のみ実行可能）
 - **認証・認可**: ServiceAccount JWT + TokenReview（詳細は auth_policy.md 参照）
 - **大量投入対応**: dispatch budget + DB スキャン型スケジューリングにより Job materialization を抑制する
