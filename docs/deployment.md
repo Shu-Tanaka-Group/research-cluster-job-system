@@ -695,6 +695,26 @@ spec:
                 secretKeyRef:
                   name: rabbitmq-secret
                   key: RABBITMQ_DEFAULT_PASS
+            - name: RABBITMQ_VHOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_VHOST
+            - name: RABBITMQ_EXCHANGE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_EXCHANGE
+            - name: RABBITMQ_ROUTING_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_ROUTING_KEY
+            - name: RABBITMQ_MAX_RETRIES
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_MAX_RETRIES
             - name: MAX_QUEUED_JOBS_PER_NAMESPACE
               valueFrom:
                 configMapKeyRef:
@@ -816,6 +836,56 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
+            - name: RABBITMQ_VHOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_VHOST
+            - name: RABBITMQ_QUEUE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_QUEUE
+            - name: RABBITMQ_RETRY_EXCHANGE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_RETRY_EXCHANGE
+            - name: RABBITMQ_RETRY_QUEUE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_RETRY_QUEUE
+            - name: RABBITMQ_RETRY_ROUTING_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_RETRY_ROUTING_KEY
+            - name: RABBITMQ_RETRY_TTL_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_RETRY_TTL_MS
+            - name: RABBITMQ_MAX_RETRIES
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_MAX_RETRIES
+            - name: JOB_NAMESPACE_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: JOB_NAMESPACE_PREFIX
+            - name: WORKSPACE_MOUNT_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: WORKSPACE_MOUNT_PATH
+            - name: LOG_BASE_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: LOG_BASE_DIR
           resources:
             requests:
               cpu: "100m"
