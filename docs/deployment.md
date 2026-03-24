@@ -841,6 +841,16 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: RABBITMQ_VHOST
+            - name: RABBITMQ_EXCHANGE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_EXCHANGE
+            - name: RABBITMQ_ROUTING_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RABBITMQ_ROUTING_KEY
             - name: RABBITMQ_QUEUE
               valueFrom:
                 configMapKeyRef:
