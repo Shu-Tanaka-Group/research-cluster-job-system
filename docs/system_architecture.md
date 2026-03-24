@@ -602,6 +602,8 @@ metadata:
   name: cjob-alice-1    # cjob-<username>-<job_id> 形式
   labels:
     kueue.x-k8s.io/queue-name: default
+    cjob.io/job-id: "1"          # job_id（Dispatcher が動的に設定）
+    cjob.io/namespace: user-alice  # namespace（Dispatcher が動的に設定）
 spec:
   ttlSecondsAfterFinished: 86400    # 完了後 24時間で Job / Pod を削除
   template:
@@ -641,7 +643,7 @@ spec:
       volumes:
         - name: workspace
           persistentVolumeClaim:
-            claimName: workspace
+            claimName: alice   # Dispatcher が message["user"] を動的に埋め込む
 ```
 
 ## 11. API 設計
@@ -978,10 +980,10 @@ def cmd_delete(expr: str = None, all: bool = False):
 
 ### 12.8 `cjob reset` の動作
 
-1. `POST /v1/reset` を呼び出す
+1. `POST /v1/reset` を呼び出す（ブロッキングジョブの確認のみ・副作用なし）
 2. 409 が返った場合は blocking_job_ids を表示して中止する
 3. 200 が返った場合はユーザーに確認プロンプトを表示する
-4. 確認後に `POST /v1/reset/confirm` を呼び出す
+4. y の場合のみ `POST /v1/reset` を再度呼び出してリセットを実行する
 5. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する
 
 ```
@@ -1129,7 +1131,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 1. Kubernetes Job 一覧を定期監視（または watch API を使用）
 2. Job の `status.conditions` を解釈
-3. `cjob.io/job-id` ラベルから対応する `job_id` を特定
+3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
 
 ## 15. 実装に使用するパッケージ / 技術
@@ -1175,9 +1177,9 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 1. 待機リストの budget 再確認・再 dispatch
 2. RabbitMQ から 1 メッセージ取得（タイムアウト: 10秒）
-3. DB 上で `DISPATCHING` に更新
-4. dispatch budget を確認（不足なら待機リストに追加して次のループへ）
-5. Job を作成
+3. dispatch budget を確認（不足なら待機リストに追加して次のループへ）
+4. DB 上で `DISPATCHING` に更新
+5. Job を作成（`claimName` には message["user"] を使用）
 6. 成功なら `DISPATCHED` に更新して `ack`
 7. 一時障害なら retry_count をインクリメントして DLQ 経由で再投入
 8. 永続障害・バリデーションエラーなら `FAILED` に更新して `reject`
@@ -1186,7 +1188,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 1. Kubernetes Job 一覧を監視
 2. Job 状態を解釈
-3. `cjob.io/job-id` ラベルで対応する `job_id` を特定
+3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルで対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新
 
 ## 17. 実装手順
