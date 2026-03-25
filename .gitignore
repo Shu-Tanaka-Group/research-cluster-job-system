@@ -1,0 +1,10 @@
+# Rust build artifacts
+cli/target/
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.venv/

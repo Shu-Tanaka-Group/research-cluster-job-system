@@ -9,11 +9,9 @@ CJob は、オンプレ Kubernetes 環境上で動作するユーザー向けジ
 
 ### 技術スタック
 
-- **言語**: Python
-- **CLI**: Typer
+- **CLI**: Rust（Clap）
 - **API**: FastAPI + Pydantic
 - **DB**: PostgreSQL（SQLAlchemy + psycopg）
-- **メッセージキュー**: RabbitMQ（Kombu）
 - **実行基盤**: Kubernetes Job + Kueue
 - **実行環境**: fixed image（Ubuntu 24.04）+ namespace PVC（`/home/jovyan`）
 - **認証**: ServiceAccount JWT + TokenReview（Keycloak は JupyterHub ログイン時のみ）
@@ -21,7 +19,7 @@ CJob は、オンプレ Kubernetes 環境上で動作するユーザー向けジ
 ### アーキテクチャ
 
 ```
-User Pod (JupyterHub) → cjob CLI → Submit API → PostgreSQL + RabbitMQ
+User Pod (JupyterHub) → cjob CLI → Submit API → PostgreSQL
                                                         ↓
                                                Dispatcher → Kubernetes Job (Kueue)
                                                         ↓
@@ -56,6 +54,16 @@ cjob reset                           # 全ジョブ履歴・ログ削除、job_i
 
 ## 開発ドキュメント一覧
 
-- システムアーキテクチャ: docs/system_architecture.md
+- システムアーキテクチャ（インデックス）: docs/system_architecture.md
+  - 機能要件・使用例: docs/architecture/requirements.md
+  - 環境前提: docs/architecture/prerequisites.md
+  - システム設計: docs/architecture/system_design.md
+  - PostgreSQL 設計: docs/architecture/database.md
+  - Kueue 設計: docs/architecture/kueue.md
+  - API 設計: docs/architecture/api.md
+  - CLI 設計: docs/architecture/cli.md
+  - Dispatcher 設計: docs/architecture/dispatcher.md
+  - Watcher 設計: docs/architecture/watcher.md
+  - 実装計画: docs/architecture/implementation.md
 - 認証・認可ガイドライン: docs/auth_policy.md
 - デプロイガイドライン: docs/deployment.md
