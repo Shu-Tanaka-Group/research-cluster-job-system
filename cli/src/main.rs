@@ -9,7 +9,7 @@ use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 
 #[derive(Parser)]
-#[command(name = "cjob", about = "CJob - ジョブキューシステム CLI")]
+#[command(name = "cjob", about = "CJob - ジョブキューシステム CLI", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
