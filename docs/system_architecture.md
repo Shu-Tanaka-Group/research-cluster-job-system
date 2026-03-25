@@ -543,7 +543,7 @@ ResourceQuota はリソースを均等分配するためではなく、バグ等
 
 設定根拠：
 - CPU / memory：クラスタ総量と同値に設定し、Kueue の admission 制御に任せる
-- Job 数：dispatch_limit(256) と `ttlSecondsAfterFinished`(86400秒=24時間) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大256) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう dispatch_limit の2倍以上に設定 → 600
+- Job 数：dispatch_limit(256) と `ttlSecondsAfterFinished`(10800秒=3時間) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大256) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう余裕を持たせて dispatch_limit の2倍以上に設定 → 600
 
 ```yaml
 apiVersion: v1
@@ -573,7 +573,7 @@ metadata:
     cjob.io/job-id: "1"          # job_id（Dispatcher が動的に設定）
     cjob.io/namespace: user-alice  # namespace（Dispatcher が動的に設定）
 spec:
-  ttlSecondsAfterFinished: 86400    # 完了後 24時間で Job / Pod を削除
+  ttlSecondsAfterFinished: 10800    # 完了後 3時間で Job / Pod を削除
   template:
     spec:
       restartPolicy: Never
