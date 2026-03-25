@@ -65,17 +65,48 @@ cargo build --release
 
 ビルド成果物は `cli/target/release/cjob` に生成される。
 
-### クロスコンパイル（Linux 向け）
+### クロスコンパイル（macOS → Linux）
 
 開発マシンが macOS の場合、K8s Pod 内で動作する Linux バイナリを生成するにはクロスコンパイルが必要。
 
+`reqwest` の TLS バックエンド（rustls）が依存する `ring` クレートは C/アセンブリコードを含むため、単純に `--target x86_64-unknown-linux-gnu` を指定するだけではビルドに失敗する。以下のいずれかの方法を使用する。
+
+#### 方法 1: musl ターゲット + クロスコンパイラ（推奨）
+
+静的リンクされたバイナリを生成する方法。glibc に依存しないため、配布先の Linux ディストリビューションを問わない。
+
 ```bash
-# ターゲット追加（初回のみ）
-rustup target add x86_64-unknown-linux-gnu
+# musl クロスコンパイラのインストール（初回のみ）
+brew install filosottile/musl-cross/musl-cross
+rustup target add x86_64-unknown-linux-musl
+
+# リンカの設定（初回のみ）
+mkdir -p cli/.cargo
+cat > cli/.cargo/config.toml << 'EOF'
+[target.x86_64-unknown-linux-musl]
+linker = "x86_64-linux-musl-gcc"
+EOF
 
 # ビルド
 cd cli/
-cargo build --release --target x86_64-unknown-linux-gnu
+cargo build --release --target x86_64-unknown-linux-musl
+```
+
+成果物は `cli/target/x86_64-unknown-linux-musl/release/cjob` に生成される。
+
+#### 方法 2: cross を使う
+
+[cross](https://github.com/cross-rs/cross) は Docker コンテナ内でクロスコンパイルを行うツール。`docker` コマンドが使用可能で Docker デーモンが動作している必要がある。
+
+> **注意**: Apple Silicon Mac では `cross` 0.2.5 時点でホストツールチェインの解決に失敗する既知の問題がある（`stable-x86_64-unknown-linux-gnu` をインストールしようとしてエラーになる）。その場合は方法 1 を使用すること。
+
+```bash
+# cross のインストール（初回のみ）
+cargo install cross
+
+# ビルド（Docker が起動している必要がある）
+cd cli/
+cross build --release --target x86_64-unknown-linux-gnu
 ```
 
 成果物は `cli/target/x86_64-unknown-linux-gnu/release/cjob` に生成される。
