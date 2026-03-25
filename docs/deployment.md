@@ -322,7 +322,7 @@ kubectl create serviceaccount computing-user -n user-${USERNAME}
 # LocalQueue 名（下記 "default"）は ConfigMap の KUEUE_LOCAL_QUEUE_NAME と一致させること。
 # KUEUE_LOCAL_QUEUE_NAME を変更する場合はこのスクリプトの LocalQueue 名も同時に修正が必要。
 kubectl apply -f - <<EOF
-apiVersion: kueue.x-k8s.io/v1beta1
+apiVersion: kueue.x-k8s.io/v1beta2
 kind: LocalQueue
 metadata:
   name: default   # KUEUE_LOCAL_QUEUE_NAME の値と一致させること

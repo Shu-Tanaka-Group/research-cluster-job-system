@@ -5,13 +5,17 @@
 ジョブキューシステム専用ノード（`cluster-job=true`）を対象とする。
 
 ```yaml
-apiVersion: kueue.x-k8s.io/v1beta1
+apiVersion: kueue.x-k8s.io/v1beta2
 kind: ResourceFlavor
 metadata:
   name: cluster-job-flavor
 spec:
   nodeLabels:
     cluster-job: "true"
+  nodeTaints:
+    - key: "role"
+      value: "computing"
+      effect: "NoSchedule"
   tolerations:
     - key: "role"
       operator: "Equal"
@@ -22,7 +26,7 @@ spec:
 ## 2. ClusterQueue
 
 ```yaml
-apiVersion: kueue.x-k8s.io/v1beta1
+apiVersion: kueue.x-k8s.io/v1beta2
 kind: ClusterQueue
 metadata:
   name: cjob-cluster-queue
