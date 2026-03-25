@@ -577,8 +577,8 @@ spec:
     limits.memory: "1000Gi"
 ```
 
-`BestEffortFIFO` の設定により、空きリソースは他ユーザーが利用できるが
-実行中のジョブは強制終了されない。
+`BestEffortFIFO` の設定により、空きリソースは他ユーザーが利用できる。
+`preemption.withinClusterQueue: Never` の設定により、実行中のジョブは強制終了されない。
 
 ### 10.5 Kubernetes Job テンプレート
 
