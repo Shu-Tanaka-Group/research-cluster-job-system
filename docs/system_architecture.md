@@ -1420,6 +1420,9 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 - `GET /v1/jobs`
 - `GET /v1/jobs/{job_id}`
 - `POST /v1/jobs/{job_id}/cancel`
+- `POST /v1/jobs/cancel`
+- `POST /v1/jobs/delete`
+- `POST /v1/reset`
 
 併せて PostgreSQL スキーマを作成する。
 
@@ -1437,12 +1440,15 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 - Pod 状態監視
 - DB 更新
 - 失敗理由反映
+- DELETING 状態の処理（K8s Job 削除・DB クリーンアップ・カウンターリセット）
 
-### Step 6: ログ取得実装
+### Step 6: ログ取得・削除・リセット実装
 
 - Job Pod のコマンドに tee ラップを追加（Step 4 で実施済み）
 - `cjob logs`（完了後表示）
 - `cjob logs --follow`（リアルタイム追跡）
+- `cjob delete`
+- `cjob reset`
 
 ### Step 7: 運用機能追加
 
