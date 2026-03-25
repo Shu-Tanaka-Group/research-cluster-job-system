@@ -341,10 +341,10 @@ metadata:
 spec:
   hard:
     count/jobs.batch: "600"
-    requests.cpu: "256"
-    requests.memory: "1000Gi"
-    limits.cpu: "256"
-    limits.memory: "1000Gi"
+    requests.cpu: "300"
+    requests.memory: "1250Gi"
+    limits.cpu: "300"
+    limits.memory: "1250Gi"
 EOF
 
 echo "Done: user-${USERNAME}"

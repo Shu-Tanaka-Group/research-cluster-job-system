@@ -542,7 +542,7 @@ spec:
 ResourceQuota はリソースを均等分配するためではなく、バグ等による意図しない無制限消費を防ぐための安全網として機能する。
 
 設定根拠：
-- CPU / memory：クラスタ総量と同値に設定し、Kueue の admission 制御に任せる
+- CPU / memory：クラスタ総量より少し大きめに設定し、Kueue の admission 制御に任せる。Job Pod（最大 dispatch_limit 分）に加えてユーザーが使用している他の計算リソース（ジョブ投入用Podやデータ解析用Podなど）の分も余裕として含める
 - Job 数：dispatch_limit(256) と `ttlSecondsAfterFinished`(10800秒=3時間) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大256) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう余裕を持たせて dispatch_limit の2倍以上に設定 → 600
 
 ```yaml
@@ -554,10 +554,10 @@ metadata:
 spec:
   hard:
     count/jobs.batch: "600"
-    requests.cpu: "256"
-    requests.memory: "1000Gi"
-    limits.cpu: "256"
-    limits.memory: "1000Gi"
+    requests.cpu: "300"
+    requests.memory: "1250Gi"
+    limits.cpu: "300"
+    limits.memory: "1250Gi"
 ```
 
 ### 10.5 Kubernetes Job テンプレート
