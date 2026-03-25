@@ -4,7 +4,9 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Resolve symlinks to find the real script location, then derive repo root
+SCRIPT_PATH="$(realpath "$0")"
+REPO_ROOT="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 VERSION_FILE="$REPO_ROOT/VERSION"
 
 if [ ! -f "$VERSION_FILE" ]; then
