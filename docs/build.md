@@ -49,6 +49,11 @@ docker build -t yusekiya/cjob-watcher:${VERSION} -f server/Dockerfile.watcher se
 docker push yusekiya/cjob-submit-api:latest
 docker push yusekiya/cjob-dispatcher:latest
 docker push yusekiya/cjob-watcher:latest
+
+# バージョンタグ指定
+docker push yusekiya/cjob-submit-api:${VERSION}
+docker push yusekiya/cjob-dispatcher:${VERSION}
+docker push yusekiya/cjob-watcher:${VERSION}
 ```
 
 ## CLI（Rust）のビルド
