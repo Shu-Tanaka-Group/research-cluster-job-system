@@ -67,3 +67,4 @@ cjob reset                           # 全ジョブ履歴・ログ削除、job_i
   - 実装計画: docs/architecture/implementation.md
 - 認証・認可ガイドライン: docs/auth_policy.md
 - デプロイガイドライン: docs/deployment.md
+- ビルド手順: docs/build.md
