@@ -43,7 +43,7 @@
 - ジョブの Kubernetes Job への変換
 - Kueue による admission 制御
 - namespace ごとの dispatch 数制御
-- namespace ごとの ResourceQuota による大枠の公平化
+- namespace ごとの ResourceQuota による意図しない無制限消費の防止（安全網）
 - 実行状態の追跡
 - Kubernetes Job / Pod 状態と内部状態 DB の整合
 
@@ -151,7 +151,7 @@ cjob delete --all
 
 - Kubernetes Job が実行単位である
 - Kueue は admission / queueing / fairness を担う
-- ResourceQuota は namespace ごとの aggregate resource usage 制御に用いる
+- ResourceQuota は namespace ごとのバグ等による意図しない無制限消費を防ぐ安全網として用いる（公平化は Kueue の BestEffortFIFO が担う）
 - Kueue に流す Job 数は Dispatcher が制御する
 
 ## 5. 提供したい機能を実現するために必要な機能の一覧
