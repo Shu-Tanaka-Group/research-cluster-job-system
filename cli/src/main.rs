@@ -115,7 +115,18 @@ async fn cmd_add(
     // Collect exported environment variables
     let env: HashMap<String, String> = std::env::vars().collect();
 
-    let cmd_str = command.join(" ");
+    let cmd_str = command
+        .iter()
+        .map(|arg| {
+            if arg.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}".contains(c)) {
+                // Wrap in single quotes, escaping any existing single quotes
+                format!("'{}'", arg.replace('\'', "'\\''"))
+            } else {
+                arg.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
 
     let req = client::JobSubmitRequest {
         command: cmd_str,
