@@ -313,10 +313,10 @@ kubectl create namespace user-${USERNAME}
 kubectl label namespace user-${USERNAME} cjob.io/user-namespace=true
 
 # User Pod 用 ServiceAccount 作成
-kubectl create serviceaccount cjob-user -n user-${USERNAME}
+kubectl create serviceaccount computing-user -n user-${USERNAME}
 
 # JupyterHub KubeSpawner 設定（config.yaml）
-# service_account: cjob-user を設定済みであること
+# service_account: computing-user を設定済みであること
 
 # Kueue LocalQueue 作成
 # LocalQueue 名（下記 "default"）は ConfigMap の KUEUE_LOCAL_QUEUE_NAME と一致させること。
@@ -354,14 +354,14 @@ echo "Done: user-${USERNAME}"
 
 ## 12. JupyterHub 設定
 
-User Pod に `cjob-user` ServiceAccount を付与するための KubeSpawner 設定。
+User Pod に `computing-user` ServiceAccount を付与するための KubeSpawner 設定。
 
 ```yaml
 # JupyterHub config.yaml
 hub:
   config:
     KubeSpawner:
-      service_account: cjob-user
+      service_account: computing-user
 ```
 
 ### `JUPYTER_IMAGE` 環境変数について
