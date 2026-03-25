@@ -1459,6 +1459,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 - `cjob list`
 - `cjob status`
 - `cjob cancel`
+- `cjob delete`
 - `cjob reset`
 - `cjob logs`（`--follow` 含む）
 - PostgreSQL 1 DB
