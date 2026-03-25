@@ -125,7 +125,7 @@ cjob delete --all
 - Kueue を Kubernetes クラスタに導入する
 - 状態管理用に PostgreSQL を使用する（新規デプロイ）
 - NFS subdir external provisioner を導入済み
-- ジョブキューシステム専用ノードには `role=parallel-computing` ラベルと `role=computing:NoSchedule` Taint が付与されている
+- ジョブキューシステム専用ノードには `cluster-job=true` ラベルと `role=computing:NoSchedule` Taint が付与されている
 - 想定規模：ユーザー数 20人・同時実行ジョブ数 300程度
 
 ### 4.2 実行環境前提
@@ -472,16 +472,16 @@ CANCELLED / SUCCEEDED / FAILED
 
 ### 10.1 ResourceFlavor
 
-ジョブキューシステム専用ノード（`role=parallel-computing`）を対象とする。
+ジョブキューシステム専用ノード（`cluster-job=true`）を対象とする。
 
 ```yaml
 apiVersion: kueue.x-k8s.io/v1beta1
 kind: ResourceFlavor
 metadata:
-  name: parallel-computing-flavor
+  name: cluster-job-flavor
 spec:
   nodeLabels:
-    role: parallel-computing
+    cluster-job: "true"
   tolerations:
     - key: "role"
       operator: "Equal"
@@ -501,7 +501,7 @@ spec:
   resourceGroups:
     - coveredResources: ["cpu", "memory"]
       flavors:
-        - name: parallel-computing-flavor
+        - name: cluster-job-flavor
           resources:
             - name: cpu
               nominalQuota: "256"
