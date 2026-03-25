@@ -155,13 +155,6 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
                 ),
                 {"namespace": ns},
             )
-            session.add(
-                JobEvent(
-                    namespace=ns,
-                    job_id=0,
-                    event_type="RESET_COMPLETE",
-                )
-            )
             logger.info("Reset complete for namespace %s", ns)
 
     session.flush()
