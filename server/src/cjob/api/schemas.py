@@ -27,6 +27,7 @@ class JobSummary(BaseModel):
     status: str
     command: str
     created_at: datetime
+    finished_at: datetime | None = None
 
 
 class JobListResponse(BaseModel):

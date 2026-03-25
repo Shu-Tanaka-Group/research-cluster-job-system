@@ -143,6 +143,7 @@ def list_jobs(
             status=j.status,
             command=j.command,
             created_at=j.created_at,
+            finished_at=j.finished_at,
         )
         for j in query.all()
     ]

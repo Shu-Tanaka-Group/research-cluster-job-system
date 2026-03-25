@@ -108,7 +108,8 @@ GET /v1/jobs?status=FAILED&limit=10
       "job_id": 1,
       "status": "RUNNING",
       "command": "python main.py --alpha 0.1 --beta 16",
-      "created_at": "2026-03-23T12:34:56Z"
+      "created_at": "2026-03-23T12:34:56Z",
+      "finished_at": null
     }
   ]
 }

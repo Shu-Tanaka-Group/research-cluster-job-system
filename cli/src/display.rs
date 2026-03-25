@@ -7,8 +7,8 @@ pub fn print_job_table(jobs: &[JobSummary]) {
     }
 
     println!(
-        "{:<8} {:<12} {:<40} {}",
-        "JOB_ID", "STATUS", "COMMAND", "CREATED"
+        "{:<8} {:<12} {:<40} {:<20} {}",
+        "JOB_ID", "STATUS", "COMMAND", "CREATED", "FINISHED"
     );
     for job in jobs {
         let command_display = if job.command.len() > 40 {
@@ -22,9 +22,14 @@ pub fn print_job_table(jobs: &[JobSummary]) {
         } else {
             &job.created_at
         };
+        let finished = match &job.finished_at {
+            Some(ts) if ts.len() > 16 => &ts[..16],
+            Some(ts) => ts.as_str(),
+            None => "-",
+        };
         println!(
-            "{:<8} {:<12} {:<40} {}",
-            job.job_id, job.status, command_display, created
+            "{:<8} {:<12} {:<40} {:<20} {}",
+            job.job_id, job.status, command_display, created, finished
         );
     }
 }

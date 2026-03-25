@@ -35,6 +35,7 @@ pub struct JobSummary {
     pub status: String,
     pub command: String,
     pub created_at: String,
+    pub finished_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -84,10 +84,10 @@ $ cjob logs --follow 3
 
 ```
 $ cjob list
-JOB_ID  STATUS      COMMAND                                    CREATED
-1       SUCCEEDED   python main.py --alpha 0.1 --beta 16       2026-03-23 12:34
-2       RUNNING     python main.py --alpha 0.2 --beta 16       2026-03-23 12:35
-3       QUEUED      python main.py --alpha 0.5 --beta 16       2026-03-23 12:35
+JOB_ID  STATUS      COMMAND                                    CREATED              FINISHED
+1       SUCCEEDED   python main.py --alpha 0.1 --beta 16       2026-03-23 12:34     2026-03-23 12:37
+2       RUNNING     python main.py --alpha 0.2 --beta 16       2026-03-23 12:35     -
+3       QUEUED      python main.py --alpha 0.5 --beta 16       2026-03-23 12:35     -
 ```
 
 オプション：
