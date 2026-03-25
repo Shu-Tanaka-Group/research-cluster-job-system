@@ -40,6 +40,14 @@ enum Commands {
         /// 表示件数を制限
         #[arg(long)]
         limit: Option<u32>,
+
+        /// JOB_ID の降順で表示する
+        #[arg(long)]
+        reverse: bool,
+
+        /// 全件表示する
+        #[arg(long)]
+        all: bool,
     },
     /// ジョブの詳細を表示する
     Status {
@@ -86,7 +94,7 @@ async fn main() -> Result<()> {
             cpu,
             memory,
         } => cmd_add(&api_client, command, cpu, memory).await,
-        Commands::List { status, limit } => cmd_list(&api_client, status, limit).await,
+        Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status, limit, reverse, all).await,
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
         Commands::Delete { job_ids, all } => cmd_delete(&api_client, job_ids, all).await,
@@ -145,15 +153,40 @@ async fn cmd_add(
     Ok(())
 }
 
+const DEFAULT_LIST_LIMIT: u32 = 50;
+
 async fn cmd_list(
     client: &client::CjobClient,
     status: Option<String>,
     limit: Option<u32>,
+    reverse: bool,
+    all: bool,
 ) -> Result<()> {
+    if let Some(0) = limit {
+        anyhow::bail!("--limit には 1 以上の値を指定してください");
+    }
+
+    let effective_limit = if all {
+        None
+    } else {
+        Some(limit.unwrap_or(DEFAULT_LIST_LIMIT))
+    };
+    let order = if reverse { "desc" } else { "asc" };
+
     let resp = client
-        .list_jobs(status.as_deref(), limit)
+        .list_jobs(status.as_deref(), effective_limit, Some(order))
         .await?;
     display::print_job_table(&resp.jobs);
+
+    if let Some(lim) = effective_limit {
+        if resp.total_count > lim {
+            eprintln!(
+                "（{}件中最新の{}件を表示。全件表示するには --all を使用してください）",
+                resp.total_count, lim
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -232,7 +265,7 @@ async fn cmd_delete(
 
 async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
     // Check current job status
-    let list_resp = client.list_jobs(None, None).await?;
+    let list_resp = client.list_jobs(None, None, None).await?;
 
     // Check for DELETING jobs
     let has_deleting = list_resp.jobs.iter().any(|j| j.status == "DELETING");

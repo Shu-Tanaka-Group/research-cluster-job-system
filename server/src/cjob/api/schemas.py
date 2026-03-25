@@ -32,6 +32,7 @@ class JobSummary(BaseModel):
 
 class JobListResponse(BaseModel):
     jobs: list[JobSummary]
+    total_count: int
 
 
 class JobDetailResponse(BaseModel):

@@ -92,11 +92,15 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 |---|---|---|
 | `status` | 文字列（任意） | 全ステータスを返す |
 | `limit` | 整数（任意） | 全件返す |
+| `order` | 文字列（`"asc"` or `"desc"`） | `"asc"`（JOB_ID 昇順） |
+
+`limit` 指定時は常に最新（JOB_ID が大きい）N 件を選択し、`order` に応じてソートして返す。
 
 ```
 GET /v1/jobs
 GET /v1/jobs?status=RUNNING
 GET /v1/jobs?status=FAILED&limit=10
+GET /v1/jobs?limit=50&order=desc
 ```
 
 ### response
@@ -111,9 +115,12 @@ GET /v1/jobs?status=FAILED&limit=10
       "created_at": "2026-03-23T12:34:56Z",
       "finished_at": null
     }
-  ]
+  ],
+  "total_count": 1
 }
 ```
+
+`total_count` はフィルタ条件に一致するジョブの総数（`limit` 適用前）を返す。
 
 ## 4. GET /v1/jobs/{job_id}
 

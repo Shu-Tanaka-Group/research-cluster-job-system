@@ -80,27 +80,33 @@ $ cjob logs --follow 3
 
 ## 4. `cjob list` の動作
 
-`GET /v1/jobs` を呼び出し、結果を表形式で表示する。
+`GET /v1/jobs` を呼び出し、結果を表形式で表示する。デフォルトでは最新50件を JOB_ID 昇順で表示する。
 
 ```
 $ cjob list
 JOB_ID  STATUS      COMMAND                                    CREATED              FINISHED
-1       SUCCEEDED   python main.py --alpha 0.1 --beta 16       2026-03-23 12:34     2026-03-23 12:37
-2       RUNNING     python main.py --alpha 0.2 --beta 16       2026-03-23 12:35     -
-3       QUEUED      python main.py --alpha 0.5 --beta 16       2026-03-23 12:35     -
+51      SUCCEEDED   python main.py --alpha 0.1 --beta 16       2026-03-23 12:34     2026-03-23 12:37
+52      RUNNING     python main.py --alpha 0.2 --beta 16       2026-03-23 12:35     -
+53      QUEUED      python main.py --alpha 0.5 --beta 16       2026-03-23 12:35     -
+（100件中最新の50件を表示。全件表示するには --all を使用してください）
 ```
 
 オプション：
 
 - `--status <status>`：指定したステータスのジョブのみ表示（例: `--status RUNNING`）
-- `--limit <n>`：表示件数を n 件に制限する。省略時は全件表示
+- `--limit <n>`：表示件数を最新 n 件に制限する（1 以上）。省略時はデフォルト50件
+- `--all`：全件表示する
+- `--reverse`：JOB_ID の降順で表示する
 
 ```bash
-cjob list                    # 全件表示
-cjob list --status RUNNING   # 実行中のみ表示
-cjob list --status FAILED    # 失敗したもののみ表示
+cjob list                    # 最新 50 件を昇順で表示
+cjob list --all              # 全件を昇順で表示
+cjob list --reverse          # 最新 50 件を降順で表示
+cjob list --status RUNNING   # RUNNING の最新 50 件を表示
 cjob list --limit 10         # 最新 10 件のみ表示
 ```
+
+表示件数がジョブ総数より少ない場合は、省略されていることを示すメッセージを標準エラー出力に表示する。
 
 command は長い場合に末尾を省略して表示する（例: 40文字で切り捨て）。
 

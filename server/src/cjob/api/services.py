@@ -129,13 +129,24 @@ def list_jobs(
     namespace: str,
     status: str | None = None,
     limit: int | None = None,
+    order: str = "asc",
 ) -> JobListResponse:
-    query = session.query(Job).filter(Job.namespace == namespace)
+    base_query = session.query(Job).filter(Job.namespace == namespace)
     if status:
-        query = query.filter(Job.status == status)
-    query = query.order_by(Job.job_id.desc())
+        base_query = base_query.filter(Job.status == status)
+
+    total_count = base_query.count()
+
+    # Always fetch newest first; limit selects the newest N jobs
+    query = base_query.order_by(Job.job_id.desc())
     if limit:
         query = query.limit(limit)
+
+    rows = query.all()
+
+    # Sort for display
+    if order != "desc":
+        rows.sort(key=lambda j: j.job_id)
 
     jobs = [
         JobSummary(
@@ -145,9 +156,9 @@ def list_jobs(
             created_at=j.created_at,
             finished_at=j.finished_at,
         )
-        for j in query.all()
+        for j in rows
     ]
-    return JobListResponse(jobs=jobs)
+    return JobListResponse(jobs=jobs, total_count=total_count)
 
 
 def get_job(

@@ -27,6 +27,7 @@ pub struct JobSubmitResponse {
 #[derive(Debug, Deserialize)]
 pub struct JobListResponse {
     pub jobs: Vec<JobSummary>,
+    pub total_count: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -136,6 +137,7 @@ impl CjobClient {
         &self,
         status: Option<&str>,
         limit: Option<u32>,
+        order: Option<&str>,
     ) -> Result<JobListResponse> {
         let mut url = format!("{}/v1/jobs", self.base_url);
         let mut params = Vec::new();
@@ -144,6 +146,9 @@ impl CjobClient {
         }
         if let Some(l) = limit {
             params.push(format!("limit={}", l));
+        }
+        if let Some(o) = order {
+            params.push(format!("order={}", o));
         }
         if !params.is_empty() {
             url = format!("{}?{}", url, params.join("&"));

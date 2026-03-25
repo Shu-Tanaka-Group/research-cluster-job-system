@@ -42,10 +42,11 @@ def post_job(
 def get_jobs(
     status: str | None = None,
     limit: int | None = None,
+    order: str = "asc",
     namespace: str = Depends(get_namespace),
     session: Session = Depends(get_session),
 ):
-    return list_jobs(session, namespace, status=status, limit=limit)
+    return list_jobs(session, namespace, status=status, limit=limit, order=order)
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
