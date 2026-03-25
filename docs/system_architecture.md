@@ -537,6 +537,8 @@ spec:
 
 preemption を禁止する理由：研究計算ではジョブが途中で強制終了されると結果が失われるケースが多いため。
 
+以上の設定により：`BestEffortFIFO` により空きリソースは他ユーザーが利用できる。`preemption.withinClusterQueue: Never` により実行中のジョブは強制終了されない。
+
 ### 10.3 LocalQueue
 
 各 user namespace に作成する。
@@ -576,9 +578,6 @@ spec:
     limits.cpu: "256"
     limits.memory: "1000Gi"
 ```
-
-`BestEffortFIFO` の設定により、空きリソースは他ユーザーが利用できる。
-`preemption.withinClusterQueue: Never` の設定により、実行中のジョブは強制終了されない。
 
 ### 10.5 Kubernetes Job テンプレート
 
