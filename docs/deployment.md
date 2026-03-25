@@ -336,7 +336,7 @@ kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ResourceQuota
 metadata:
-  name: cjob-quota
+  name: computing-quota
   namespace: user-${USERNAME}
 spec:
   hard:

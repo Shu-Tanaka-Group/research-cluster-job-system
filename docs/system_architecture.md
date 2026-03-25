@@ -549,7 +549,7 @@ ResourceQuota はリソースを均等分配するためではなく、バグ等
 apiVersion: v1
 kind: ResourceQuota
 metadata:
-  name: cjob-quota
+  name: computing-quota
   namespace: user-alice
 spec:
   hard:
