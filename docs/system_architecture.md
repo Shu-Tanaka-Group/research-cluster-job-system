@@ -310,7 +310,7 @@ user-<username>    : User Pod / Job Pod / LocalQueue / ResourceQuota / PVC
 
 | コンポーネント | 種類 | Replica | namespace |
 |---|---|---|---|
-| Submit API | Deployment | 1 | cjob-system |
+| Submit API | Deployment | 2以上推奨 | cjob-system |
 | Dispatcher | Deployment | 1 | cjob-system |
 | Watcher / Reconciler | Deployment | 1 | cjob-system |
 | PostgreSQL | StatefulSet | 1 | cjob-system |
@@ -640,6 +640,8 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 **404 の方針**：他ユーザーのジョブへのアクセスも 404 を返す。ジョブの存在自体を隠すことで情報漏洩を防ぐ。
 
 **401 の方針**：TokenReview が失敗した場合（JWT 無効・期限切れ）に返す。レスポンスボディは固定文字列とし、詳細なエラー原因は含めない。
+
+**レート制限の方針**：Submit API は各リクエストで K8s TokenReview API を呼ぶため、大量リクエストは K8s API サーバへの負荷につながりうる。ただし Submit API 自身の CPU/memory limit（500m / 512Mi）が事実上のスループット上限として機能するため、想定規模（20ユーザー）においては明示的なレート制限は不要と判断する。ユーザー数や利用規模が拡大する場合は `slowapi` 等による namespace ごとのレート制限を検討すること。
 
 ### 11.1 POST /v1/jobs
 
@@ -1086,9 +1088,10 @@ fn cmd_delete(expr, all: bool):
    - `DELETING` のジョブが1件でも存在する場合は「前回のリセット処理がまだ完了していません。しばらく待ってから再試行してください。」を表示して中止する
    - `QUEUED` / `DISPATCHING` / `DISPATCHED` / `RUNNING` のジョブが1件でも存在する場合は job_id を表示して中止する
 2. 全ジョブが完了済みの場合はユーザーに確認プロンプトを表示する
-3. y の場合のみ `POST /v1/reset` を呼び出す（202 Accepted が返る）
-4. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する（202 受信直後・Watcher 完了前に削除する。Watcher 完了後は §11.1 の DELETING チェックにより新規ジョブが受け付けられるが、その時点でログは既に削除済みであるため新旧 log_dir の衝突が生じない）
-5. リセット開始メッセージを表示して終了する（完了を待たない）
+3. y の場合のみ以下を順に実行する
+   1. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する（API 呼び出し前に削除することで、API 呼び出し後に CLI がクラッシュしても Watcher が counter をリセットした後の job_id=1 再利用時に log_dir が存在しない状態を保証する）
+   2. `POST /v1/reset` を呼び出す（202 Accepted が返る）
+4. リセット開始メッセージを表示して終了する（完了を待たない）
 
 実際の K8s Job 削除・DB クリーンアップ・カウンターリセットは Watcher が非同期で処理する。
 リセット完了前に `cjob add` を実行すると、Submit API は `DELETING` ジョブが存在するとして 409 を返し投入を拒否する。
