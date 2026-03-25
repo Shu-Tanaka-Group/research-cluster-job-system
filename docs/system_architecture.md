@@ -528,8 +528,7 @@ spec:
               nominalQuota: "1000Gi"
   queueingStrategy: BestEffortFIFO
   preemption:
-    reclaimWithinCohort: Never   # 実行中ジョブの強制終了を禁止
-    withinClusterQueue: Never
+    withinClusterQueue: Never   # 実行中ジョブの強制終了を禁止
 ```
 
 `BestEffortFIFO` を採用する理由：空きリソースがあれば他ユーザーの idle quota を利用できる（1ユーザーが全コアを使える）ため、かつ `StrictFIFO` では1ユーザーの大量投入が全体を止める可能性があるため。単一 ClusterQueue 内でのユーザー間リソース共有は `cohort` ではなくこの `queueingStrategy` が担う。
