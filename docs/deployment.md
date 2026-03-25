@@ -804,7 +804,7 @@ kubectl apply -f kueue/resource-flavor.yaml
 kubectl apply -f kueue/cluster-queue.yaml
 
 # 7. PostgreSQL のデプロイ
-kubectl apply -f deployments/postgres.yaml
+kubectl apply -f statefulsets/postgres.yaml
 
 # 8. DB スキーマの初期化
 # postgres-schema ConfigMap の schema.sql が /docker-entrypoint-initdb.d/ にマウントされ、
