@@ -19,12 +19,13 @@ user-<username>    : ユーザーごとの実行環境（User Pod / Job Pod / Lo
 
 | コンポーネント | 種類 | Replica | namespace |
 |---|---|---|---|
-| Submit API | Deployment | 1 | cjob-system |
+| Submit API | Deployment | 2以上推奨 | cjob-system |
 | Dispatcher | Deployment | 1 | cjob-system |
 | Watcher / Reconciler | Deployment | 1 | cjob-system |
 | PostgreSQL | StatefulSet | 1 | cjob-system |
 
 Dispatcher・Watcher を Replica 1 に固定する理由：Replica 複数にすると二重 dispatch・二重 DB 更新が発生するため。
+Submit API は stateless であるため Replica を増やしても安全。可用性向上のため Replica 2 以上を推奨する。
 
 ---
 
@@ -402,6 +403,7 @@ data:
         gpu           INTEGER NOT NULL DEFAULT 0,
         status        TEXT NOT NULL,
         retry_count   INTEGER NOT NULL DEFAULT 0,
+        retry_after   TIMESTAMPTZ,
         k8s_job_name  TEXT,
         log_dir       TEXT,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -522,7 +524,7 @@ metadata:
   name: submit-api
   namespace: cjob-system
 spec:
-  replicas: 1
+  replicas: 2   # stateless のため複数 Replica 可。可用性向上のため 2 以上を推奨
   selector:
     matchLabels:
       app: submit-api
@@ -703,8 +705,10 @@ spec:
               memory: "512Mi"
           livenessProbe:
             exec:
-              command: ["python", "-c", "import os; os.kill(1, 0)"]
-            initialDelaySeconds: 10
+              # メインループが DISPATCH_BUDGET_CHECK_INTERVAL_SEC ごとに /tmp/liveness をタッチする
+              # 最終更新から 120 秒以上経過した場合はループ停止とみなして再起動
+              command: ["sh", "-c", "test $(( $(date +%s) - $(stat -c %Y /tmp/liveness) )) -lt 120"]
+            initialDelaySeconds: 30
             periodSeconds: 30
 ```
 
@@ -765,8 +769,10 @@ spec:
               memory: "256Mi"
           livenessProbe:
             exec:
-              command: ["python", "-c", "import os; os.kill(1, 0)"]
-            initialDelaySeconds: 10
+              # メインループが定期的に /tmp/liveness をタッチする
+              # 最終更新から 120 秒以上経過した場合はループ停止とみなして再起動
+              command: ["sh", "-c", "test $(( $(date +%s) - $(stat -c %Y /tmp/liveness) )) -lt 120"]
+            initialDelaySeconds: 30
             periodSeconds: 30
 ```
 

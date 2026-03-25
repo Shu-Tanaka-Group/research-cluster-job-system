@@ -3,7 +3,7 @@
 ## 1. 概要
 
 本設計書は、オンプレ Kubernetes 環境上で動作する、**ユーザー向けジョブキューシステム `cjob`** の設計をまとめたものである。  
-本システムは、研究計算・parameter sweep・バッチ計算を対象とし、**ユーザーに Kubernetes の Job / Pod / YAML を意識させずに**、シェルコマンドをそのままジョブとして投入できることを目的とする。
+本システムは、研究計算・バッチ計算を対象とし、**ユーザーに Kubernetes の Job / Pod / YAML を意識させずに**、シェルコマンドをそのままジョブとして投入できることを目的とする。
 
 本システムは、以下の方針で設計する。
 
@@ -26,7 +26,6 @@
 - 個別ジョブの状態を確認する
 - ジョブをキャンセルする
 - ジョブのログを確認する（リアルタイム追跡含む）
-- parameter sweep をまとめて投入する
 - 将来的に workflow engine から API 経由で利用できる
 
 ### 2.2 ジョブ投入時に再現したい情報
@@ -161,7 +160,6 @@ cjob delete --all
 ### 5.1 CLI 機能
 
 - `cjob add`
-- `cjob sweep`
 - `cjob list`
 - `cjob status`
 - `cjob cancel`
@@ -176,7 +174,7 @@ cjob delete --all
 - コンテナイメージ名取得（`JUPYTER_IMAGE` 環境変数から取得）
 - コマンド文字列の保存
 - ユーザー namespace 解決（ServiceAccount の namespace ファイルから取得）
-- namespace ごとのアクティブジョブ数上限チェック（QUEUED + 実行中の合計）
+- namespace ごとのジョブ総数上限チェック（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計）
 - ジョブ ID 発行
 - 内部 DB へのジョブ登録（QUEUED 状態で保存）
 
@@ -208,11 +206,6 @@ cjob delete --all
 - orphan Job 検出
 - cancel 反映
 - retry 可能なジョブの管理
-
-### 5.6 parameter sweep 展開機能
-
-- ファイル入力からの展開（必要なら）
-- sweep 展開結果を logical job 群として登録
 
 ## 6. 必要な機能を実装する方針
 
@@ -263,19 +256,6 @@ submit 時に取得した以下を Job Pod に反映する。
 - `cwd` → Kubernetes container `workingDir`
 - `env` → Kubernetes container `env`（`PATH` / `VIRTUAL_ENV` を含む全 export 済み環境変数）
 - `command` → `bash -lc "<command>"`
-
-### 6.6 parameter sweep の実装方針
-
-parameter sweep は **logical job を複数生成する方式**とする。  
-Indexed Job は採用しない。
-
-理由:
-
-- 1コマンド = 1ジョブという UX 方針に合う
-- 各ジョブの状態・キャンセル・再試行を個別に扱いやすい
-- ログ・課金・進捗管理の粒度を揃えやすい
-
-大量投入による Kueue / Job オブジェクト増加は、dispatch budget により制御する。
 
 ### 6.7 ログ取得方針
 
@@ -337,6 +317,7 @@ user-<username>    : User Pod / Job Pod / LocalQueue / ResourceQuota / PVC
 | Kubernetes Job | Job | - | user-\<username\> |
 
 Dispatcher と Watcher は Replica 複数にすると二重 dispatch・二重更新が発生するため、1 固定とする。
+Submit API は stateless（状態の正本は PostgreSQL・認証は K8s TokenReview に委譲・job_id 採番は DB でアトミック）であるため、Replica を増やしても安全である。Replica 2 以上を推奨する。
 
 ## 8. Dispatcher スケジューリング設計
 
@@ -707,71 +688,13 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 { "detail": "command は空にできません" }
 ```
 
-namespace のアクティブジョブ数（QUEUED / DISPATCHING / DISPATCHED / RUNNING の合計）が
+namespace のジョブ総数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計）が
 `MAX_QUEUED_JOBS_PER_NAMESPACE`（デフォルト 2000）に達している場合は 429 を返す。
+CANCELLED ジョブを含めることで、cancel → 再投入の無制限サイクルによる DB 肥大化を防ぐ。
+上限に達した場合は `cjob delete` で CANCELLED ジョブを削除してから再投入すること。
 
 ```json
 { "detail": "投入可能なジョブ数の上限（2000件）に達しています" }
-```
-
-namespace に `DELETING` 状態のジョブが1件でも存在する場合は 409 を返す（リセット処理中）。
-
-```json
-{ "detail": "リセット処理中のためジョブを投入できません。しばらく待ってから再試行してください" }
-```
-
-### 11.2 POST /v1/jobs/sweep
-
-parameter sweep を投入する。
-
-#### request
-
-```json
-{
-  "command_template": "python main.py --alpha '{{alpha}}' --beta '{{beta}}'",
-  "image": "yusekiya/stg-jupyter:2.1.0",
-  "cwd": "/home/jovyan/project-a/exp1",
-  "env": {
-    "OMP_NUM_THREADS": "4"
-  },
-  "resources": {
-    "cpu": "2",
-    "memory": "4Gi",
-    "gpu": 0
-  },
-  "sweep": {
-    "type": "grid",
-    "parameters": {
-      "alpha": ["0.1", "0.2", "0.5"],
-      "beta": ["8", "16"]
-    }
-  }
-}
-```
-
-#### response
-
-```json
-{
-  "job_ids": [1, 2, 3, 4, 5, 6],
-  "job_count": 6,
-  "status": "QUEUED"
-}
-```
-
-#### エラーレスポンス
-
-`command_template` が空文字の場合、または `sweep.parameters` が空の場合は 400 を返す。
-
-```json
-{ "detail": "command_template は空にできません" }
-```
-
-投入後のアクティブジョブ数合計（現在のアクティブ数 + sweep 展開件数）が
-`MAX_QUEUED_JOBS_PER_NAMESPACE`（2000）を超える場合は 429 を返す。
-
-```json
-{ "detail": "投入後の合計が上限を超えます（現在 1950 件 / 上限 2000 件）" }
 ```
 
 namespace に `DELETING` 状態のジョブが1件でも存在する場合は 409 を返す（リセット処理中）。
@@ -989,7 +912,6 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 
 ```bash
 cjob add -- <command...>
-cjob sweep -- <command with placeholders...> --grid key=v1,v2,...
 cjob list
 cjob status <job-id>
 cjob cancel <job-id>              # 単体指定
@@ -1015,13 +937,6 @@ cjob logs --follow <job-id>
 5. ServiceAccount JWT と namespace を固定パスから読み取る
 6. API にジョブ投入を行う（`image` フィールドを含む）
 7. `job_id` を表示する
-
-### 12.3 `cjob sweep` の動作
-
-1. command template を受け取る
-2. `JUPYTER_IMAGE` 環境変数からコンテナイメージ名を取得する
-3. grid 展開を行う
-4. logical job 群として API に送る（`image` フィールドを含む）
 
 ### 12.4 `cjob logs` の動作
 
@@ -1172,7 +1087,7 @@ fn cmd_delete(expr, all: bool):
    - `QUEUED` / `DISPATCHING` / `DISPATCHED` / `RUNNING` のジョブが1件でも存在する場合は job_id を表示して中止する
 2. 全ジョブが完了済みの場合はユーザーに確認プロンプトを表示する
 3. y の場合のみ `POST /v1/reset` を呼び出す（202 Accepted が返る）
-4. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する
+4. PVC 上のログディレクトリ（`/home/jovyan/.cjob/logs/`）を削除する（202 受信直後・Watcher 完了前に削除する。Watcher 完了後は §11.1 の DELETING チェックにより新規ジョブが受け付けられるが、その時点でログは既に削除済みであるため新旧 log_dir の衝突が生じない）
 5. リセット開始メッセージを表示して終了する（完了を待たない）
 
 実際の K8s Job 削除・DB クリーンアップ・カウンターリセットは Watcher が非同期で処理する。
@@ -1200,7 +1115,7 @@ Dispatcher は PostgreSQL をスキャンして QUEUED ジョブを選択し、K
 - 成功・失敗時に DB 状態を更新する
 - 起動時の DISPATCHING 状態リセット
 
-### 13.2 dispatch budget
+Dispatcher のメインループは各スキャンサイクル完了時に `/tmp/liveness` ファイルをタッチする。Kubernetes の Liveness probe がこのファイルの最終更新時刻を確認し、ループ停止を検知して再起動できるようにする（deployment.md §13.4 参照）。
 
 ```text
 dispatch_budget = namespace_dispatch_limit - active_jobs_in_db(namespace)
@@ -1340,6 +1255,10 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - `DELETING` ジョブの K8s Job 削除・DB レコード削除・カウンターリセット
 - orphan Job 検出
 - DB と Kubernetes のズレ修正
+
+Watcher のメインループは各スキャンサイクル完了時に `/tmp/liveness` ファイルをタッチする。Kubernetes の Liveness probe がこのファイルの最終更新時刻を確認し、ループ停止を検知して再起動できるようにする（deployment.md §13.5 参照）。
+
+Watcher は K8s Job の `cjob.io/namespace` ラベルから直接 namespace を取得するため、`JOB_NAMESPACE_PREFIX` 環境変数を必要としない（Dispatcher は Job 作成時に namespace を `user-<username>` 形式で構築する際に `JOB_NAMESPACE_PREFIX` を使用するが、Watcher は既存のラベルを読み取るのみで構築は行わない）。
 
 ### 14.2 必要性
 
@@ -1515,12 +1434,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 - `cjob logs`（完了後表示）
 - `cjob logs --follow`（リアルタイム追跡）
 
-### Step 7: parameter sweep 実装
-
-- 複数 logical job を DB に一括登録
-- 一括投入時の UX 改善
-
-### Step 8: 運用機能追加
+### Step 7: 運用機能追加
 
 - metrics
 - tracing
@@ -1536,7 +1450,6 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 - `cjob status`
 - `cjob cancel`
 - `cjob logs`（`--follow` 含む）
-- 単純な `grid` sweep
 - PostgreSQL 1 DB
 - namespace ごとの LocalQueue
 - 1種類の runtime image
@@ -1587,4 +1500,4 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 - **削除**: `cjob delete` で完了済みジョブを個別削除（実行中ジョブは削除不可・cancel を促す。reset 処理中の DELETING ジョブも削除不可）
 - **リセット**: `cjob reset` で全ジョブ履歴・ログを削除し job_id を 1 から採番し直す（全ジョブ完了時のみ実行可能）
 - **認証・認可**: ServiceAccount JWT + TokenReview（詳細は auth_policy.md 参照）
-- **大量投入対応**: dispatch budget + DB スキャン型スケジューリングにより Job materialization を抑制する
+- **大量投入対応**: dispatch budget + DB スキャン型スケジューリングにより Job materialization を抑制する。投入上限（`MAX_QUEUED_JOBS_PER_NAMESPACE`）は QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計でカウントし、cancel → 再投入サイクルによる DB 肥大化を防ぐ
