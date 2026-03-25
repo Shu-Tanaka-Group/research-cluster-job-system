@@ -257,7 +257,7 @@ submit 時に取得した以下を Job Pod に反映する。
 - `env` → Kubernetes container `env`（`PATH` / `VIRTUAL_ENV` を含む全 export 済み環境変数）
 - `command` → `bash -lc "<command>"`
 
-### 6.7 ログ取得方針
+### 6.6 ログ取得方針
 
 Job Pod のコマンドを tee でラップし、stdout / stderr を PVC 上に保存する。
 
@@ -1459,6 +1459,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 - `cjob list`
 - `cjob status`
 - `cjob cancel`
+- `cjob reset`
 - `cjob logs`（`--follow` 含む）
 - PostgreSQL 1 DB
 - namespace ごとの LocalQueue
