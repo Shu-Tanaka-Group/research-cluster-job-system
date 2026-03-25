@@ -560,7 +560,40 @@ spec:
     limits.memory: "1250Gi"
 ```
 
-### 10.5 Kubernetes Job テンプレート
+### 10.5 リソース制限まとめ
+
+#### ジョブ数に関する制限
+
+| 制限 | 設定箇所 | 値 | 管理主体 | 適用単位 | 制限対象 |
+|---|---|---|---|---|---|
+| `MAX_QUEUED_JOBS_PER_NAMESPACE` | ConfigMap | 2000 | Submit API | ユーザーごと | PostgreSQL の `jobs` テーブルへの登録数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計） |
+| `DISPATCH_BUDGET_PER_NAMESPACE` | ConfigMap | 256 | Dispatcher | ユーザーごと | DB 上の active ジョブ数（DISPATCHING + DISPATCHED + RUNNING の合計）。上限に達すると Dispatcher が新規 dispatch を停止する |
+| `count/jobs.batch` | ResourceQuota | 600 | Kubernetes | ユーザーごと | K8s 上に存在する `batch/v1 Job` オブジェクトの総数。実行中 + TTL 待ち完了済みジョブの合計が対象 |
+
+3つの制限は独立したレイヤーで機能する。
+
+```
+cjob add → DB 登録（MAX_QUEUED_JOBS_PER_NAMESPACE: 2000件上限）
+              ↓
+Dispatcher がスキャン → dispatch_budget チェック（DISPATCH_BUDGET_PER_NAMESPACE: 256件上限）
+              ↓
+K8s Job を作成 → count/jobs.batch チェック（600件上限）
+```
+
+`count/jobs.batch` を 600 に設定する理由：dispatch_budget の上限（256件）で動作していても、SUCCEEDED/FAILED になった K8s Job が TTL（3時間）が切れるまで K8s 上に残り続けるため、実行中 + TTL 待ち完了済みジョブの合計を吸収できるよう dispatch_limit の2倍以上に設定している。
+
+#### CPU・メモリに関する制限
+
+| 制限 | 設定箇所 | 値 | 管理主体 | 適用単位 | 制限対象 |
+|---|---|---|---|---|---|
+| ResourceQuota `requests.cpu` / `limits.cpu` | ResourceQuota（user namespace） | 300 | Kubernetes | ユーザーごと | namespace 内の全 Pod（Job Pod + User Pod）が要求・使用できる CPU の合計上限 |
+| ResourceQuota `requests.memory` / `limits.memory` | ResourceQuota（user namespace） | 1250Gi | Kubernetes | ユーザーごと | namespace 内の全 Pod が要求・使用できるメモリの合計上限 |
+| ClusterQueue `nominalQuota` CPU | ClusterQueue | 256 | Kueue | クラスタ全体 | Kueue が Job Pod に割り当てるクラスタ全体の CPU 上限。ユーザー間で共有される |
+| ClusterQueue `nominalQuota` memory | ClusterQueue | 1000Gi | Kueue | クラスタ全体 | Kueue が Job Pod に割り当てるクラスタ全体のメモリ上限。ユーザー間で共有される |
+
+ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User Pod を含む namespace 内の全 Pod を対象とした上限（バグ等による無制限消費を防ぐ安全網）。ClusterQueue nominalQuota は Kueue が Job Pod の admission を判断するための上限であり、実際の実行スケジューリングを制御する。User Pod は Kueue を経由しないため ClusterQueue の制御対象外である。
+
+### 10.6 Kubernetes Job テンプレート
 
 ```yaml
 apiVersion: batch/v1
