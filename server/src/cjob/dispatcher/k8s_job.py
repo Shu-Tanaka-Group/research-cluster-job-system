@@ -31,8 +31,8 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
     wrapped_command = (
         f'LOG_DIR={log_dir}\n'
         f'mkdir -p "${{LOG_DIR}}"\n'
-        f'exec > >(stdbuf -oL tee "${{LOG_DIR}}/stdout.log") '
-        f'2> >(stdbuf -oL tee "${{LOG_DIR}}/stderr.log" >&2)\n'
+        f'exec > >(tee "${{LOG_DIR}}/stdout.log") '
+        f'2> >(tee "${{LOG_DIR}}/stderr.log" >&2)\n'
         f'{user_command}'
     )
 
