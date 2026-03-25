@@ -36,7 +36,7 @@ docker build -t yusekiya/cjob-watcher:latest -f server/Dockerfile.watcher server
 ### バージョンタグ付きでビルドする場合
 
 ```bash
-VERSION=0.1.0
+read -r VERSION < VERSION
 
 docker build -t yusekiya/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
 docker build -t yusekiya/cjob-dispatcher:${VERSION} -f server/Dockerfile.dispatcher server/
