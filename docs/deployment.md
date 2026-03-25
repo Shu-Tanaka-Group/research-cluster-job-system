@@ -76,8 +76,6 @@ data:
   POSTGRES_HOST: postgres.cjob-system.svc.cluster.local
   POSTGRES_PORT: "5432"
   POSTGRES_DB: cjob
-  SUBMIT_API_HOST: submit-api.cjob-system.svc.cluster.local
-  SUBMIT_API_PORT: "8080"
   DISPATCH_BUDGET_PER_NAMESPACE: "256"
   DISPATCH_BUDGET_CHECK_INTERVAL_SEC: "10"
   DISPATCH_RETRY_INTERVAL_SEC: "30"
