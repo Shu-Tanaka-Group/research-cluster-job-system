@@ -341,7 +341,7 @@ metadata:
   namespace: user-${USERNAME}
 spec:
   hard:
-    count/jobs.batch: "300"
+    count/jobs.batch: "600"
     requests.cpu: "256"
     requests.memory: "1000Gi"
     limits.cpu: "256"

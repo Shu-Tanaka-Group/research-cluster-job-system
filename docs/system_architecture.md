@@ -524,20 +524,17 @@ spec:
           resources:
             - name: cpu
               nominalQuota: "256"
-              borrowingLimit: "0"
             - name: memory
               nominalQuota: "1000Gi"
-              borrowingLimit: "0"
   queueingStrategy: BestEffortFIFO
-  cohort: cjob-cohort
   preemption:
     reclaimWithinCohort: Never   # 実行中ジョブの強制終了を禁止
     withinClusterQueue: Never
 ```
 
-`BestEffortFIFO` を採用する理由：`StrictFIFO` では1ユーザーの大量投入が全体を止める可能性があるため。
+`BestEffortFIFO` を採用する理由：空きリソースがあれば他ユーザーの idle quota を利用できる（1ユーザーが全コアを使える）ため、かつ `StrictFIFO` では1ユーザーの大量投入が全体を止める可能性があるため。単一 ClusterQueue 内でのユーザー間リソース共有は `cohort` ではなくこの `queueingStrategy` が担う。
 
-cohort を設定する理由：使われていないリソースを他ユーザーが借りて使えるようにするため。
+`cohort` を設定しない理由：`cohort` は複数 ClusterQueue 間のリソース共有に使う仕組みであり、本設計の単一 ClusterQueue 構成では意味を持たないため削除する。将来 GPU 専用キューなど複数 ClusterQueue 構成に拡張する際に追加すること。
 
 preemption を禁止する理由：研究計算ではジョブが途中で強制終了されると結果が失われるケースが多いため。
 
@@ -564,7 +561,7 @@ ResourceQuota はリソースを均等分配するためではなく、バグ等
 
 設定根拠：
 - CPU / memory：クラスタ総量と同値に設定し、Kueue の admission 制御に任せる
-- Job 数：dispatch_limit(256) より大きく設定 → 300
+- Job 数：dispatch_limit(256) と `ttlSecondsAfterFinished`(86400秒=24時間) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大256) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう dispatch_limit の2倍以上に設定 → 600
 
 ```yaml
 apiVersion: v1
@@ -574,14 +571,14 @@ metadata:
   namespace: user-alice
 spec:
   hard:
-    count/jobs.batch: "300"
+    count/jobs.batch: "600"
     requests.cpu: "256"
     requests.memory: "1000Gi"
     limits.cpu: "256"
     limits.memory: "1000Gi"
 ```
 
-cohort + preemption なしの設定により、空きリソースは他ユーザーが借りて使えるが
+`BestEffortFIFO` の設定により、空きリソースは他ユーザーが利用できるが
 実行中のジョブは強制終了されない。
 
 ### 10.5 Kubernetes Job テンプレート
