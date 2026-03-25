@@ -797,7 +797,7 @@ kubectl apply -f rbac/submit-api-sa.yaml
 kubectl apply -f rbac/dispatcher-sa.yaml
 
 # 5. Kueue のインストール
-kubectl apply -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.16.4/manifests.yaml
+kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.16.4/manifests.yaml
 
 # 6. Kueue リソースの作成
 kubectl apply -f kueue/resource-flavor.yaml
