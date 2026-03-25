@@ -393,6 +393,7 @@ data:
         job_id        INTEGER NOT NULL,
         "user"        TEXT NOT NULL,
         namespace     TEXT NOT NULL,
+        image         TEXT NOT NULL,
         command       TEXT NOT NULL,
         cwd           TEXT NOT NULL,
         env_json      JSONB NOT NULL DEFAULT '{}',

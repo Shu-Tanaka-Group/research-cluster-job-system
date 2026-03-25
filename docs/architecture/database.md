@@ -10,6 +10,7 @@ CREATE TABLE jobs (
     job_id        INTEGER NOT NULL,
     "user"        TEXT NOT NULL,
     namespace     TEXT NOT NULL,
+    image         TEXT NOT NULL,           -- CLI が JUPYTER_IMAGE 環境変数から取得したコンテナイメージ名
     command       TEXT NOT NULL,
     cwd           TEXT NOT NULL,
     env_json      JSONB NOT NULL DEFAULT '{}',
