@@ -158,9 +158,13 @@ spec:
             - |
               LOG_DIR=/home/jovyan/.cjob/logs/1
               mkdir -p "${LOG_DIR}"
-              exec > >(stdbuf -oL tee "${LOG_DIR}/stdout.log") \
-                   2> >(stdbuf -oL tee "${LOG_DIR}/stderr.log" >&2)
+              exec > >(tee "${LOG_DIR}/stdout.log") \
+                   2> >(tee "${LOG_DIR}/stderr.log" >&2)
               python main.py --alpha 0.1 --beta 16
+              EXIT_CODE=$?
+              exec >&- 2>&-
+              wait
+              exit $EXIT_CODE
           env:
             - name: PYTHONUNBUFFERED
               value: "1"
