@@ -319,6 +319,29 @@ user-<username>    : User Pod / Job Pod / LocalQueue / ResourceQuota / PVC
 Dispatcher と Watcher は Replica 複数にすると二重 dispatch・二重更新が発生するため、1 固定とする。
 Submit API は stateless（状態の正本は PostgreSQL・認証は K8s TokenReview に委譲・job_id 採番は DB でアトミック）であるため、Replica を増やしても安全である。Replica 2 以上を推奨する。
 
+#### 各コンポーネントの役割
+
+**cjob CLI**
+ユーザーが User Pod 内で操作するコマンドラインツール。ジョブの投入・一覧・状態確認・キャンセル・ログ閲覧などを Submit API への HTTP リクエストとして送信する。Rust 製シングルバイナリとして配布し、image には含めない。
+
+**Submit API**
+CLI からのリクエストを受け付け、ジョブを PostgreSQL に QUEUED 状態で登録する。ServiceAccount JWT を K8s TokenReview API で検証し、操作が自分の namespace のジョブに限定されることを保証する。状態を持たない（stateless）ため Replica を複数にできる。
+
+**PostgreSQL**
+全ジョブ状態の正本（Single Source of Truth）。ジョブのメタデータ・状態・実行履歴を管理する。Dispatcher のスケジューリング判断・Submit API のバリデーション・CLI の表示はすべてここを参照する。
+
+**Dispatcher**
+PostgreSQL を定期スキャンして QUEUED ジョブを選択し、Kubernetes Job を作成する。dispatch budget と公平スケジューリング（per-namespace Round-robin）を制御する。Replica 1 固定（複数にすると二重 dispatch が発生するため）。
+
+**Watcher / Reconciler**
+Kubernetes API を定期監視し、Job / Pod の実行状態を PostgreSQL に反映する。SUCCEEDED / FAILED への遷移検知・CANCELLED ジョブの K8s Job 削除・reset 時の DELETING クリーンアップを担う。Dispatcher と同じく Replica 1 固定。
+
+**Kubernetes Job / Job Pod**
+Dispatcher が作成する実行単位。Job Pod はユーザーの投入時の環境（image・cwd・env・command）を再現して実行し、stdout / stderr を PVC 上のログディレクトリに書き出す。User Pod と同一 image を使用する。
+
+**Kueue**
+Kubernetes Job の admission 制御を担う。ClusterQueue でクラスタ全体のリソース上限を管理し、BestEffortFIFO により空きリソースをユーザー間で公平に利用できるようにする。preemption は無効化しており実行中ジョブを強制終了しない。
+
 ## 8. Dispatcher スケジューリング設計
 
 ### 8.1 スケジューリング方針
