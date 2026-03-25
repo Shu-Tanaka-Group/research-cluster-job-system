@@ -30,11 +30,14 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
     user_command = job.command
     wrapped_command = (
         f'LOG_DIR={log_dir}\n'
-        f'mkdir -p "${{LOG_DIR}}"\n'
-        f'exec > >(tee "${{LOG_DIR}}/stdout.log") '
-        f'2> >(tee "${{LOG_DIR}}/stderr.log" >&2)\n'
+        f'mkdir -p "$LOG_DIR"\n'
+        f'exec > >(tee "$LOG_DIR/stdout.log") '
+        f'2> >(tee "$LOG_DIR/stderr.log" >&2)\n'
         f'{user_command}\n'
-        f'wait'
+        f'EXIT_CODE=$?\n'
+        f'exec >&- 2>&-\n'
+        f'wait\n'
+        f'exit $EXIT_CODE'
     )
 
     # Build env vars from job.env_json
