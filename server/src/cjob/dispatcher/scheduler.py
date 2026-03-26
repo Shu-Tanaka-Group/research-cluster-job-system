@@ -24,7 +24,7 @@ def _reset_expired_usage(session: Session, settings: Settings):
         ),
         {"reset_interval": settings.FAIR_SHARE_RESET_INTERVAL_SEC},
     )
-    session.flush()
+    session.commit()
 
 
 def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
