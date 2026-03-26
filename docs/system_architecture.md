@@ -21,13 +21,13 @@
 
 | ドキュメント | 内容 |
 |---|---|
-| [architecture/requirements.md](architecture/requirements.md) | 機能要件・ユースケース・使用例 |
+| [architecture/requirements.md](architecture/requirements.md) | 機能要件・ユースケース |
 | [architecture/prerequisites.md](architecture/prerequisites.md) | インフラ・実行環境・スケジューリング前提 |
 | [architecture/system_design.md](architecture/system_design.md) | 必要機能一覧・実装方針・システム構成 |
 | [architecture/database.md](architecture/database.md) | PostgreSQL テーブル定義・状態遷移 |
 | [architecture/kueue.md](architecture/kueue.md) | Kueue 設計・リソース制限・Job テンプレート |
 | [architecture/api.md](architecture/api.md) | API エンドポイント仕様 |
-| [architecture/cli.md](architecture/cli.md) | CLI コマンド仕様・動作詳細 |
+| [architecture/cli.md](architecture/cli.md) | CLI コマンド仕様・使用例・動作詳細 |
 | [architecture/dispatcher.md](architecture/dispatcher.md) | Dispatcher スケジューリング・詳細設計 |
 | [architecture/watcher.md](architecture/watcher.md) | Watcher / Reconciler 設計 |
 | [architecture/implementation.md](architecture/implementation.md) | 技術スタック・実装方針・手順・スコープ・将来拡張 |
