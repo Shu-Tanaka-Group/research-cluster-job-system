@@ -10,13 +10,31 @@ from cjob.models import Job, JobEvent
 logger = logging.getLogger(__name__)
 
 
+def _reset_expired_usage(session: Session, settings: Settings):
+    """Reset namespace_resource_usage rows whose period has expired."""
+    session.execute(
+        text(
+            "UPDATE namespace_resource_usage "
+            "SET cpu_millicores_seconds = 0, "
+            "memory_mib_seconds = 0, "
+            "gpu_seconds = 0, "
+            "period_start = NOW(), "
+            "updated_at = NOW() "
+            "WHERE NOW() - period_start > MAKE_INTERVAL(secs => :reset_interval)"
+        ),
+        {"reset_interval": settings.FAIR_SHARE_RESET_INTERVAL_SEC},
+    )
+    session.flush()
+
+
 def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
     """Fetch up to batch_size QUEUED jobs, round-robin across namespaces.
 
-    Prioritises namespaces with fewer active jobs so that resource
-    allocation converges toward fairness even when the number of
-    namespaces exceeds the batch size.
+    Uses DRF (Dominant Resource Fairness) to prioritise namespaces with
+    lower cumulative resource consumption.
     """
+    _reset_expired_usage(session, settings)
+
     result = session.execute(
         text(
             "WITH active AS ("
@@ -34,15 +52,25 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
             "    AND (retry_after IS NULL OR retry_after <= NOW())"
             ") "
             "SELECT q.* FROM queued q"
-            "  LEFT JOIN active a USING (namespace) "
+            "  LEFT JOIN active a USING (namespace)"
+            "  LEFT JOIN namespace_resource_usage u ON q.namespace = u.namespace "
             "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
             "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
-            "ORDER BY q.rn ASC, COALESCE(a.active_count, 0) ASC, q.namespace ASC "
+            "ORDER BY q.rn ASC, "
+            "  GREATEST("
+            "    COALESCE(u.cpu_millicores_seconds, 0) * 1.0 / :cluster_cpu_millicores,"
+            "    COALESCE(u.memory_mib_seconds, 0) * 1.0 / :cluster_memory_mib,"
+            "    COALESCE(u.gpu_seconds, 0) * 1.0 / NULLIF(:cluster_gpus, 0)"
+            "  ) ASC NULLS FIRST, "
+            "  q.namespace ASC "
             "LIMIT :batch_size"
         ),
         {
             "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
             "batch_size": settings.DISPATCH_BATCH_SIZE,
+            "cluster_cpu_millicores": settings.CLUSTER_TOTAL_CPU_MILLICORES,
+            "cluster_memory_mib": settings.CLUSTER_TOTAL_MEMORY_MIB,
+            "cluster_gpus": settings.CLUSTER_TOTAL_GPUS,
         },
     )
 
