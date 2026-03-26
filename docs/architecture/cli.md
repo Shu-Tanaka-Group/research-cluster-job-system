@@ -20,7 +20,72 @@ cjob logs <job-id>
 cjob logs --follow <job-id>
 ```
 
-## 2. `cjob add` の動作
+## 2. 使用例
+
+### 2.1 単一ジョブの投入
+
+```bash
+cjob add -- python main.py --alpha 0.1 --beta 16
+```
+
+### 2.2 シェルスクリプトの実行
+
+```bash
+cjob add -- bash run_experiment.sh case001
+```
+
+### 2.3 仮想環境を利用した実行
+
+```bash
+source /home/jovyan/myenv/bin/activate
+cjob add -- python main.py --config config.yaml
+# PATH / VIRTUAL_ENV が export 済みのため Job Pod で venv が再現される
+```
+
+### 2.4 ジョブ一覧表示
+
+```bash
+cjob list
+```
+
+### 2.5 状態確認
+
+```bash
+cjob status <job-id>
+```
+
+### 2.6 キャンセル
+
+```bash
+cjob cancel <job-id>
+```
+
+### 2.7 ログ取得
+
+```bash
+# 完了後に確認
+cjob logs <job-id>
+
+# リアルタイム追跡
+cjob logs --follow <job-id>
+```
+
+### 2.8 完了済みジョブの削除
+
+```bash
+# 単体指定
+cjob delete 5
+
+# 範囲指定・複数指定
+cjob delete 1-5
+cjob delete 1,3,5
+cjob delete 1-5,8,10-12
+
+# 完了済みジョブを全て削除（実行中ジョブはスキップ）
+cjob delete --all
+```
+
+## 3. `cjob add` の動作
 
 1. `pwd` を取得する
 2. export 済み環境変数を収集する（`PATH` / `VIRTUAL_ENV` を含む）
@@ -30,7 +95,7 @@ cjob logs --follow <job-id>
 6. API にジョブ投入を行う（`image` フィールドを含む）
 7. `job_id` を表示する
 
-## 3. `cjob logs` の動作
+## 4. `cjob logs` の動作
 
 `cjob logs` はログの閲覧に特化する。ログの削除は `cjob delete` または `cjob reset` が担う。
 
@@ -78,7 +143,7 @@ $ cjob logs --follow 3
 ^C      ← ユーザーが Ctrl-C で終了
 ```
 
-## 4. `cjob list` の動作
+## 5. `cjob list` の動作
 
 `GET /v1/jobs` を呼び出し、結果を表形式で表示する。デフォルトでは最新50件を JOB_ID 昇順で表示する。
 
@@ -110,7 +175,7 @@ cjob list --limit 10         # 最新 10 件のみ表示
 
 command は長い場合に末尾を省略して表示する（例: 40文字で切り捨て）。
 
-## 5. `cjob status` の動作
+## 6. `cjob status` の動作
 
 `GET /v1/jobs/{job_id}` を呼び出し、主要フィールドを整形して表示する。
 
@@ -134,7 +199,7 @@ $ cjob status 999
 エラー: job_id 999 が見つかりません。
 ```
 
-## 6. CLI の設定
+## 7. CLI の設定
 
 Submit API のエンドポイントは環境変数 `CJOB_API_URL` から読む。未設定時はデフォルト値を使用する。
 
@@ -145,7 +210,7 @@ SUBMIT_API_URL = env("CJOB_API_URL")
               ?? "http://submit-api.cjob-system.svc.cluster.local:8080"
 ```
 
-## 7. `cjob cancel` の動作
+## 8. `cjob cancel` の動作
 
 job_id の指定形式をパースして job_id のリストに展開し、`POST /v1/jobs/cancel` を呼ぶ。
 
@@ -160,7 +225,7 @@ fn parse_job_ids(expr) -> Vec<u32>:
     重複除去して昇順ソートして返す
 ```
 
-## 8. `cjob delete` の動作
+## 9. `cjob delete` の動作
 
 `--all` フラグがある場合は job_ids を省略して `POST /v1/jobs/delete` を呼ぶ。
 それ以外は job_id の指定形式をパースして job_id のリストに展開してから呼ぶ。
@@ -185,7 +250,7 @@ fn cmd_delete(expr, all: bool):
         not_found があれば "見つかりませんでした" を表示する
 ```
 
-## 9. `cjob reset` の動作
+## 10. `cjob reset` の動作
 
 1. `GET /v1/jobs` でジョブ一覧を取得し、以下の順で確認する
    - `DELETING` のジョブが1件でも存在する場合は「前回のリセット処理がまだ完了していません。しばらく待ってから再試行してください。」を表示して中止する

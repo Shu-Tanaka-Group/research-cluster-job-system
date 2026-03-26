@@ -55,7 +55,7 @@ cjob reset                           # 全ジョブ履歴・ログ削除、job_i
 ## 開発ドキュメント一覧
 
 - システムアーキテクチャ（インデックス）: docs/system_architecture.md
-  - 機能要件・使用例: docs/architecture/requirements.md
+  - 機能要件: docs/architecture/requirements.md
   - 環境前提: docs/architecture/prerequisites.md
   - システム設計: docs/architecture/system_design.md
   - PostgreSQL 設計: docs/architecture/database.md
