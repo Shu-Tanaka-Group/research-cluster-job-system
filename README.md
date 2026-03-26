@@ -179,6 +179,15 @@ mv /tmp/cjob ~/.local/bin/cjob
 stateDiagram-v2
       [*] --> QUEUED : cjob add
 
+      state "**QUEUED**\n投入済み、Dispatcher の選択待ち" as QUEUED
+      state "**DISPATCHING**\nDispatcher が K8s Job を作成中" as DISPATCHING
+      state "**DISPATCHED**\nK8s Job 作成済み、Kueue のリソース割当て待ち" as DISPATCHED
+      state "**RUNNING**\nPod 実行中" as RUNNING
+      state "**SUCCEEDED**\n正常完了" as SUCCEEDED
+      state "**FAILED**\n失敗（エラー / 時間超過 / 再試行上限）" as FAILED
+      state "**CANCELLED**\nユーザーがキャンセル" as CANCELLED
+      state "**DELETING**\ncjob reset 後の削除処理中" as DELETING
+
       QUEUED --> DISPATCHING : Dispatcher がジョブを選択
       QUEUED --> CANCELLED : cjob cancel
 
@@ -199,31 +208,4 @@ stateDiagram-v2
       CANCELLED --> DELETING : cjob reset
 
       DELETING --> [*] : K8s Job 削除完了後に DB レコード削除
-
-      note right of QUEUED
-          投入済み、Dispatcher の選択待ち
-      end note
-      note right of DISPATCHING
-          Dispatcher が K8s Job を作成中
-      end note
-      note right of DISPATCHED
-          K8s Job 作成済み
-          Kueue のリソース割当て待ち
-      end note
-      note right of RUNNING
-          Pod 実行中
-      end note
-      note right of SUCCEEDED
-          正常完了
-      end note
-      note right of FAILED
-          失敗（エラー / 時間超過 / 再試行上限）
-      end note
-      note right of CANCELLED
-          ユーザーがキャンセル
-      end note
-      note right of DELETING
-          cjob reset 後の削除処理中
-      end note
 ```
-
