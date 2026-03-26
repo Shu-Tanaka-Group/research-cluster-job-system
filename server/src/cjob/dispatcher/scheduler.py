@@ -56,7 +56,7 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
             "  LEFT JOIN namespace_resource_usage u ON q.namespace = u.namespace "
             "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
             "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
-            "ORDER BY q.rn ASC, "
+            "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
             "  GREATEST("
             "    COALESCE(u.cpu_millicores_seconds, 0) * 1.0 / :cluster_cpu_millicores,"
             "    COALESCE(u.memory_mib_seconds, 0) * 1.0 / :cluster_memory_mib,"
@@ -68,6 +68,7 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
         {
             "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
             "batch_size": settings.DISPATCH_BATCH_SIZE,
+            "round_size": settings.DISPATCH_ROUND_SIZE,
             "cluster_cpu_millicores": settings.CLUSTER_TOTAL_CPU_MILLICORES,
             "cluster_memory_mib": settings.CLUSTER_TOTAL_MEMORY_MIB,
             "cluster_gpus": settings.CLUSTER_TOTAL_GPUS,

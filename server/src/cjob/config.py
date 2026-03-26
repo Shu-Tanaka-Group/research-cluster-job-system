@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     DISPATCH_BUDGET_PER_NAMESPACE: int = 256
     DISPATCH_BATCH_SIZE: int = 50
     DISPATCH_BUDGET_CHECK_INTERVAL_SEC: int = 10
+    DISPATCH_ROUND_SIZE: int = 1                   # jobs per namespace per round-robin round
     DISPATCH_RETRY_INTERVAL_SEC: int = 30
     DISPATCH_MAX_RETRIES: int = 5
 

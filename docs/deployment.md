@@ -78,6 +78,7 @@ data:
   POSTGRES_DB: cjob
   DISPATCH_BUDGET_PER_NAMESPACE: "256"
   DISPATCH_BATCH_SIZE: "50"
+  DISPATCH_ROUND_SIZE: "1"
   DISPATCH_BUDGET_CHECK_INTERVAL_SEC: "10"
   DISPATCH_RETRY_INTERVAL_SEC: "30"
   DISPATCH_MAX_RETRIES: "5"
@@ -684,6 +685,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DISPATCH_BATCH_SIZE
+            - name: DISPATCH_ROUND_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_ROUND_SIZE
             - name: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
               valueFrom:
                 configMapKeyRef:

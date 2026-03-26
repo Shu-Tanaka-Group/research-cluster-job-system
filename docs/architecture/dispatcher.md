@@ -45,7 +45,7 @@ SELECT q.* FROM queued q
   LEFT JOIN namespace_resource_usage u ON q.namespace = u.namespace
 WHERE COALESCE(a.active_count, 0) < :dispatch_limit          -- budget に余裕がある namespace のみ
   AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0)  -- 残り budget 分だけ取得
-ORDER BY q.rn ASC,                        -- ラウンドロビン（各 namespace から1件ずつ交互）
+ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 namespace から round_size 件ずつ交互）
          GREATEST(                         -- DRF: dominant share が小さい namespace を優先
            COALESCE(u.cpu_millicores_seconds, 0)::float / :cluster_cpu_millicores,
            COALESCE(u.memory_mib_seconds, 0)::float / :cluster_memory_mib,
@@ -57,7 +57,7 @@ LIMIT :batch_size;                         -- 1サイクルの総取得数を固
 
 このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_resource_usage` は namespace ごとに最大 1 行であり、JOIN のコストは無視できる。
 
-**ラウンドロビンの仕組み：** `ROW_NUMBER()` を QUEUED ジョブのみに振り、`ORDER BY rn ASC` とすることで、各 namespace の rn=1（最古の QUEUED ジョブ）が全 namespace 分先に並び、次に rn=2 が全 namespace 分並ぶ。`LIMIT :batch_size` で打ち切ることで、namespace 間で均等に dispatch される。
+**ラウンドロビンの仕組み：** `ROW_NUMBER()` を QUEUED ジョブのみに振り、`CEIL(rn / round_size)` でグループ化することで、各 namespace から `DISPATCH_ROUND_SIZE` 件ずつ交互に取得する。デフォルト（`round_size = 1`）では各 namespace から 1 件ずつ交互に並び、`round_size = 5` なら 5 件ずつまとめて並ぶ。`LIMIT :batch_size` で打ち切ることで、1 サイクルの dispatch 数が制限される。
 
 **公平性の保証（DRF）：** 各リソースの累計消費量をクラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求めてソートする。これにより、支配的リソースの消費割合が小さい namespace が優先され、namespace 数が `DISPATCH_BATCH_SIZE` を超えても公平性が維持される。`namespace_resource_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。
 
