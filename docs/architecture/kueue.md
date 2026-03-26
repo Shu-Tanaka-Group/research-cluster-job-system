@@ -129,6 +129,14 @@ K8s Job を作成 → count/jobs.batch チェック（600件上限）
 
 ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User Pod を含む namespace 内の全 Pod を対象とした上限（バグ等による無制限消費を防ぐ安全網）。ClusterQueue nominalQuota は Kueue が Job Pod の admission を判断するための上限であり、実際の実行スケジューリングを制御する。User Pod は Kueue を経由しないため ClusterQueue の制御対象外である。
 
+### 実行時間に関する制限
+
+| 制限 | 設定箇所 | 値 | 管理主体 | 適用単位 | 制限対象 |
+|---|---|---|---|---|---|
+| `DEFAULT_TIME_LIMIT_SECONDS` | ConfigMap | 86400 (24h) | Submit API | ジョブごと | `time_limit_seconds` 省略時に適用されるデフォルト実行時間上限 |
+| `MAX_TIME_LIMIT_SECONDS` | ConfigMap | 604800 (7d) | Submit API | ジョブごと | ユーザーが指定できる `time_limit_seconds` の最大値 |
+| `activeDeadlineSeconds` | K8s Job spec | DB の `time_limit_seconds` | Kubernetes | ジョブごと | Pod が Running になってからの実行時間上限。超過時に K8s が Job を終了し、Watcher が FAILED（`time limit exceeded`）に遷移させる |
+
 ## 6. Kubernetes Job テンプレート
 
 ```yaml
@@ -142,6 +150,7 @@ metadata:
     cjob.io/job-id: "1"          # job_id（Dispatcher が動的に設定）
     cjob.io/namespace: user-alice  # namespace（Dispatcher が動的に設定）
 spec:
+  activeDeadlineSeconds: 86400      # DB の time_limit_seconds をそのまま設定（Dispatcher が動的に設定）
   ttlSecondsAfterFinished: 10800    # 完了後 3時間で Job / Pod を削除
   template:
     spec:

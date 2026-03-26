@@ -187,7 +187,7 @@ class Dispatcher:
 
         # DISPATCHING への更新が確定したので続行
         try:
-            k8s.create_job(job)
+            k8s.create_job(job)  # job.time_limit_seconds を activeDeadlineSeconds に設定
             # AND status='DISPATCHING' 条件により CANCELLED を上書きしない
             # updated_rows == 0 の場合は status が CANCELLED のまま維持され、
             # Watcher が次のサイクルで CANCELLED ジョブの K8s Job を削除する（watcher.md §3 Step 5）

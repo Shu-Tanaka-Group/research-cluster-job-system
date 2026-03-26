@@ -3,7 +3,7 @@
 ## 1. 基本コマンド
 
 ```bash
-cjob add -- <command...>
+cjob add [--time-limit <duration>] -- <command...>
 cjob list
 cjob status <job-id>
 cjob cancel <job-id>              # 単体指定
@@ -91,9 +91,24 @@ cjob delete --all
 2. export 済み環境変数を収集する（`PATH` / `VIRTUAL_ENV` を含む）
 3. `JUPYTER_IMAGE` 環境変数からコンテナイメージ名を取得する
 4. `--` 以降の argv を shell-safe に連結して command を生成する
-5. ServiceAccount JWT と namespace を固定パスから読み取る
-6. API にジョブ投入を行う（`image` フィールドを含む）
-7. `job_id` を表示する
+5. `--time-limit` が指定されていれば秒数に変換する（省略時は API のデフォルト値を使用）
+6. ServiceAccount JWT と namespace を固定パスから読み取る
+7. API にジョブ投入を行う（`image`, `time_limit_seconds` フィールドを含む）
+8. `job_id` を表示する
+
+### `--time-limit` オプション
+
+実行時間の上限を指定する。省略時はサーバ側のデフォルト（24時間）が適用される。
+
+```bash
+cjob add --time-limit 3600 -- python main.py    # 秒数で指定
+cjob add --time-limit 1h -- python main.py       # 1時間
+cjob add --time-limit 6h -- python main.py       # 6時間
+cjob add --time-limit 1d -- python main.py       # 1日
+cjob add --time-limit 3d -- python main.py       # 3日
+```
+
+受け付ける表記: 整数（秒）、`<数値>s`（秒）、`<数値>h`（時間）、`<数値>d`（日）。最大 7 日。
 
 ## 4. `cjob logs` の動作
 
@@ -185,12 +200,16 @@ job_id:       2
 status:       RUNNING
 command:      python main.py --alpha 0.2 --beta 16
 cwd:          /home/jovyan/project-a/exp1
+time_limit:   24h (残り 23h 24m)
 created_at:   2026-03-23 12:35:00
 dispatched_at: 2026-03-23 12:35:05
+started_at:   2026-03-23 12:35:10
 finished_at:  -
 k8s_job_name: cjob-alice-2
 log_dir:      /home/jovyan/.cjob/logs/2
 ```
+
+`time_limit` は `time_limit_seconds` を人間が読みやすい形式で表示する。ジョブが RUNNING の場合は残り時間も併記する。
 
 存在しない job_id を指定した場合はエラーメッセージを表示して終了する。
 

@@ -17,6 +17,7 @@ CREATE TABLE jobs (
     cpu           TEXT NOT NULL,
     memory        TEXT NOT NULL,
     gpu           INTEGER NOT NULL DEFAULT 0,
+    time_limit_seconds INTEGER NOT NULL,   -- 実行時間上限（秒）。K8s Job の activeDeadlineSeconds に設定される
     status        TEXT NOT NULL,
     retry_count   INTEGER NOT NULL DEFAULT 0,
     retry_after   TIMESTAMPTZ,              -- K8s 一時障害時の再試行解禁時刻（NULL = 即時対象）
@@ -24,6 +25,7 @@ CREATE TABLE jobs (
     log_dir       TEXT,          -- /home/jovyan/.cjob/logs/<job_id>
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     dispatched_at TIMESTAMPTZ,
+    started_at    TIMESTAMPTZ,             -- Pod が RUNNING に遷移した時刻（Watcher が記録）
     finished_at   TIMESTAMPTZ,
     last_error    TEXT,
     PRIMARY KEY (namespace, job_id)

@@ -26,11 +26,12 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 1. Kubernetes Job 一覧を定期監視（または watch API を使用）
 2. Job の `status.conditions` を以下のルールで解釈する
 
-   | K8s Job の `status.conditions` | DB status |
-   |---|---|
-   | `type: Complete, status: True` | `SUCCEEDED` |
-   | `type: Failed, status: True` | `FAILED`（Pod の exit code 非0・起動失敗を含む） |
-   | 条件なし・Pod が Running 中 | `RUNNING` |
+   | K8s Job の `status.conditions` | DB status | 備考 |
+   |---|---|---|
+   | `type: Complete, status: True` | `SUCCEEDED` | |
+   | `type: Failed, status: True, reason: DeadlineExceeded` | `FAILED` | `last_error` に `"time limit exceeded"` を設定 |
+   | `type: Failed, status: True` | `FAILED` | Pod の exit code 非0・起動失敗を含む |
+   | 条件なし・Pod が Running 中 | `RUNNING` | 初回 RUNNING 遷移時に `started_at` を記録する |
 
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）

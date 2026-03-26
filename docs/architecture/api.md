@@ -39,7 +39,8 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
     "cpu": "2",
     "memory": "4Gi",
     "gpu": 0
-  }
+  },
+  "time_limit_seconds": 3600
 }
 ```
 
@@ -59,6 +60,13 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 
 ```json
 { "detail": "GPU ジョブは現在サポートされていません" }
+```
+
+`time_limit_seconds` は省略可能。省略時はサーバ側デフォルト（ConfigMap: `DEFAULT_TIME_LIMIT_SECONDS`、デフォルト 86400 = 24時間）を使用する。
+`MAX_TIME_LIMIT_SECONDS`（デフォルト 604800 = 7日）を超える値を指定した場合は 400 を返す。
+
+```json
+{ "detail": "time_limit_seconds は 604800 秒（7日）以下で指定してください" }
 ```
 
 `command` が空文字の場合は 400 を返す。
@@ -135,10 +143,12 @@ GET /v1/jobs?limit=50&order=desc
   "namespace": "user-alice",
   "command": "python main.py --alpha 0.1 --beta 16",
   "cwd": "/home/jovyan/project-a/exp1",
+  "time_limit_seconds": 86400,
   "k8s_job_name": "cjob-alice-1",
   "log_dir": "/home/jovyan/.cjob/logs/1",
   "created_at": "2026-03-23T12:34:56Z",
   "dispatched_at": "2026-03-23T12:35:02Z",
+  "started_at": "2026-03-23T12:35:10Z",
   "finished_at": "2026-03-23T12:37:10Z"
 }
 ```
