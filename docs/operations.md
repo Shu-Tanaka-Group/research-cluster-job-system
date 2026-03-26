@@ -166,7 +166,7 @@ SET cpu_millicores_seconds = 0,
 
 ## 4. DB スキーマの更新
 
-バージョンアップ時に新しいテーブルやカラムを追加する場合。`IF NOT EXISTS` / `IF NOT EXISTS` により冪等に実行できる。
+バージョンアップ時に新しいテーブルやカラムを追加する場合。`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` により冪等に実行できる。
 
 ```bash
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
