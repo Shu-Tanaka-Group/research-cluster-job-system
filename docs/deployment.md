@@ -594,6 +594,21 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: LOG_BASE_DIR
+            - name: DEFAULT_TIME_LIMIT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DEFAULT_TIME_LIMIT_SECONDS
+            - name: MAX_TIME_LIMIT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: MAX_TIME_LIMIT_SECONDS
+            - name: JOB_NAMESPACE_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: JOB_NAMESPACE_PREFIX
           resources:
             requests:
               cpu: "100m"
