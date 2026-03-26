@@ -88,6 +88,8 @@ data:
   CLUSTER_TOTAL_MEMORY_MIB: "1024000"
   CLUSTER_TOTAL_GPUS: "0"
   MAX_QUEUED_JOBS_PER_NAMESPACE: "2000"
+  DEFAULT_TIME_LIMIT_SECONDS: "86400"
+  MAX_TIME_LIMIT_SECONDS: "604800"
   KUEUE_LOCAL_QUEUE_NAME: default
   JOB_NAMESPACE_PREFIX: user-
   WORKSPACE_MOUNT_PATH: /home/jovyan
@@ -697,6 +699,36 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DISPATCH_MAX_RETRIES
+            - name: GAP_FILLING_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: GAP_FILLING_ENABLED
+            - name: GAP_FILLING_STALL_THRESHOLD_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: GAP_FILLING_STALL_THRESHOLD_SEC
+            - name: FAIR_SHARE_RESET_INTERVAL_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: FAIR_SHARE_RESET_INTERVAL_SEC
+            - name: CLUSTER_TOTAL_CPU_MILLICORES
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: CLUSTER_TOTAL_CPU_MILLICORES
+            - name: CLUSTER_TOTAL_MEMORY_MIB
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: CLUSTER_TOTAL_MEMORY_MIB
+            - name: CLUSTER_TOTAL_GPUS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: CLUSTER_TOTAL_GPUS
             - name: KUEUE_LOCAL_QUEUE_NAME
               valueFrom:
                 configMapKeyRef:
@@ -781,6 +813,11 @@ spec:
                 secretKeyRef:
                   name: postgres-secret
                   key: POSTGRES_PASSWORD
+            - name: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
           resources:
             requests:
               cpu: "100m"
