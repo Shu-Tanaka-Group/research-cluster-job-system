@@ -19,7 +19,7 @@ Dispatcher は PostgreSQL を定期的にスキャンし、以下の基準で di
 - namespace 数が `DISPATCH_BATCH_SIZE` を超えても累計消費量による優先で公平性が維持される
 - 1サイクルあたりの dispatch 数が固定されるため K8s API への負荷が予測可能になる
 
-**Fair sharing（DRF）：** namespace ごとの累計リソース消費量（[database.md](database.md) §4 の `namespace_resource_usage` テーブル）を参照し、Dominant Resource Fairness（DRF）に基づいて dispatch 優先度を決定する。各リソース（CPU・メモリ・GPU）をクラスタ全体の容量で正規化し、最大値（dominant share）が小さい namespace を優先的に dispatch する。これにより、リソースを多く消費した namespace の優先度が下がり、消費の少ない namespace にリソースが行き渡る。累計消費量は `FAIR_SHARE_RESET_INTERVAL_SEC`（デフォルト 7 日）ごとにリセットされる。
+**Fair sharing（DRF）：** namespace ごとの直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量（[database.md](database.md) §4 の `namespace_daily_usage` テーブル）を参照し、Dominant Resource Fairness（DRF）に基づいて dispatch 優先度を決定する。各リソース（CPU・メモリ・GPU）をクラスタ全体の容量で正規化し、最大値（dominant share）が小さい namespace を優先的に dispatch する。これにより、リソースを多く消費した namespace の優先度が下がり、消費の少ない namespace にリソースが行き渡る。日別の消費量をスライディングウィンドウで集計するため、一括リセットの断崖が生じない。
 
 ### 1.2 DB スキャンのクエリ方針
 
@@ -42,7 +42,15 @@ queued AS (
 )
 SELECT q.* FROM queued q
   LEFT JOIN active a USING (namespace)
-  LEFT JOIN namespace_resource_usage u ON q.namespace = u.namespace
+  LEFT JOIN (                              -- 直近 N 日のウィンドウ集計
+    SELECT namespace,
+           SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,
+           SUM(memory_mib_seconds) AS memory_mib_seconds,
+           SUM(gpu_seconds) AS gpu_seconds
+    FROM namespace_daily_usage
+    WHERE usage_date > CURRENT_DATE - :window_days
+    GROUP BY namespace
+  ) u ON q.namespace = u.namespace
 WHERE COALESCE(a.active_count, 0) < :dispatch_limit          -- budget に余裕がある namespace のみ
   AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0)  -- 残り budget 分だけ取得
 ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 namespace から round_size 件ずつ交互）
@@ -55,13 +63,13 @@ ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 nam
 LIMIT :batch_size;                         -- 1サイクルの総取得数を固定
 ```
 
-このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_resource_usage` は namespace ごとに最大 1 行であり、JOIN のコストは無視できる。
+このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_daily_usage` のウィンドウ集計はサブクエリで行い、namespace ごとに 1 行に集約されるため JOIN のコストは無視できる（20 namespace × 7 日 = 140 行程度）。
 
 **ラウンドロビンの仕組み：** `ROW_NUMBER()` を QUEUED ジョブのみに振り、`CEIL(rn / round_size)` でグループ化することで、各 namespace から `DISPATCH_ROUND_SIZE` 件ずつ交互に取得する。デフォルト（`round_size = 1`）では各 namespace から 1 件ずつ交互に並び、`round_size = 5` なら 5 件ずつまとめて並ぶ。`LIMIT :batch_size` で打ち切ることで、1 サイクルの dispatch 数が制限される。
 
-**公平性の保証（DRF）：** 各リソースの累計消費量をクラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求めてソートする。これにより、支配的リソースの消費割合が小さい namespace が優先され、namespace 数が `DISPATCH_BATCH_SIZE` を超えても公平性が維持される。`namespace_resource_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。
+**公平性の保証（DRF）：** 直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量をクラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求めてソートする。これにより、支配的リソースの消費割合が小さい namespace が優先され、namespace 数が `DISPATCH_BATCH_SIZE` を超えても公平性が維持される。`namespace_daily_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。
 
-**期間リセット：** `fetch_dispatchable_jobs()` の実行前に、`period_start` が `FAIR_SHARE_RESET_INTERVAL_SEC` を超過した行のカウンタをリセットする（[database.md](database.md) §4.3 参照）。
+**古い行の削除：** `fetch_dispatchable_jobs()` の実行前に、ウィンドウ外の古い行を削除する（[database.md](database.md) §4.4 参照）。
 
 ### 1.3 再試行の管理
 

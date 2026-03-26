@@ -84,7 +84,7 @@ data:
   DISPATCH_MAX_RETRIES: "5"
   GAP_FILLING_ENABLED: "true"
   GAP_FILLING_STALL_THRESHOLD_SEC: "300"
-  FAIR_SHARE_RESET_INTERVAL_SEC: "604800"
+  FAIR_SHARE_WINDOW_DAYS: "7"
   CLUSTER_TOTAL_CPU_MILLICORES: "256000"
   CLUSTER_TOTAL_MEMORY_MIB: "1024000"
   CLUSTER_TOTAL_GPUS: "0"
@@ -437,13 +437,13 @@ data:
         FOREIGN KEY (namespace, job_id) REFERENCES jobs(namespace, job_id)
             ON DELETE CASCADE
     );
-    CREATE TABLE IF NOT EXISTS namespace_resource_usage (
-        namespace              TEXT PRIMARY KEY,
+    CREATE TABLE IF NOT EXISTS namespace_daily_usage (
+        namespace              TEXT NOT NULL,
+        usage_date             DATE NOT NULL,
         cpu_millicores_seconds BIGINT NOT NULL DEFAULT 0,
         memory_mib_seconds     BIGINT NOT NULL DEFAULT 0,
         gpu_seconds            BIGINT NOT NULL DEFAULT 0,
-        period_start           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        PRIMARY KEY (namespace, usage_date)
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
     CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ON jobs (namespace, status);

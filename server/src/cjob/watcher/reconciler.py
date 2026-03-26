@@ -84,25 +84,22 @@ def parse_memory_mib(memory: str) -> int:
 
 
 def _record_resource_usage(session: Session, job: Job):
-    """Add resource usage to namespace_resource_usage on RUNNING transition."""
+    """Add resource usage to namespace_daily_usage on RUNNING transition."""
     delta_cpu = job.time_limit_seconds * parse_cpu_millicores(job.cpu)
     delta_mem = job.time_limit_seconds * parse_memory_mib(job.memory)
     delta_gpu = job.time_limit_seconds * job.gpu
 
     session.execute(
         text(
-            "INSERT INTO namespace_resource_usage "
-            "(namespace, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds, "
-            "period_start, updated_at) "
-            "VALUES (:namespace, :delta_cpu, :delta_mem, :delta_gpu, "
-            "NOW(), NOW()) "
-            "ON CONFLICT (namespace) DO UPDATE SET "
-            "cpu_millicores_seconds = namespace_resource_usage.cpu_millicores_seconds "
+            "INSERT INTO namespace_daily_usage "
+            "(namespace, usage_date, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds) "
+            "VALUES (:namespace, date('now'), :delta_cpu, :delta_mem, :delta_gpu) "
+            "ON CONFLICT (namespace, usage_date) DO UPDATE SET "
+            "cpu_millicores_seconds = namespace_daily_usage.cpu_millicores_seconds "
             "+ :delta_cpu, "
-            "memory_mib_seconds = namespace_resource_usage.memory_mib_seconds "
+            "memory_mib_seconds = namespace_daily_usage.memory_mib_seconds "
             "+ :delta_mem, "
-            "gpu_seconds = namespace_resource_usage.gpu_seconds + :delta_gpu, "
-            "updated_at = NOW()"
+            "gpu_seconds = namespace_daily_usage.gpu_seconds + :delta_gpu"
         ),
         {
             "namespace": job.namespace,

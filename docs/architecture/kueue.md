@@ -143,12 +143,12 @@ ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User P
 
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
 |---|---|---|---|---|---|
-| `FAIR_SHARE_RESET_INTERVAL_SEC` | ConfigMap | 604800 (7日) | Dispatcher | 全体 | 累計リソース消費量のリセット間隔（秒）。Dispatcher が参照時に `period_start` からの経過がこの値を超えていたらリセットする |
+| `FAIR_SHARE_WINDOW_DAYS` | ConfigMap | 7 | Dispatcher | 全体 | DRF の消費量集計に使用するスライディングウィンドウの日数。直近 N 日分の日別消費量を合計して dominant share を計算する |
 | `CLUSTER_TOTAL_CPU_MILLICORES` | ConfigMap | 256000 (256コア) | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体の CPU 容量（ミリコア）。ClusterQueue の `nominalQuota` CPU と一致させる |
 | `CLUSTER_TOTAL_MEMORY_MIB` | ConfigMap | 1024000 (1000GiB) | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体のメモリ容量（MiB）。ClusterQueue の `nominalQuota` memory と一致させる |
 | `CLUSTER_TOTAL_GPUS` | ConfigMap | 0 | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体の GPU 数。0 の場合、GPU は DRF の計算から除外される |
 
-累計リソース消費量の詳細は [database.md](database.md) §4、DRF によるスケジューリングの詳細は [dispatcher.md](dispatcher.md) §1.1・§1.2 を参照。
+日別リソース消費量の詳細は [database.md](database.md) §4、DRF によるスケジューリングの詳細は [dispatcher.md](dispatcher.md) §1.1・§1.2 を参照。
 
 ### 実行時間に関する制限
 

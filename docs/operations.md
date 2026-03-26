@@ -39,37 +39,39 @@ FROM jobs WHERE status = 'RUNNING' ORDER BY started_at;
 ### 1.3 累計リソース消費量の確認
 
 ```bash
-# 全 namespace の累計消費量
+# 日別の消費量（生データ）
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT * FROM namespace_resource_usage ORDER BY namespace;
+SELECT * FROM namespace_daily_usage ORDER BY namespace, usage_date;
+"
+
+# 直近 7 日間のウィンドウ集計（Dispatcher が使用する値と同等）
+kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
+SELECT
+  namespace,
+  SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,
+  SUM(memory_mib_seconds) AS memory_mib_seconds,
+  SUM(gpu_seconds) AS gpu_seconds
+FROM namespace_daily_usage
+WHERE usage_date > CURRENT_DATE - 7
+GROUP BY namespace ORDER BY namespace;
 "
 
 # DRF の dominant share を確認（Dispatcher のソート順序と同等）
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
 SELECT
   namespace,
-  cpu_millicores_seconds,
-  memory_mib_seconds,
-  gpu_seconds,
+  SUM(cpu_millicores_seconds) AS cpu_total,
+  SUM(memory_mib_seconds) AS mem_total,
+  SUM(gpu_seconds) AS gpu_total,
   GREATEST(
-    cpu_millicores_seconds * 1.0 / 256000,
-    memory_mib_seconds * 1.0 / 1024000,
-    gpu_seconds * 1.0 / NULLIF(0, 0)
-  ) AS dominant_share,
-  period_start,
-  updated_at
-FROM namespace_resource_usage
+    SUM(cpu_millicores_seconds) * 1.0 / 256000,
+    SUM(memory_mib_seconds) * 1.0 / 1024000,
+    SUM(gpu_seconds) * 1.0 / NULLIF(0, 0)
+  ) AS dominant_share
+FROM namespace_daily_usage
+WHERE usage_date > CURRENT_DATE - 7
+GROUP BY namespace
 ORDER BY dominant_share ASC NULLS FIRST;
-"
-
-# 集計期間の残り時間を確認
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT
-  namespace,
-  period_start,
-  NOW() - period_start AS elapsed,
-  MAKE_INTERVAL(secs => 604800) - (NOW() - period_start) AS remaining
-FROM namespace_resource_usage ORDER BY namespace;
 "
 ```
 
@@ -144,23 +146,12 @@ kubectl get configmap cjob-config -n cjob-system -o yaml
 ```bash
 # 特定 namespace のリセット
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-UPDATE namespace_resource_usage
-SET cpu_millicores_seconds = 0,
-    memory_mib_seconds = 0,
-    gpu_seconds = 0,
-    period_start = NOW(),
-    updated_at = NOW()
-WHERE namespace = '<namespace>';
+DELETE FROM namespace_daily_usage WHERE namespace = '<namespace>';
 "
 
 # 全 namespace のリセット
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-UPDATE namespace_resource_usage
-SET cpu_millicores_seconds = 0,
-    memory_mib_seconds = 0,
-    gpu_seconds = 0,
-    period_start = NOW(),
-    updated_at = NOW();
+DELETE FROM namespace_daily_usage;
 "
 ```
 
@@ -170,13 +161,13 @@ SET cpu_millicores_seconds = 0,
 
 ```bash
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-CREATE TABLE IF NOT EXISTS namespace_resource_usage (
-    namespace              TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS namespace_daily_usage (
+    namespace              TEXT NOT NULL,
+    usage_date             DATE NOT NULL,
     cpu_millicores_seconds BIGINT NOT NULL DEFAULT 0,
     memory_mib_seconds     BIGINT NOT NULL DEFAULT 0,
     gpu_seconds            BIGINT NOT NULL DEFAULT 0,
-    period_start           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    PRIMARY KEY (namespace, usage_date)
 );
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS time_limit_seconds INTEGER NOT NULL DEFAULT 86400;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;

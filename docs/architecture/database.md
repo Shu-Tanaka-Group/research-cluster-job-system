@@ -76,20 +76,20 @@ CREATE TABLE job_events (
 );
 ```
 
-## 4. `namespace_resource_usage` テーブル
+## 4. `namespace_daily_usage` テーブル
 
-namespace ごとの累計リソース消費量を記録する。Dispatcher の fair sharing（dispatch 優先度の調整）に使用する。
+namespace ごとの日別リソース消費量を記録する。Dispatcher の fair sharing（dispatch 優先度の調整）に使用する。直近 `FAIR_SHARE_WINDOW_DAYS` 日分の合計をスライディングウィンドウで計算し、DRF の dominant share を求める。
 
 `jobs` テーブルとは独立しており、`cjob reset` による jobs レコード削除の影響を受けない。
 
 ```sql
-CREATE TABLE namespace_resource_usage (
-    namespace              TEXT PRIMARY KEY,
+CREATE TABLE namespace_daily_usage (
+    namespace              TEXT NOT NULL,
+    usage_date             DATE NOT NULL,
     cpu_millicores_seconds BIGINT NOT NULL DEFAULT 0,
     memory_mib_seconds     BIGINT NOT NULL DEFAULT 0,
     gpu_seconds            BIGINT NOT NULL DEFAULT 0,
-    period_start           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    PRIMARY KEY (namespace, usage_date)
 );
 ```
 
@@ -97,56 +97,63 @@ CREATE TABLE namespace_resource_usage (
 
 | カラム | 型 | 説明 |
 |---|---|---|
-| `namespace` | TEXT PK | ユーザーの namespace |
-| `cpu_millicores_seconds` | BIGINT | `time_limit_seconds × cpu（ミリコア換算）` の累計。"2" → 2000, "0.5" → 500 |
-| `memory_mib_seconds` | BIGINT | `time_limit_seconds × memory（MiB 換算）` の累計。"4Gi" → 4096, "500Mi" → 500 |
-| `gpu_seconds` | BIGINT | `time_limit_seconds × gpu（個数）` の累計 |
-| `period_start` | TIMESTAMPTZ | 現在の集計期間の開始時刻 |
-| `updated_at` | TIMESTAMPTZ | 最終更新時刻 |
+| `namespace` | TEXT | ユーザーの namespace |
+| `usage_date` | DATE | 消費が記録された日（UTC） |
+| `cpu_millicores_seconds` | BIGINT | `time_limit_seconds × cpu（ミリコア換算）` のその日の合計。"2" → 2000, "0.5" → 500 |
+| `memory_mib_seconds` | BIGINT | `time_limit_seconds × memory（MiB 換算）` のその日の合計。"4Gi" → 4096, "500Mi" → 500 |
+| `gpu_seconds` | BIGINT | `time_limit_seconds × gpu（個数）` のその日の合計 |
 
 ### 4.2 加算処理
 
-Watcher がジョブを RUNNING に遷移させる際に、`started_at` の記録と同じトランザクション内で累計消費量を加算する。
+Watcher がジョブを RUNNING に遷移させる際に、`started_at` の記録と同じトランザクション内で当日分の消費量を加算する。
 
 加算量の計算: `time_limit_seconds × リソース量`（方式 C: 予約のみ、返却なし）。ジョブが `time_limit_seconds` より早く完了しても返却しない。これにより、ユーザーが `time_limit_seconds` を適切に見積もるインセンティブが生まれ、隙間充填（gap filling）の推定精度も向上する。
 
 CANCELLED に対する特別処理は不要。RUNNING 前のキャンセルは加算されておらず、RUNNING 中のキャンセルは既に加算済みで返却しない。
 
 ```sql
-INSERT INTO namespace_resource_usage (namespace, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds, period_start, updated_at)
-VALUES (:namespace, :delta_cpu, :delta_mem, :delta_gpu, NOW(), NOW())
-ON CONFLICT (namespace) DO UPDATE SET
-    cpu_millicores_seconds = namespace_resource_usage.cpu_millicores_seconds + EXCLUDED.cpu_millicores_seconds,
-    memory_mib_seconds     = namespace_resource_usage.memory_mib_seconds + EXCLUDED.memory_mib_seconds,
-    gpu_seconds            = namespace_resource_usage.gpu_seconds + EXCLUDED.gpu_seconds,
-    updated_at = NOW();
+INSERT INTO namespace_daily_usage (namespace, usage_date, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds)
+VALUES (:namespace, CURRENT_DATE, :delta_cpu, :delta_mem, :delta_gpu)
+ON CONFLICT (namespace, usage_date) DO UPDATE SET
+    cpu_millicores_seconds = namespace_daily_usage.cpu_millicores_seconds + EXCLUDED.cpu_millicores_seconds,
+    memory_mib_seconds     = namespace_daily_usage.memory_mib_seconds + EXCLUDED.memory_mib_seconds,
+    gpu_seconds            = namespace_daily_usage.gpu_seconds + EXCLUDED.gpu_seconds;
 ```
 
-アトミックな UPSERT により、初回は INSERT（`period_start = NOW()`）、以降は加算のみ（`period_start` は変更しない）。
+アトミックな UPSERT により、その日の初回は INSERT、以降は加算。
 
-### 4.3 期間リセット
+### 4.3 ウィンドウ集計
 
-Dispatcher が `fetch_dispatchable_jobs()` を実行する直前に、`period_start` を確認し、集計期間を超過していたらリセットする。リセットは DRF のソートに使用する累計消費量を参照する前に実行されるため、期間超過した古いデータが dispatch 優先度に影響することはない。
+Dispatcher が `fetch_dispatchable_jobs()` で DRF の dominant share を計算する際に、直近 `FAIR_SHARE_WINDOW_DAYS` 日分の消費量を集計する。
 
 ```sql
-UPDATE namespace_resource_usage
-SET cpu_millicores_seconds = 0,
-    memory_mib_seconds = 0,
-    gpu_seconds = 0,
-    period_start = NOW(),
-    updated_at = NOW()
-WHERE NOW() - period_start > MAKE_INTERVAL(secs => :reset_interval_seconds);
+SELECT namespace,
+       SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,
+       SUM(memory_mib_seconds) AS memory_mib_seconds,
+       SUM(gpu_seconds) AS gpu_seconds
+FROM namespace_daily_usage
+WHERE usage_date > CURRENT_DATE - :window_days
+GROUP BY namespace
 ```
 
-リセット期間は `FAIR_SHARE_RESET_INTERVAL_SEC`（デフォルト 604800 秒 = 7 日）で設定する。
+ウィンドウの外側にある古い日は自然に集計対象から外れる。毎日、最も古い日が脱落するため、一括リセットの断崖が生じない。
 
-### 4.4 設計判断
+### 4.4 古い行の削除
+
+Dispatcher が `fetch_dispatchable_jobs()` を実行する直前に、ウィンドウ外の古い行を削除する。
+
+```sql
+DELETE FROM namespace_daily_usage
+WHERE usage_date <= CURRENT_DATE - :window_days;
+```
+
+### 4.5 設計判断
 
 - **jobs テーブルと独立**: FK を持たないため、`cjob reset` の `DELETE FROM jobs` に影響されない
-- **namespace 単位で集約**: ジョブごとの明細は不要。方式 C（予約のみ）により RUNNING 遷移時に確定加算するため、後から個別ジョブの寄与を差し引く必要がない
+- **日別に分割**: スライディングウィンドウにより、一括リセットの断崖（リセット直後に全員の消費量が 0 になる問題）を解消する。毎日、最も古い日が自然に脱落するため、消費量の変化が滑らかになる
 - **リソース種別ごとにカラムを分離**: CPU・メモリ・GPU の消費パターンが異なるため、Dispatcher が重み付けを柔軟に設定できるよう分離する
-- **BIGINT の十分性**: `time_limit_seconds`（最大 604800）× `cpu_millicores`（最大 300000）でも 1 回あたり最大約 1.8 × 10^11。BIGINT（最大 9.2 × 10^18）で十分
-- **期間ベースのリセット**: 外部 CronJob ではなく Dispatcher が参照時にリセットする方式を採用。コンポーネントを増やさずシンプルに実現できる
+- **BIGINT の十分性**: `time_limit_seconds`（最大 604800）× `cpu_millicores`（最大 300000）でも 1 日あたり最大約 1.8 × 10^11。BIGINT（最大 9.2 × 10^18）で十分
+- **行数の見積もり**: namespace 数 × ウィンドウ日数。20 namespace × 7 日 = 140 行程度であり、集計クエリのコストは無視できる
 
 ## 5. 状態遷移
 
