@@ -65,6 +65,7 @@ cjob reset                           # 全ジョブ履歴・ログ削除、job_i
   - Dispatcher 設計: docs/architecture/dispatcher.md
   - Watcher 設計: docs/architecture/watcher.md
   - 実装計画: docs/architecture/implementation.md
+  - パフォーマンス分析: docs/architecture/performance.md
 - 認証・認可ガイドライン: docs/auth_policy.md
 - デプロイガイドライン: docs/deployment.md
 - ビルド手順: docs/build.md
