@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cjob"
-version = "0.1.8"
+version = "0.1.9-beta.1"
 requires-python = ">=3.12"
 dependencies = [
     "sqlalchemy>=2.0",
