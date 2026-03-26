@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from kubernetes.client import V1Job, V1JobCondition, V1JobStatus, V1ObjectMeta
 
-from cjob.models import Job, NamespaceResourceUsage, UserJobCounter
+from cjob.models import Job, NamespaceDailyUsage, UserJobCounter
 from cjob.watcher.reconciler import (
     parse_cpu_millicores,
     parse_memory_mib,
@@ -285,6 +285,25 @@ class TestParseMemoryMib:
 class TestReconcileResourceUsage:
     """Test that RUNNING transition records resource usage."""
 
+    def _get_usage(self, db_session, namespace=NS):
+        """Get the daily usage row for today."""
+        rows = (
+            db_session.query(NamespaceDailyUsage)
+            .filter(NamespaceDailyUsage.namespace == namespace)
+            .all()
+        )
+        if not rows:
+            return None
+        # Sum all rows (should be 1 for today in tests)
+        total = NamespaceDailyUsage(
+            namespace=namespace,
+            usage_date=rows[0].usage_date,
+            cpu_millicores_seconds=sum(r.cpu_millicores_seconds for r in rows),
+            memory_mib_seconds=sum(r.memory_mib_seconds for r in rows),
+            gpu_seconds=sum(r.gpu_seconds for r in rows),
+        )
+        return total
+
     def test_running_transition_records_usage(self, mock_delete, db_session):
         _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
                      gpu=0, time_limit_seconds=3600)
@@ -292,7 +311,7 @@ class TestReconcileResourceUsage:
 
         reconcile_cycle(db_session, k8s_jobs)
 
-        usage = db_session.get(NamespaceResourceUsage, NS)
+        usage = self._get_usage(db_session)
         assert usage is not None
         assert usage.cpu_millicores_seconds == 3600 * 2000  # 7_200_000
         assert usage.memory_mib_seconds == 3600 * 4096      # 14_745_600
@@ -317,7 +336,7 @@ class TestReconcileResourceUsage:
 
         reconcile_cycle(db_session, k8s_jobs2)
 
-        usage = db_session.get(NamespaceResourceUsage, NS)
+        usage = self._get_usage(db_session)
         assert usage.cpu_millicores_seconds == 100 * 1000 + 200 * 2000  # 500_000
         assert usage.memory_mib_seconds == 100 * 1024 + 200 * 2048     # 512_000
 
@@ -331,5 +350,5 @@ class TestReconcileResourceUsage:
 
         reconcile_cycle(db_session, k8s_jobs)
 
-        usage = db_session.get(NamespaceResourceUsage, NS)
+        usage = self._get_usage(db_session)
         assert usage is None  # No usage recorded

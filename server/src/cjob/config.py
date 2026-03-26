@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     GAP_FILLING_STALL_THRESHOLD_SEC: int = 300  # 5 minutes
 
     # Dispatcher - Fair Sharing
-    FAIR_SHARE_RESET_INTERVAL_SEC: int = 604800    # 7 days
+    FAIR_SHARE_WINDOW_DAYS: int = 7
     CLUSTER_TOTAL_CPU_MILLICORES: int = 256000     # 256 cores
     CLUSTER_TOTAL_MEMORY_MIB: int = 1024000        # 1000 GiB
     CLUSTER_TOTAL_GPUS: int = 0                    # 0 = exclude GPU from DRF

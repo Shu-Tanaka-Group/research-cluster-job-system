@@ -32,7 +32,7 @@ cargo test
 | `tests/test_determine_status.py` | `watcher/reconciler.py::determine_status` | 9 | K8s Job の conditions から DB ステータスへのマッピング。SUCCEEDED / FAILED / RUNNING / DeadlineExceeded / 条件なし等 |
 | `tests/test_build_k8s_job.py` | `dispatcher/k8s_job.py::build_k8s_job` | 13 | K8s Job マニフェスト生成。ラベル / activeDeadlineSeconds / リソース / 環境変数 / ボリューム / コマンドラッピング等 |
 | `tests/test_services.py` | `api/services.py` 全関数 | 32 | submit_job（time_limit バリデーション含む）/ list_jobs / get_job / cancel / delete / reset |
-| `tests/test_reconciler.py` | `watcher/reconciler.py` | 24 | reconcile_cycle のステータス同期（started_at / finished_at / last_error 記録）/ CANCELLED 削除 / orphan 検出 / DELETING フェーズ 1・2 / namespace 分離 / RUNNING 遷移時の累計消費量加算（namespace_resource_usage）/ parse_cpu_millicores / parse_memory_mib |
+| `tests/test_reconciler.py` | `watcher/reconciler.py` | 24 | reconcile_cycle のステータス同期（started_at / finished_at / last_error 記録）/ CANCELLED 削除 / orphan 検出 / DELETING フェーズ 1・2 / namespace 分離 / RUNNING 遷移時の累計消費量加算（namespace_daily_usage）/ parse_cpu_millicores / parse_memory_mib |
 | `tests/test_scheduler.py` | `dispatcher/scheduler.py` 4関数 | 13 | cas_update_to_dispatching / mark_dispatched / mark_failed / reset_stale_dispatching の CAS 動作・状態遷移 |
 | `tests/test_gap_filling.py` | `dispatcher/scheduler.py::apply_gap_filling` | 7 | 隙間充填フィルタリング。無効時 / 滞留なし / 残り時間による候補選択 / RUNNING なし / namespace 混在 / 残り時間 0 / 候補なし |
 | **Rust** | | | |
@@ -47,7 +47,7 @@ cargo test
 | 対象 | 理由 |
 |---|---|
 | `dispatcher/scheduler.py::fetch_dispatchable_jobs` | PostgreSQL 固有の CTE（`ROW_NUMBER() OVER` + `NOW()`）・`GREATEST` ・`NULLIF` を使用。SQLite インメモリ DB では実行不可。テストには testcontainers 等で実 PostgreSQL が必要 |
-| `dispatcher/scheduler.py::_reset_expired_usage` | `MAKE_INTERVAL(secs => ...)` が PostgreSQL 固有関数。`fetch_dispatchable_jobs` 内で呼び出される |
+| `dispatcher/scheduler.py::_cleanup_old_usage` | `CURRENT_DATE` 演算が PostgreSQL 固有。`fetch_dispatchable_jobs` 内で呼び出される |
 | `dispatcher/scheduler.py::increment_retry` | `MAKE_INTERVAL(secs => :interval)` が PostgreSQL 固有関数 |
 | `dispatcher/scheduler.py::fetch_stalled_jobs` | `NOW() - MAKE_INTERVAL(secs => :threshold)` が PostgreSQL 固有。`apply_gap_filling` テストではモックで代替 |
 | `dispatcher/scheduler.py::estimate_shortest_remaining` | `EXTRACT(EPOCH FROM ...)` + `MAKE_INTERVAL` が PostgreSQL 固有。`apply_gap_filling` テストではモックで代替 |

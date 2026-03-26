@@ -10,19 +10,14 @@ from cjob.models import Job, JobEvent
 logger = logging.getLogger(__name__)
 
 
-def _reset_expired_usage(session: Session, settings: Settings):
-    """Reset namespace_resource_usage rows whose period has expired."""
+def _cleanup_old_usage(session: Session, settings: Settings):
+    """Delete namespace_daily_usage rows outside the sliding window."""
     session.execute(
         text(
-            "UPDATE namespace_resource_usage "
-            "SET cpu_millicores_seconds = 0, "
-            "memory_mib_seconds = 0, "
-            "gpu_seconds = 0, "
-            "period_start = NOW(), "
-            "updated_at = NOW() "
-            "WHERE NOW() - period_start > MAKE_INTERVAL(secs => :reset_interval)"
+            "DELETE FROM namespace_daily_usage "
+            "WHERE usage_date <= CURRENT_DATE - :window_days"
         ),
-        {"reset_interval": settings.FAIR_SHARE_RESET_INTERVAL_SEC},
+        {"window_days": settings.FAIR_SHARE_WINDOW_DAYS},
     )
     session.commit()
 
@@ -31,9 +26,9 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
     """Fetch up to batch_size QUEUED jobs, round-robin across namespaces.
 
     Uses DRF (Dominant Resource Fairness) to prioritise namespaces with
-    lower cumulative resource consumption.
+    lower cumulative resource consumption over a sliding window.
     """
-    _reset_expired_usage(session, settings)
+    _cleanup_old_usage(session, settings)
 
     result = session.execute(
         text(
@@ -50,10 +45,19 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
             "  FROM jobs"
             "  WHERE status = 'QUEUED'"
             "    AND (retry_after IS NULL OR retry_after <= NOW())"
+            "), "
+            "usage AS ("
+            "  SELECT namespace,"
+            "    SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,"
+            "    SUM(memory_mib_seconds) AS memory_mib_seconds,"
+            "    SUM(gpu_seconds) AS gpu_seconds"
+            "  FROM namespace_daily_usage"
+            "  WHERE usage_date > CURRENT_DATE - :window_days"
+            "  GROUP BY namespace"
             ") "
             "SELECT q.* FROM queued q"
             "  LEFT JOIN active a USING (namespace)"
-            "  LEFT JOIN namespace_resource_usage u ON q.namespace = u.namespace "
+            "  LEFT JOIN usage u ON q.namespace = u.namespace "
             "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
             "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
             "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
@@ -69,6 +73,7 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
             "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
             "batch_size": settings.DISPATCH_BATCH_SIZE,
             "round_size": settings.DISPATCH_ROUND_SIZE,
+            "window_days": settings.FAIR_SHARE_WINDOW_DAYS,
             "cluster_cpu_millicores": settings.CLUSTER_TOTAL_CPU_MILLICORES,
             "cluster_memory_mib": settings.CLUSTER_TOTAL_MEMORY_MIB,
             "cluster_gpus": settings.CLUSTER_TOTAL_GPUS,
