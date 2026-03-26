@@ -28,12 +28,13 @@ def db_session():
     """Create an in-memory SQLite database session for testing."""
     engine = create_engine("sqlite:///:memory:")
 
-    # SQLite foreign key support
     @event.listens_for(engine, "connect")
-    def set_sqlite_pragma(dbapi_conn, _):
+    def _configure_sqlite(dbapi_conn, _):
         cursor = dbapi_conn.cursor()
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
+        # Register NOW() function for PostgreSQL compatibility in raw SQL
+        dbapi_conn.create_function("NOW", 0, lambda: "2026-01-01 00:00:00")
 
     _patch_sqlite_incompatible_types()
     Base.metadata.create_all(engine)
