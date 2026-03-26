@@ -36,14 +36,14 @@ docs/#8_update-deployment-guide
 
 <本文（任意）>
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Co-Authored-By: <モデル名> <noreply@anthropic.com>
 ```
 
 - タイトル行は英語で記述する
 - タイトル行は動詞の原形で始める（Add / Fix / Update / Implement / Remove 等）
 - issue に紐づくコミットはタイトル末尾に `(#<issue番号>)` を付ける
 - 本文は日本語でも英語でもよい。変更の目的（why）を記述する
-- Claude が作成したコミットには `Co-Authored-By` 行を付ける
+- Claude が作成したコミットには `Co-Authored-By` 行を付ける。`<モデル名>` には実行時のモデル名を使用する（例: `Claude Opus 4.6 (1M context)`, `Claude Sonnet 4.6` 等）
 
 ### タイトル行の動詞の使い分け
 
@@ -64,7 +64,7 @@ Add job execution time limit (activeDeadlineSeconds) to design docs
 巨大なリソースを要求するJobがBestEffortFIFOの下でstarvationされる問題への
 対策として、ジョブ実行時間上限を導入する。
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Co-Authored-By: <モデル名> <noreply@anthropic.com>
 ```
 
 ```
@@ -72,7 +72,7 @@ Implement gap filling dispatch logic (#2)
 
 滞留ジョブ検知と隙間充填フィルタリングを追加。
 
-Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+Co-Authored-By: <モデル名> <noreply@anthropic.com>
 ```
 
 ## 3. Pull Request
