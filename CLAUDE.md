@@ -73,4 +73,5 @@ cjob reset                           # 全ジョブ履歴・ログ削除、job_i
 
 ## Git 操作
 
-コミット・ブランチ作成・PR 作成時は [Git 運用規則](docs/git_conventions.md) に従うこと。
+- プッシュ前には毎回必ずユーザーの確認を取ること
+- コミット・ブランチ作成・PR 作成時は [Git 運用規則](docs/git_conventions.md) に従うこと。
