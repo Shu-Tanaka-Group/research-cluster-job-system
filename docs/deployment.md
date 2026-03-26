@@ -715,11 +715,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: GAP_FILLING_STALL_THRESHOLD_SEC
-            - name: FAIR_SHARE_RESET_INTERVAL_SEC
+            - name: FAIR_SHARE_WINDOW_DAYS
               valueFrom:
                 configMapKeyRef:
                   name: cjob-config
-                  key: FAIR_SHARE_RESET_INTERVAL_SEC
+                  key: FAIR_SHARE_WINDOW_DAYS
             - name: CLUSTER_TOTAL_CPU_MILLICORES
               valueFrom:
                 configMapKeyRef:
