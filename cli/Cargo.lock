@@ -139,7 +139,7 @@ dependencies = [
 
 [[package]]
 name = "cjob"
-version = "0.1.9-beta.1"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "chrono",
