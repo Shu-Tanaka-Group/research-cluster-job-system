@@ -783,7 +783,34 @@ spec:
 
 ---
 
-## 14. 初期セットアップ手順
+## 14. Kueue インストール
+
+
+マニフェストをダウンロード
+
+```bash
+curl -L -o kueue-manifests.yaml https://github.com/kubernetes-sigs/kueue/releases/download/v0.16.4/manifests.yaml
+```
+
+ファイル内で kueue-manager-config ConfigMapを探し，controller_manager_config.yaml の integrations セクションを変更．これを行わないと，KueueのQueueを適用するnamespaceの全てのリソースがKueueの管理対象となる．例えば，JupyterHubのユーザーnamespaceをKueueの適用対象とした場合，Notebook PodもKueueの対象となるため，起動に失敗する．
+
+```yaml
+integrations:
+  frameworks:
+    - "batch/job"
+    # - Pos # ←PodやDeploymentなどを範囲対象から外す
+```
+
+Kueue リソースの作成
+
+```bash
+kubectl apply -f kueue/resource-flavor.yaml
+kubectl apply -f kueue/cluster-queue.yaml
+```
+
+---
+
+## 15. 初期セットアップ手順
 
 新規クラスタへの初回セットアップ手順。
 
@@ -802,22 +829,16 @@ kubectl apply -f configmaps/postgres-schema.yaml
 kubectl apply -f rbac/submit-api-sa.yaml
 kubectl apply -f rbac/dispatcher-sa.yaml
 
-# 5. Kueue のインストール
-kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.16.4/manifests.yaml
 
-# 6. Kueue リソースの作成
-kubectl apply -f kueue/resource-flavor.yaml
-kubectl apply -f kueue/cluster-queue.yaml
-
-# 7. PostgreSQL のデプロイ
+# 5. PostgreSQL のデプロイ
 kubectl apply -f statefulsets/postgres.yaml
 
-# 8. DB スキーマの初期化
+# 6. DB スキーマの初期化
 # postgres-schema ConfigMap の schema.sql が /docker-entrypoint-initdb.d/ にマウントされ、
 # PostgreSQL 初回起動時に自動実行される。
 # IF NOT EXISTS を使用しているため再デプロイ時も安全に再実行できる。
 
-# 9. システムコンポーネント image のビルドと push
+# 7. システムコンポーネント image のビルドと push
 docker build -t yusekiya/cjob-submit-api:latest -f Dockerfile.submit-api .
 docker push yusekiya/cjob-submit-api:latest
 
@@ -829,19 +850,19 @@ docker push yusekiya/cjob-watcher:latest
 
 # Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
 
-# 10. Submit API のデプロイ
+# 8. Submit API のデプロイ
 kubectl apply -f deployments/submit-api.yaml
 
-# 11. Dispatcher のデプロイ
+# 9. Dispatcher のデプロイ
 kubectl apply -f deployments/dispatcher.yaml
 
-# 12. Watcher のデプロイ
+# 10. Watcher のデプロイ
 kubectl apply -f deployments/watcher.yaml
 
-# 13. NetworkPolicy の適用
+# 11. NetworkPolicy の適用
 kubectl apply -f networkpolicies/allow-submit-api.yaml
 
-# 14. 各ユーザーの namespace 作成
+# 12. 各ユーザーの namespace 作成
 ./scripts/create-user-namespace.sh alice
 ./scripts/create-user-namespace.sh bob
 ```
