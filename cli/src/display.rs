@@ -96,3 +96,92 @@ pub fn print_job_detail(job: &JobDetailResponse) {
         job.log_dir.as_deref().unwrap_or("-")
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::client::JobDetailResponse;
+
+    #[test]
+    fn test_format_duration_days() {
+        assert_eq!(format_duration(86400), "1d 0h");
+        assert_eq!(format_duration(90000), "1d 1h");
+        assert_eq!(format_duration(604800), "7d 0h");
+    }
+
+    #[test]
+    fn test_format_duration_hours() {
+        assert_eq!(format_duration(3600), "1h 0m");
+        assert_eq!(format_duration(5400), "1h 30m");
+        assert_eq!(format_duration(82800), "23h 0m");
+    }
+
+    #[test]
+    fn test_format_duration_minutes() {
+        assert_eq!(format_duration(0), "0m");
+        assert_eq!(format_duration(60), "1m");
+        assert_eq!(format_duration(3599), "59m");
+    }
+
+    fn make_job(status: &str, time_limit_seconds: u32, started_at: Option<&str>) -> JobDetailResponse {
+        JobDetailResponse {
+            job_id: 1,
+            status: status.to_string(),
+            namespace: "user-test".to_string(),
+            command: "echo hello".to_string(),
+            cwd: "/home/jovyan".to_string(),
+            time_limit_seconds,
+            k8s_job_name: None,
+            log_dir: None,
+            created_at: "2026-03-23T12:00:00Z".to_string(),
+            dispatched_at: None,
+            started_at: started_at.map(|s| s.to_string()),
+            finished_at: None,
+        }
+    }
+
+    #[test]
+    fn test_format_time_limit_not_running() {
+        let job = make_job("QUEUED", 86400, None);
+        assert_eq!(format_time_limit(&job), "1d 0h");
+    }
+
+    #[test]
+    fn test_format_time_limit_running_no_started_at() {
+        let job = make_job("RUNNING", 3600, None);
+        assert_eq!(format_time_limit(&job), "1h 0m");
+    }
+
+    #[test]
+    fn test_format_time_limit_running_with_started_at() {
+        // Use a started_at far in the past so remaining is 0
+        let job = make_job("RUNNING", 3600, Some("2020-01-01T00:00:00Z"));
+        let result = format_time_limit(&job);
+        assert!(result.contains("残り"));
+        assert!(result.contains("0m"));
+    }
+
+    #[test]
+    fn test_format_time_limit_running_just_started() {
+        // Use current time as started_at so remaining ≈ full time_limit
+        let now = chrono::Utc::now().to_rfc3339();
+        let job = make_job("RUNNING", 86400, Some(&now));
+        let result = format_time_limit(&job);
+        assert!(result.starts_with("1d 0h"));
+        assert!(result.contains("残り"));
+    }
+
+    #[test]
+    fn test_format_time_limit_succeeded() {
+        let job = make_job("SUCCEEDED", 86400, Some("2026-03-23T12:00:00Z"));
+        // Non-RUNNING status should not show remaining time
+        assert_eq!(format_time_limit(&job), "1d 0h");
+    }
+
+    #[test]
+    fn test_format_time_limit_invalid_started_at() {
+        let job = make_job("RUNNING", 3600, Some("not-a-date"));
+        // Invalid date should fall back to just the limit string
+        assert_eq!(format_time_limit(&job), "1h 0m");
+    }
+}
