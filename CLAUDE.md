@@ -69,3 +69,8 @@ cjob reset                           # 全ジョブ履歴・ログ削除、job_i
 - デプロイガイドライン: docs/deployment.md
 - ビルド手順: docs/build.md
 - テスト: docs/testing.md
+- Git 運用規則: docs/git_conventions.md
+
+## Git 操作
+
+コミット・ブランチ作成・PR 作成時は [Git 運用規則](docs/git_conventions.md) に従うこと。
