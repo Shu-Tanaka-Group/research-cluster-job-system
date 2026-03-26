@@ -85,6 +85,23 @@ def submit_job(
             detail="GPU ジョブは現在サポートされていません",
         )
 
+    # Resolve time_limit_seconds
+    time_limit = req.time_limit_seconds if req.time_limit_seconds is not None else settings.DEFAULT_TIME_LIMIT_SECONDS
+    if time_limit > settings.MAX_TIME_LIMIT_SECONDS:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=400,
+            detail=f"time_limit_seconds は {settings.MAX_TIME_LIMIT_SECONDS} 秒（7日）以下で指定してください",
+        )
+    if time_limit <= 0:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=400,
+            detail="time_limit_seconds は 1 以上で指定してください",
+        )
+
     # Extract username from namespace
     user = namespace.removeprefix(settings.JOB_NAMESPACE_PREFIX)
 
@@ -106,6 +123,7 @@ def submit_job(
         cpu=req.resources.cpu,
         memory=req.resources.memory,
         gpu=req.resources.gpu,
+        time_limit_seconds=time_limit,
         status="QUEUED",
         log_dir=log_dir,
     )
@@ -174,10 +192,12 @@ def get_job(
         namespace=job.namespace,
         command=job.command,
         cwd=job.cwd,
+        time_limit_seconds=job.time_limit_seconds,
         k8s_job_name=job.k8s_job_name,
         log_dir=job.log_dir,
         created_at=job.created_at,
         dispatched_at=job.dispatched_at,
+        started_at=job.started_at,
         finished_at=job.finished_at,
     )
 

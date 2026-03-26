@@ -101,6 +101,7 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
             },
         ),
         spec=k8s_client.V1JobSpec(
+            active_deadline_seconds=job.time_limit_seconds,
             ttl_seconds_after_finished=10800,
             template=k8s_client.V1PodTemplateSpec(spec=pod_spec),
         ),

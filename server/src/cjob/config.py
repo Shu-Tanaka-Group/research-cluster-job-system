@@ -20,6 +20,8 @@ class Settings(BaseSettings):
 
     # Submit API
     MAX_QUEUED_JOBS_PER_NAMESPACE: int = 2000
+    DEFAULT_TIME_LIMIT_SECONDS: int = 86400   # 24 hours
+    MAX_TIME_LIMIT_SECONDS: int = 604800      # 7 days
 
     # Kueue
     KUEUE_LOCAL_QUEUE_NAME: str = "default"

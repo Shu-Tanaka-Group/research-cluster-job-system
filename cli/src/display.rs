@@ -34,11 +34,43 @@ pub fn print_job_table(jobs: &[JobSummary]) {
     }
 }
 
+fn format_duration(secs: u32) -> String {
+    let days = secs / 86400;
+    let hours = (secs % 86400) / 3600;
+    let minutes = (secs % 3600) / 60;
+    if days > 0 {
+        format!("{}d {}h", days, hours)
+    } else if hours > 0 {
+        format!("{}h {}m", hours, minutes)
+    } else {
+        format!("{}m", minutes)
+    }
+}
+
+fn format_time_limit(job: &JobDetailResponse) -> String {
+    let limit_str = format_duration(job.time_limit_seconds);
+    if job.status == "RUNNING" {
+        if let Some(ref started) = job.started_at {
+            // Parse started_at and compute remaining time
+            if let Ok(started_dt) = chrono::DateTime::parse_from_rfc3339(started) {
+                let elapsed = chrono::Utc::now()
+                    .signed_duration_since(started_dt)
+                    .num_seconds()
+                    .max(0) as u32;
+                let remaining = job.time_limit_seconds.saturating_sub(elapsed);
+                return format!("{} (残り {})", limit_str, format_duration(remaining));
+            }
+        }
+    }
+    limit_str
+}
+
 pub fn print_job_detail(job: &JobDetailResponse) {
     println!("job_id:        {}", job.job_id);
     println!("status:        {}", job.status);
     println!("command:       {}", job.command);
     println!("cwd:           {}", job.cwd);
+    println!("time_limit:    {}", format_time_limit(job));
     println!(
         "created_at:    {}",
         job.created_at
@@ -46,6 +78,10 @@ pub fn print_job_detail(job: &JobDetailResponse) {
     println!(
         "dispatched_at: {}",
         job.dispatched_at.as_deref().unwrap_or("-")
+    );
+    println!(
+        "started_at:    {}",
+        job.started_at.as_deref().unwrap_or("-")
     );
     println!(
         "finished_at:   {}",

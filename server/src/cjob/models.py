@@ -31,6 +31,7 @@ class Job(Base):
     cpu: Mapped[str] = mapped_column(String, nullable=False)
     memory: Mapped[str] = mapped_column(String, nullable=False)
     gpu: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    time_limit_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -40,6 +41,7 @@ class Job(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
 

@@ -30,6 +30,10 @@ enum Commands {
         /// メモリリソース（例: "4Gi"）
         #[arg(long, default_value = "1Gi")]
         memory: String,
+
+        /// 実行時間の上限（例: 3600, 1h, 6h, 1d, 3d）
+        #[arg(long = "time-limit")]
+        time_limit: Option<String>,
     },
     /// ジョブ一覧を表示する
     List {
@@ -93,7 +97,8 @@ async fn main() -> Result<()> {
             command,
             cpu,
             memory,
-        } => cmd_add(&api_client, command, cpu, memory).await,
+            time_limit,
+        } => cmd_add(&api_client, command, cpu, memory, time_limit).await,
         Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status, limit, reverse, all).await,
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
@@ -103,11 +108,35 @@ async fn main() -> Result<()> {
     }
 }
 
+const MAX_TIME_LIMIT_SECONDS: u32 = 604800;
+
+fn parse_duration(s: &str) -> Result<u32> {
+    let s = s.trim();
+    if let Ok(secs) = s.parse::<u32>() {
+        return Ok(secs);
+    }
+    let (num_str, multiplier) = if s.ends_with('d') {
+        (&s[..s.len() - 1], 86400u32)
+    } else if s.ends_with('h') {
+        (&s[..s.len() - 1], 3600u32)
+    } else if s.ends_with('s') {
+        (&s[..s.len() - 1], 1u32)
+    } else {
+        anyhow::bail!("不正な時間指定です: {}（例: 3600, 1h, 6h, 1d, 3d）", s);
+    };
+    let num: u32 = num_str.parse().map_err(|_| {
+        anyhow::anyhow!("不正な時間指定です: {}（例: 3600, 1h, 6h, 1d, 3d）", s)
+    })?;
+    num.checked_mul(multiplier)
+        .ok_or_else(|| anyhow::anyhow!("時間指定が大きすぎます: {}", s))
+}
+
 async fn cmd_add(
     client: &client::CjobClient,
     command: Vec<String>,
     cpu: String,
     memory: String,
+    time_limit: Option<String>,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?
         .to_string_lossy()
@@ -136,6 +165,23 @@ async fn cmd_add(
         .collect::<Vec<_>>()
         .join(" ");
 
+    let time_limit_seconds = match time_limit {
+        Some(ref s) => {
+            let secs = parse_duration(s)?;
+            if secs > MAX_TIME_LIMIT_SECONDS {
+                anyhow::bail!(
+                    "time-limit は {} 秒（7日）以下で指定してください",
+                    MAX_TIME_LIMIT_SECONDS
+                );
+            }
+            if secs == 0 {
+                anyhow::bail!("time-limit は 1 以上で指定してください");
+            }
+            Some(secs)
+        }
+        None => None,
+    };
+
     let req = client::JobSubmitRequest {
         command: cmd_str,
         image,
@@ -146,6 +192,7 @@ async fn cmd_add(
             memory,
             gpu: 0,
         },
+        time_limit_seconds,
     };
 
     let resp = client.submit_job(&req).await?;

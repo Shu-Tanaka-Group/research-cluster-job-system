@@ -15,6 +15,7 @@ class JobSubmitRequest(BaseModel):
     cwd: str
     env: dict[str, str] = Field(default_factory=dict)
     resources: ResourceSpec = Field(default_factory=ResourceSpec)
+    time_limit_seconds: int | None = None
 
 
 class JobSubmitResponse(BaseModel):
@@ -41,10 +42,12 @@ class JobDetailResponse(BaseModel):
     namespace: str
     command: str
     cwd: str
+    time_limit_seconds: int
     k8s_job_name: str | None
     log_dir: str | None
     created_at: datetime
     dispatched_at: datetime | None
+    started_at: datetime | None
     finished_at: datetime | None
 
 

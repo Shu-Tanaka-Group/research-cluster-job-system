@@ -3,7 +3,7 @@ from collections import defaultdict
 
 from kubernetes import client as k8s_client
 from kubernetes.client.rest import ApiException
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from cjob.models import Job, JobEvent
@@ -24,20 +24,24 @@ def list_cjob_k8s_jobs() -> list[k8s_client.V1Job]:
         return []
 
 
-def determine_status(k8s_job: k8s_client.V1Job) -> str | None:
-    """Map K8s Job conditions to DB status."""
+def determine_status(k8s_job: k8s_client.V1Job) -> tuple[str | None, str | None]:
+    """Map K8s Job conditions to (DB status, reason).
+
+    Returns a tuple of (status, reason). reason is set for specific failure
+    modes (e.g. "DeadlineExceeded") and None otherwise.
+    """
     if k8s_job.status and k8s_job.status.conditions:
         for cond in k8s_job.status.conditions:
             if cond.type == "Complete" and cond.status == "True":
-                return "SUCCEEDED"
+                return "SUCCEEDED", None
             if cond.type == "Failed" and cond.status == "True":
-                return "FAILED"
+                return "FAILED", cond.reason
 
     # Check if pod is running
     if k8s_job.status and k8s_job.status.active and k8s_job.status.active > 0:
-        return "RUNNING"
+        return "RUNNING", None
 
-    return None
+    return None, None
 
 
 def _delete_k8s_job(namespace: str, name: str):
@@ -116,12 +120,15 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
             continue
 
         # Normal status sync (don't overwrite CANCELLED or DELETING)
-        new_status = determine_status(kj)
+        new_status, reason = determine_status(kj)
         if new_status and new_status != db_job.status:
             db_job.status = new_status
+            if new_status == "RUNNING" and db_job.started_at is None:
+                db_job.started_at = func.now()
             if new_status in ("SUCCEEDED", "FAILED"):
-                from sqlalchemy import func
                 db_job.finished_at = func.now()
+            if new_status == "FAILED" and reason == "DeadlineExceeded":
+                db_job.last_error = "time limit exceeded"
             session.add(
                 JobEvent(namespace=ns, job_id=jid, event_type=new_status)
             )

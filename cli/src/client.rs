@@ -9,6 +9,8 @@ pub struct JobSubmitRequest {
     pub cwd: String,
     pub env: std::collections::HashMap<String, String>,
     pub resources: ResourceSpec,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_limit_seconds: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -47,10 +49,12 @@ pub struct JobDetailResponse {
     pub namespace: String,
     pub command: String,
     pub cwd: String,
+    pub time_limit_seconds: u32,
     pub k8s_job_name: Option<String>,
     pub log_dir: Option<String>,
     pub created_at: String,
     pub dispatched_at: Option<String>,
+    pub started_at: Option<String>,
     pub finished_at: Option<String>,
 }
 
