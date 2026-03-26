@@ -70,6 +70,7 @@ cjob reset                           # 全ジョブ履歴・ログ削除、job_i
 - ビルド手順: docs/build.md
 - テスト: docs/testing.md
 - Git 運用規則: docs/git_conventions.md
+- 運用ガイド: docs/operations.md
 
 ## Git 操作
 
