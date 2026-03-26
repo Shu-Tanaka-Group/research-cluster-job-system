@@ -407,6 +407,7 @@ data:
         cpu           TEXT NOT NULL,
         memory        TEXT NOT NULL,
         gpu           INTEGER NOT NULL DEFAULT 0,
+        time_limit_seconds INTEGER NOT NULL,
         status        TEXT NOT NULL,
         retry_count   INTEGER NOT NULL DEFAULT 0,
         retry_after   TIMESTAMPTZ,
@@ -414,6 +415,7 @@ data:
         log_dir       TEXT,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         dispatched_at TIMESTAMPTZ,
+        started_at    TIMESTAMPTZ,
         finished_at   TIMESTAMPTZ,
         last_error    TEXT,
         PRIMARY KEY (namespace, job_id)
