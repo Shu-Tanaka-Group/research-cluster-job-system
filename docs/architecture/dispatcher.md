@@ -7,32 +7,52 @@
 Dispatcher は PostgreSQL を定期的にスキャンし、以下の基準で dispatch するジョブを選択する。
 
 1. **budget に余裕のある namespace のみ対象とする**（DISPATCHING + DISPATCHED + RUNNING < dispatch_limit）
-2. **対象 namespace の中から各 namespace 最古の QUEUED ジョブを1件ずつ取得する**（`created_at` 昇順）
-3. **各 namespace を Round-robin で処理する**
+2. **対象 namespace の QUEUED ジョブを `created_at` 昇順で取得する**
+3. **1サイクルあたりの取得数を `DISPATCH_BATCH_SIZE`（デフォルト 50）で固定する**
+4. **namespace 間を公平にラウンドロビンする**（各 namespace から1件ずつ交互に取得）
+5. **active ジョブ数が少ない namespace を優先する**（リソース消費の公平性）
 
 この方式により：
 - budget を使い切ったユーザーのジョブが他ユーザーをブロックしない
 - 同一ユーザーの投入順（`created_at` 昇順）は常に保証される
 - 複数ユーザーが同時に QUEUED 状態でも公平に処理される
+- namespace 数が `DISPATCH_BATCH_SIZE` を超えても active ジョブ数による優先で公平性が維持される
+- 1サイクルあたりの dispatch 数が固定されるため K8s API への負荷が予測可能になる
 
 ### 1.2 DB スキャンのクエリ方針
 
 ```sql
--- 各 namespace の最古の QUEUED ジョブを取得（budget に余裕がある namespace のみ）
-SELECT DISTINCT ON (namespace) *
-FROM jobs
-WHERE status = 'QUEUED'
-  AND (retry_after IS NULL OR retry_after <= NOW())
-  AND namespace NOT IN (
-    -- dispatch_limit に達した namespace を除外
-    SELECT namespace FROM jobs
-    WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')
-    GROUP BY namespace HAVING COUNT(*) >= :dispatch_limit
-  )
-ORDER BY namespace, created_at ASC;
+-- active CTE: namespace ごとの active ジョブ数を集計
+WITH active AS (
+  SELECT namespace, COUNT(*) AS active_count
+  FROM jobs
+  WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')
+  GROUP BY namespace
+),
+-- queued CTE: QUEUED ジョブのみに namespace 内の投入順（rn）を付与
+queued AS (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY namespace ORDER BY created_at ASC
+  ) AS rn
+  FROM jobs
+  WHERE status = 'QUEUED'
+    AND (retry_after IS NULL OR retry_after <= NOW())
+)
+SELECT q.* FROM queued q
+  LEFT JOIN active a USING (namespace)
+WHERE COALESCE(a.active_count, 0) < :dispatch_limit          -- budget に余裕がある namespace のみ
+  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0)  -- 残り budget 分だけ取得
+ORDER BY q.rn ASC,                        -- ラウンドロビン（各 namespace から1件ずつ交互）
+         COALESCE(a.active_count, 0) ASC,  -- active が少ない namespace を優先
+         q.namespace ASC                   -- 同率の場合は namespace 名で決定的に順序付け
+LIMIT :batch_size;                         -- 1サイクルの総取得数を固定
 ```
 
 このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。
+
+**ラウンドロビンの仕組み：** `ROW_NUMBER()` を QUEUED ジョブのみに振り、`ORDER BY rn ASC` とすることで、各 namespace の rn=1（最古の QUEUED ジョブ）が全 namespace 分先に並び、次に rn=2 が全 namespace 分並ぶ。`LIMIT :batch_size` で打ち切ることで、namespace 間で均等に dispatch される。
+
+**公平性の保証：** `active_count ASC` でソートすることで、現在の active ジョブ数が少ない namespace が優先される。これにより namespace 数が `DISPATCH_BATCH_SIZE` を超えても、リソース消費の少ないユーザーから先に dispatch され、公平性が維持される。
 
 ### 1.3 再試行の管理
 
@@ -71,6 +91,7 @@ Dispatcher のメインループは各スキャンサイクル完了時に `/tmp
 dispatch_budget = namespace_dispatch_limit - active_jobs_in_db(namespace)
 
 namespace_dispatch_limit = 256（ConfigMap: DISPATCH_BUDGET_PER_NAMESPACE で設定）
+batch_size              = 50 （ConfigMap: DISPATCH_BATCH_SIZE で設定）
 
 active_jobs_in_db(namespace) は PostgreSQL から取得する。
 K8s API は参照しない。
@@ -139,10 +160,12 @@ except TemporaryK8sError:
 class Dispatcher:
     def __init__(self):
         self.check_interval = int(os.environ["DISPATCH_BUDGET_CHECK_INTERVAL_SEC"])
+        self.batch_size = int(os.environ["DISPATCH_BATCH_SIZE"])
 
     def run(self):
         while True:
-            candidates = db.fetch_dispatchable_jobs()   # §1.2 のクエリ
+            # §1.2 のクエリ（ラウンドロビン・active_count 優先・LIMIT batch_size）
+            candidates = db.fetch_dispatchable_jobs()
             for job in candidates:
                 self.dispatch(job)
             time.sleep(self.check_interval)

@@ -102,14 +102,16 @@ spec:
 |---|---|---|---|---|---|
 | `MAX_QUEUED_JOBS_PER_NAMESPACE` | ConfigMap | 2000 | Submit API | ユーザーごと | PostgreSQL の `jobs` テーブルへの登録数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計） |
 | `DISPATCH_BUDGET_PER_NAMESPACE` | ConfigMap | 256 | Dispatcher | ユーザーごと | DB 上の active ジョブ数（DISPATCHING + DISPATCHED + RUNNING の合計）。上限に達すると Dispatcher が新規 dispatch を停止する |
+| `DISPATCH_BATCH_SIZE` | ConfigMap | 50 | Dispatcher | サイクルごと（全体） | 1回の dispatch サイクルで取得するジョブの総数上限。namespace 間でラウンドロビン・active ジョブ数優先で公平に分配される |
 | `count/jobs.batch` | ResourceQuota | 600 | Kubernetes | ユーザーごと | K8s 上に存在する `batch/v1 Job` オブジェクトの総数。実行中 + TTL 待ち完了済みジョブの合計が対象 |
 
-3つの制限は独立したレイヤーで機能する。
+4つの制限は独立したレイヤーで機能する。
 
 ```
 cjob add → DB 登録（MAX_QUEUED_JOBS_PER_NAMESPACE: 2000件上限）
               ↓
 Dispatcher がスキャン → dispatch_budget チェック（DISPATCH_BUDGET_PER_NAMESPACE: 256件上限）
+                      → batch_size チェック（DISPATCH_BATCH_SIZE: 50件/サイクル上限）
               ↓
 K8s Job を作成 → count/jobs.batch チェック（600件上限）
 ```
