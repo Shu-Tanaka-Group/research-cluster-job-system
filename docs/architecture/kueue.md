@@ -129,6 +129,15 @@ K8s Job を作成 → count/jobs.batch チェック（600件上限）
 
 ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User Pod を含む namespace 内の全 Pod を対象とした上限（バグ等による無制限消費を防ぐ安全網）。ClusterQueue nominalQuota は Kueue が Job Pod の admission を判断するための上限であり、実際の実行スケジューリングを制御する。User Pod は Kueue を経由しないため ClusterQueue の制御対象外である。
 
+### 隙間充填に関する設定
+
+| 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
+|---|---|---|---|---|---|
+| `GAP_FILLING_ENABLED` | ConfigMap | true | Dispatcher | 全体 | 隙間充填ロジックの有効/無効。false にすると従来動作 |
+| `GAP_FILLING_STALL_THRESHOLD_SEC` | ConfigMap | 300 (5分) | Dispatcher | ジョブごと | DISPATCHED からの経過秒数がこの値を超えたジョブを滞留とみなす |
+
+隙間充填の詳細は [dispatcher.md](dispatcher.md) §2.4 を参照。
+
 ### 実行時間に関する制限
 
 | 制限 | 設定箇所 | 値 | 管理主体 | 適用単位 | 制限対象 |
