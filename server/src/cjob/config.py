@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     DISPATCH_RETRY_INTERVAL_SEC: int = 30
     DISPATCH_MAX_RETRIES: int = 5
 
+    # Dispatcher - Gap Filling
+    GAP_FILLING_ENABLED: bool = True
+    GAP_FILLING_STALL_THRESHOLD_SEC: int = 300  # 5 minutes
+
     # Submit API
     MAX_QUEUED_JOBS_PER_NAMESPACE: int = 2000
     DEFAULT_TIME_LIMIT_SECONDS: int = 86400   # 24 hours

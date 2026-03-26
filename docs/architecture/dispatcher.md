@@ -166,6 +166,8 @@ class Dispatcher:
         while True:
             # §1.2 のクエリ（ラウンドロビン・active_count 優先・LIMIT batch_size）
             candidates = db.fetch_dispatchable_jobs()
+            # §2.4 の隙間充填フィルタ（滞留ジョブがある namespace の候補を制限）
+            candidates = apply_gap_filling(session, candidates, settings)
             for job in candidates:
                 self.dispatch(job)
             time.sleep(self.check_interval)
@@ -205,7 +207,142 @@ class Dispatcher:
             )
 ```
 
-### 2.4 起動時の初期化処理
+### 2.4 隙間充填（Gap Filling）
+
+#### 2.4.1 背景と目的
+
+Kueue の `BestEffortFIFO` は、先頭のジョブが admit できない場合に後続の小さなジョブを先に admit する。`preemption: Never` の制約下では、小さなジョブが継続的に投入される環境でノード丸ごと使うような巨大ジョブが starvation される可能性がある。
+
+この問題に対し、Dispatcher が time_limit を活用して時間方向の隙間充填を行う。空間方向のパッキング（ノード配置）は Kueue + K8s Scheduler に任せ、Dispatcher は「大きなジョブのためにリソースが空くまで、隙間に収まるジョブだけを dispatch する」制御に専念する。
+
+#### 2.4.2 滞留ジョブの検知
+
+DISPATCHED 状態のまま `GAP_FILLING_STALL_THRESHOLD_SEC`（デフォルト 300 秒 = 5 分）以上経過したジョブを「滞留ジョブ」とみなす。
+
+```sql
+SELECT namespace, job_id
+FROM jobs
+WHERE status = 'DISPATCHED'
+  AND dispatched_at <= NOW() - MAKE_INTERVAL(secs => :threshold)
+```
+
+滞留ジョブは「Kueue に渡されたがリソース不足で admit されていないジョブ」を意味する。通常のジョブは DISPATCHED から数秒〜数十秒で RUNNING に遷移するため、閾値を超えた場合はリソース不足で待機していると判断できる。
+
+閾値が短すぎると Kueue の通常処理中のジョブも滞留扱いになる。閾値が長すぎると対策の発動が遅れる。5 分はクラスタの通常動作を考慮した保守的な値である。
+
+#### 2.4.3 リソース空き推定
+
+滞留ジョブが検知された場合、同一 namespace の RUNNING ジョブから「リソースが空くまでの推定残り時間」を計算する。
+
+```sql
+SELECT MIN(
+  EXTRACT(EPOCH FROM
+    (started_at + MAKE_INTERVAL(secs => time_limit_seconds)) - NOW()
+  )
+) AS min_remaining
+FROM jobs
+WHERE namespace = :namespace
+  AND status = 'RUNNING'
+  AND started_at IS NOT NULL
+```
+
+全 RUNNING ジョブの最遅終了時刻（started_at + time_limit_seconds）から現在時刻を引き、最小値を T とする。T が負の場合は 0 にクランプする。RUNNING ジョブが存在しない場合は NULL（None）を返す。
+
+T は「少なくともあと T 秒後には、いずれかの RUNNING ジョブが終了する」ことを意味する。実際にはジョブが time_limit より早く完了する場合が多いため、T は保守的な（長めの）推定となる。
+
+#### 2.4.4 隙間充填ロジック
+
+滞留ジョブが存在する namespace について、QUEUED ジョブの dispatch 対象を制限する。
+
+```
+dispatch サイクル:
+  1. 通常の fetch_dispatchable_jobs() で候補を取得する
+  2. 各 namespace について滞留ジョブの有無を確認する
+  3. 滞留ジョブが存在しない namespace → 候補をそのまま dispatch（現行動作）
+  4. 滞留ジョブが存在する namespace → 候補をフィルタリング:
+     a. RUNNING ジョブの最短残り時間 T を計算する
+     b. 候補のうち time_limit_seconds ≤ T のジョブだけを dispatch 対象とする
+     c. time_limit_seconds > T のジョブは dispatch を保留する（次サイクルで再評価）
+```
+
+**RUNNING ジョブが存在しない場合**（全て DISPATCHED で待機中）: T = None となり、隙間充填の判定条件（`time_limit_seconds <= T`）が成立しないため、全ての QUEUED ジョブの dispatch が保留される。DISPATCHED ジョブのいずれかが RUNNING に遷移するか、キャンセルされて枠が空くのを待つ。
+
+**設計判断: namespace 内スコープに限定する理由**
+
+滞留ジョブの影響は同一 namespace 内のみに適用し、他 namespace の dispatch は制限しない。理由は以下の通り。
+
+- 他ユーザーの dispatch を制限すると、巨大ジョブを投入したユーザーが他ユーザーの実行を妨げることになり、公平性に反する
+- Kueue の ClusterQueue レベルのリソース管理は Kueue 自身に委ねる
+- namespace 内であれば、同一ユーザーのジョブ同士の調整であり、妥当な制御範囲である
+
+**設計判断: 既存の fetch_dispatchable_jobs を変更せず、後段でフィルタリングする理由**
+
+`fetch_dispatchable_jobs` の SQL クエリを直接変更する方式は、隙間充填ロジックを SQL に組み込む必要があり複雑になる。代わりに、取得した候補リストを Python 側でフィルタリングする方式を採用する。これにより：
+
+- 既存のラウンドロビン・budget 制御ロジックに影響しない
+- 隙間充填のオン・オフが設定値で制御可能
+- テストが容易（フィルタリング関数を独立してテストできる）
+
+#### 2.4.5 設定値
+
+| 設定 | ConfigMap キー | デフォルト値 | 説明 |
+|---|---|---|---|
+| 滞留検知閾値 | `GAP_FILLING_STALL_THRESHOLD_SEC` | 300 (5分) | DISPATCHED から経過した秒数がこの値を超えたジョブを滞留とみなす |
+| 隙間充填の有効/無効 | `GAP_FILLING_ENABLED` | true | false にすると隙間充填ロジックをスキップする（従来動作） |
+
+#### 2.4.6 擬似コード
+
+```python
+# ※ 概念説明のための擬似コードである。
+
+def apply_gap_filling(
+    session: Session,
+    candidates: list[Job],
+    settings: Settings,
+) -> list[Job]:
+    """滞留ジョブが存在する namespace の候補をフィルタリングする。"""
+    if not settings.GAP_FILLING_ENABLED:
+        return candidates
+
+    # 滞留ジョブを namespace ごとに取得
+    stalled = fetch_stalled_jobs(session, settings.GAP_FILLING_STALL_THRESHOLD_SEC)
+    stalled_namespaces = {job.namespace for job in stalled}
+
+    if not stalled_namespaces:
+        return candidates
+
+    # 滞留が発生していない namespace の候補はそのまま通す
+    result = [c for c in candidates if c.namespace not in stalled_namespaces]
+
+    # 滞留が発生している namespace の候補はフィルタリング
+    for ns in stalled_namespaces:
+        ns_candidates = [c for c in candidates if c.namespace == ns]
+        if not ns_candidates:
+            continue
+
+        # RUNNING ジョブの最短残り時間を計算
+        remaining = estimate_shortest_remaining(session, ns)
+
+        # time_limit_seconds が残り時間以内のジョブだけを通す
+        for c in ns_candidates:
+            if remaining is not None and c.time_limit_seconds <= remaining:
+                result.append(c)
+            else:
+                logger.debug(
+                    "Gap filling: holding %s/%d (time_limit=%ds, remaining=%s)",
+                    ns, c.job_id, c.time_limit_seconds, remaining,
+                )
+
+    return result
+```
+
+#### 2.4.7 制約と限界
+
+- **推定精度**: DB ベースの推定であり、Kueue/K8s Scheduler が把握する実際のノード空き状況とは乖離する。ジョブが time_limit より早く完了した場合、推定より早くリソースが空くが、Dispatcher は次のサイクルで再評価する
+- **空間方向のパッキングは行わない**: Dispatcher は CPU/メモリの合計値を追跡しない。「滞留ジョブがいるので隙間だけ埋める」という時間方向の制御のみを行い、空間方向は Kueue に委ねる
+- **time_limit_seconds が実行時間と大きく乖離する場合**: ユーザーが time_limit を実際の実行時間より大幅に長く設定すると、T の推定が保守的になりすぎて隙間充填の効果が薄れる。ただしこれは制御が保守的な方向（dispatch を控える）にずれるだけで、starvation を悪化させることはない
+
+### 2.5 起動時の初期化処理
 
 Dispatcher 再起動時に `DISPATCHING` で止まっているジョブを `QUEUED` に戻す。
 
