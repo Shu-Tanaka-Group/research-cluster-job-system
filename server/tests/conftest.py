@@ -9,12 +9,18 @@ from cjob.config import Settings
 from cjob.models import Base, Job, JobEvent
 
 
-def _patch_jsonb_columns():
-    """Replace JSONB columns with JSON for SQLite compatibility."""
+def _patch_sqlite_incompatible_types():
+    """Replace PostgreSQL-specific types for SQLite compatibility."""
+    from sqlalchemy import BigInteger, Integer
+
     for table in Base.metadata.tables.values():
         for column in table.columns:
             if isinstance(column.type, JSONB):
                 column.type = JSON()
+            # BigInteger AUTOINCREMENT doesn't work in SQLite;
+            # replace with plain Integer for the job_events.id column
+            if isinstance(column.type, BigInteger) and column.autoincrement:
+                column.type = Integer()
 
 
 @pytest.fixture()
@@ -29,7 +35,7 @@ def db_session():
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    _patch_jsonb_columns()
+    _patch_sqlite_incompatible_types()
     Base.metadata.create_all(engine)
     session_factory = sessionmaker(bind=engine)
     session = session_factory()
