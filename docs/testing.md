@@ -37,10 +37,10 @@ cargo test
 | `tests/test_gap_filling.py` | `dispatcher/scheduler.py::apply_gap_filling` | 7 | 隙間充填フィルタリング。無効時 / 滞留なし / 残り時間による候補選択 / RUNNING なし / namespace 混在 / 残り時間 0 / 候補なし |
 | **Rust** | | | |
 | `src/job_ids.rs` | `parse_job_ids` | 7 | ジョブ ID 式のパース（単体 / 範囲 / リスト / 組み合わせ / 重複除去 / エラー） |
-| `src/main.rs` | `parse_duration` | 8 | 時間指定のパース（秒数 / s / h / d サフィックス / 空白 / 不正値 / オーバーフロー） |
+| `src/main.rs` | `parse_duration` | 9 | 時間指定のパース（秒数 / s / m / h / d サフィックス / 空白 / 不正値 / オーバーフロー） |
 | `src/display.rs` | `format_duration` / `format_time_limit` | 9 | 時間表示フォーマット（日 / 時間 / 分）/ RUNNING 時の残り時間計算 / 非 RUNNING / 不正日付のフォールバック |
 
-**合計: Python 98 + Rust 24 = 122 テスト**
+**合計: Python 98 + Rust 25 = 123 テスト**
 
 ### 未テスト
 

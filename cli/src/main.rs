@@ -119,13 +119,15 @@ fn parse_duration(s: &str) -> Result<u32> {
         (&s[..s.len() - 1], 86400u32)
     } else if s.ends_with('h') {
         (&s[..s.len() - 1], 3600u32)
+    } else if s.ends_with('m') {
+        (&s[..s.len() - 1], 60u32)
     } else if s.ends_with('s') {
         (&s[..s.len() - 1], 1u32)
     } else {
-        anyhow::bail!("不正な時間指定です: {}（例: 3600, 1h, 6h, 1d, 3d）", s);
+        anyhow::bail!("不正な時間指定です: {}（例: 3600, 30m, 1h, 6h, 1d, 3d）", s);
     };
     let num: u32 = num_str.parse().map_err(|_| {
-        anyhow::anyhow!("不正な時間指定です: {}（例: 3600, 1h, 6h, 1d, 3d）", s)
+        anyhow::anyhow!("不正な時間指定です: {}（例: 3600, 30m, 1h, 6h, 1d, 3d）", s)
     })?;
     num.checked_mul(multiplier)
         .ok_or_else(|| anyhow::anyhow!("時間指定が大きすぎます: {}", s))
@@ -374,6 +376,13 @@ mod tests {
     fn test_parse_duration_seconds_suffix() {
         assert_eq!(parse_duration("60s").unwrap(), 60);
         assert_eq!(parse_duration("3600s").unwrap(), 3600);
+    }
+
+    #[test]
+    fn test_parse_duration_minutes() {
+        assert_eq!(parse_duration("1m").unwrap(), 60);
+        assert_eq!(parse_duration("30m").unwrap(), 1800);
+        assert_eq!(parse_duration("90m").unwrap(), 5400);
     }
 
     #[test]
