@@ -87,7 +87,7 @@ def run():
     logger.info(
         "Dispatcher main loop started (interval=%ds, batch_size=%d)",
         settings.DISPATCH_BUDGET_CHECK_INTERVAL_SEC,
-        settings.DISPATCH_BATCH_SIZE_PER_NAMESPACE,
+        settings.DISPATCH_BATCH_SIZE,
     )
 
     while not _shutdown:

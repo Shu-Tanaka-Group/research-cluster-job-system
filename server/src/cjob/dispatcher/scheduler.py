@@ -11,28 +11,38 @@ logger = logging.getLogger(__name__)
 
 
 def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
-    """Fetch up to batch_size oldest QUEUED jobs per namespace where dispatch budget is available."""
+    """Fetch up to batch_size QUEUED jobs, round-robin across namespaces.
+
+    Prioritises namespaces with fewer active jobs so that resource
+    allocation converges toward fairness even when the number of
+    namespaces exceeds the batch size.
+    """
     result = session.execute(
         text(
-            "SELECT * FROM ("
+            "WITH active AS ("
+            "  SELECT namespace, COUNT(*) AS active_count"
+            "  FROM jobs"
+            "  WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
+            "  GROUP BY namespace"
+            "), "
+            "queued AS ("
             "  SELECT *, ROW_NUMBER() OVER ("
             "    PARTITION BY namespace ORDER BY created_at ASC"
-            "  ) AS rn,"
-            "  COUNT(*) FILTER ("
-            "    WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
-            "  ) OVER (PARTITION BY namespace) AS active_count"
+            "  ) AS rn"
             "  FROM jobs"
-            "  WHERE (status = 'QUEUED' AND (retry_after IS NULL OR retry_after <= NOW()))"
-            "     OR status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
-            ") sub "
-            "WHERE status = 'QUEUED' "
-            "  AND active_count < :dispatch_limit "
-            "  AND rn <= LEAST(:batch_size, :dispatch_limit - active_count) "
-            "ORDER BY namespace, created_at ASC"
+            "  WHERE status = 'QUEUED'"
+            "    AND (retry_after IS NULL OR retry_after <= NOW())"
+            ") "
+            "SELECT q.* FROM queued q"
+            "  LEFT JOIN active a USING (namespace) "
+            "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
+            "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
+            "ORDER BY q.rn ASC, COALESCE(a.active_count, 0) ASC, q.namespace ASC "
+            "LIMIT :batch_size"
         ),
         {
             "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
-            "batch_size": settings.DISPATCH_BATCH_SIZE_PER_NAMESPACE,
+            "batch_size": settings.DISPATCH_BATCH_SIZE,
         },
     )
 
