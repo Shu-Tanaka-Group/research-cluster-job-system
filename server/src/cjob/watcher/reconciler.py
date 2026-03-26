@@ -93,7 +93,7 @@ def _record_resource_usage(session: Session, job: Job):
         text(
             "INSERT INTO namespace_daily_usage "
             "(namespace, usage_date, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds) "
-            "VALUES (:namespace, date('now'), :delta_cpu, :delta_mem, :delta_gpu) "
+            "VALUES (:namespace, CURRENT_DATE, :delta_cpu, :delta_mem, :delta_gpu) "
             "ON CONFLICT (namespace, usage_date) DO UPDATE SET "
             "cpu_millicores_seconds = namespace_daily_usage.cpu_millicores_seconds "
             "+ :delta_cpu, "

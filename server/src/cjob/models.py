@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
+    Date,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -62,7 +63,7 @@ class NamespaceDailyUsage(Base):
     __tablename__ = "namespace_daily_usage"
 
     namespace: Mapped[str] = mapped_column(String, primary_key=True)
-    usage_date: Mapped[str] = mapped_column(String, primary_key=True)
+    usage_date: Mapped[date] = mapped_column(Date, primary_key=True)
     cpu_millicores_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     memory_mib_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     gpu_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
