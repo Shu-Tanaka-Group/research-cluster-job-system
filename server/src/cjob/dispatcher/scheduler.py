@@ -139,6 +139,89 @@ def increment_retry(
     return result.rowcount > 0
 
 
+def fetch_stalled_jobs(session: Session, threshold_sec: int) -> list[Job]:
+    """Fetch DISPATCHED jobs that have been waiting longer than threshold_sec."""
+    result = session.execute(
+        text(
+            "SELECT namespace, job_id FROM jobs "
+            "WHERE status = 'DISPATCHED' "
+            "  AND dispatched_at <= NOW() - MAKE_INTERVAL(secs => :threshold)"
+        ),
+        {"threshold": threshold_sec},
+    )
+    jobs = []
+    for row in result.mappings():
+        job = session.get(Job, (row["namespace"], row["job_id"]))
+        if job is not None:
+            jobs.append(job)
+    return jobs
+
+
+def estimate_shortest_remaining(session: Session, namespace: str) -> int | None:
+    """Estimate the shortest remaining time (seconds) among RUNNING jobs in a namespace.
+
+    Returns None if there are no RUNNING jobs with a known started_at.
+    """
+    result = session.execute(
+        text(
+            "SELECT MIN("
+            "  EXTRACT(EPOCH FROM "
+            "    (started_at + MAKE_INTERVAL(secs => time_limit_seconds)) - NOW()"
+            "  )"
+            ") AS min_remaining "
+            "FROM jobs "
+            "WHERE namespace = :namespace "
+            "  AND status = 'RUNNING' "
+            "  AND started_at IS NOT NULL"
+        ),
+        {"namespace": namespace},
+    )
+    row = result.mappings().first()
+    if row is None or row["min_remaining"] is None:
+        return None
+    remaining = int(row["min_remaining"])
+    return max(remaining, 0)
+
+
+def apply_gap_filling(
+    session: Session, candidates: list[Job], settings: Settings
+) -> list[Job]:
+    """Filter dispatch candidates based on gap filling logic.
+
+    When stalled jobs (DISPATCHED for too long) exist in a namespace,
+    only dispatch QUEUED jobs whose time_limit_seconds fits within the
+    estimated remaining time of RUNNING jobs in that namespace.
+    """
+    if not settings.GAP_FILLING_ENABLED:
+        return candidates
+
+    stalled = fetch_stalled_jobs(session, settings.GAP_FILLING_STALL_THRESHOLD_SEC)
+    stalled_namespaces = {job.namespace for job in stalled}
+
+    if not stalled_namespaces:
+        return candidates
+
+    result = [c for c in candidates if c.namespace not in stalled_namespaces]
+
+    for ns in stalled_namespaces:
+        ns_candidates = [c for c in candidates if c.namespace == ns]
+        if not ns_candidates:
+            continue
+
+        remaining = estimate_shortest_remaining(session, ns)
+
+        for c in ns_candidates:
+            if remaining is not None and c.time_limit_seconds <= remaining:
+                result.append(c)
+            else:
+                logger.debug(
+                    "Gap filling: holding %s/%d (time_limit=%ds, remaining=%s)",
+                    ns, c.job_id, c.time_limit_seconds, remaining,
+                )
+
+    return result
+
+
 def reset_stale_dispatching(session: Session) -> int:
     """Reset DISPATCHING jobs to QUEUED on startup."""
     result = session.execute(

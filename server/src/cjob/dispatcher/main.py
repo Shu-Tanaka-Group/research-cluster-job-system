@@ -11,6 +11,7 @@ from cjob.models import Job
 
 from .k8s_job import PermanentK8sError, TemporaryK8sError, build_k8s_job, create_k8s_job
 from .scheduler import (
+    apply_gap_filling,
     cas_update_to_dispatching,
     fetch_dispatchable_jobs,
     increment_retry,
@@ -94,6 +95,7 @@ def run():
         session = create_session()
         try:
             candidates = fetch_dispatchable_jobs(session, settings)
+            candidates = apply_gap_filling(session, candidates, settings)
             if candidates:
                 logger.info("Found %d dispatchable jobs", len(candidates))
             for job in candidates:
