@@ -177,35 +177,37 @@ mv /tmp/cjob ~/.local/bin/cjob
 
 ```mermaid
 stateDiagram-v2
-      [*] --> QUEUED : cjob add
+    [*] --> QUEUED : cjob add
 
-      state "**QUEUED**\n投入済み、Dispatcher の選択待ち" as QUEUED
-      state "**DISPATCHING**\nDispatcher が K8s Job を作成中" as DISPATCHING
-      state "**DISPATCHED**\nK8s Job 作成済み、Kueue のリソース割当て待ち" as DISPATCHED
-      state "**RUNNING**\nPod 実行中" as RUNNING
-      state "**SUCCEEDED**\n正常完了" as SUCCEEDED
-      state "**FAILED**\n失敗（エラー / 時間超過 / 再試行上限）" as FAILED
-      state "**CANCELLED**\nユーザーがキャンセル" as CANCELLED
-      state "**DELETING**\ncjob reset 後の削除処理中" as DELETING
+    QUEUED --> DISPATCHING : Dispatcher がジョブを選択
+    QUEUED --> CANCELLED : cjob cancel
 
-      QUEUED --> DISPATCHING : Dispatcher がジョブを選択
-      QUEUED --> CANCELLED : cjob cancel
+    DISPATCHING --> DISPATCHED : K8s Job 作成成功
+    DISPATCHING --> QUEUED : 一時障害で再試行
+    DISPATCHING --> FAILED : 永続エラー / 最大再試行超過
+    DISPATCHING --> CANCELLED : cjob cancel
 
-      DISPATCHING --> DISPATCHED : K8s Job 作成成功
-      DISPATCHING --> QUEUED : 一時障害で再試行
-      DISPATCHING --> FAILED : 永続エラー / 最大再試行超過
-      DISPATCHING --> CANCELLED : cjob cancel
+    DISPATCHED --> RUNNING : Pod が実行開始
+    DISPATCHED --> CANCELLED : cjob cancel
 
-      DISPATCHED --> RUNNING : Pod が実行開始
-      DISPATCHED --> CANCELLED : cjob cancel
+    RUNNING --> SUCCEEDED : 正常完了
+    RUNNING --> FAILED : エラー終了 / 時間超過
+    RUNNING --> CANCELLED : cjob cancel
 
-      RUNNING --> SUCCEEDED : 正常完了
-      RUNNING --> FAILED : エラー終了 / 時間超過
-      RUNNING --> CANCELLED : cjob cancel
+    SUCCEEDED --> DELETING : cjob reset
+    FAILED --> DELETING : cjob reset
+    CANCELLED --> DELETING : cjob reset
 
-      SUCCEEDED --> DELETING : cjob reset
-      FAILED --> DELETING : cjob reset
-      CANCELLED --> DELETING : cjob reset
-
-      DELETING --> [*] : K8s Job 削除完了後に DB レコード削除
+    DELETING --> [*] : K8s Job 削除完了後に DB レコード削除
 ```
+
+| ステータス | 説明 |
+|---|---|
+| **QUEUED** | 投入済み、Dispatcher の選択待ち |
+| **DISPATCHING** | Dispatcher が K8s Job を作成中 |
+| **DISPATCHED** | K8s Job 作成済み、Kueue のリソース割当て待ち |
+| **RUNNING** | Pod 実行中 |
+| **SUCCEEDED** | 正常完了 |
+| **FAILED** | 失敗（エラー / 時間超過 / 再試行上限） |
+| **CANCELLED** | ユーザーがキャンセル |
+| **DELETING** | `cjob reset` 後の削除処理中 |
