@@ -83,6 +83,7 @@ $ cjob list --status RUNNING
 
 - 投入したジョブのリストを表示します
 - ジョブのIDやジョブの状態、計算開始時刻などを確認できます
+- 指定可能な状態は[ジョブの状態](#ジョブの状態)を参照してください
 
 
 ### 状態確認
@@ -167,4 +168,62 @@ mv /tmp/cjob ~/.local/bin/cjob
 ```
 
 手動で `cjob` ファイルをアップロードする場合は、アップロードしたファイルのパスに対して、実行権限の付与（`chmod u+x <cjob file>`）と実行パス上への配置（`mv <cjob file> ~/.local/bin/`）を行ってください。
+
+
+## ジョブの状態
+
+投入されたジョブは以下の状態のいずれかとなります。
+
+
+```mermaid
+stateDiagram-v2
+      [*] --> QUEUED : cjob add
+
+      QUEUED --> DISPATCHING : Dispatcher がジョブを選択
+      QUEUED --> CANCELLED : cjob cancel
+
+      DISPATCHING --> DISPATCHED : K8s Job 作成成功
+      DISPATCHING --> QUEUED : 一時障害で再試行
+      DISPATCHING --> FAILED : 永続エラー / 最大再試行超過
+      DISPATCHING --> CANCELLED : cjob cancel
+
+      DISPATCHED --> RUNNING : Pod が実行開始
+      DISPATCHED --> CANCELLED : cjob cancel
+
+      RUNNING --> SUCCEEDED : 正常完了
+      RUNNING --> FAILED : エラー終了 / 時間超過
+      RUNNING --> CANCELLED : cjob cancel
+
+      SUCCEEDED --> DELETING : cjob reset
+      FAILED --> DELETING : cjob reset
+      CANCELLED --> DELETING : cjob reset
+
+      DELETING --> [*] : K8s Job 削除完了後に DB レコード削除
+
+      note right of QUEUED
+          投入済み、Dispatcher の選択待ち
+      end note
+      note right of DISPATCHING
+          Dispatcher が K8s Job を作成中
+      end note
+      note right of DISPATCHED
+          K8s Job 作成済み
+          Kueue のリソース割当て待ち
+      end note
+      note right of RUNNING
+          Pod 実行中
+      end note
+      note right of SUCCEEDED
+          正常完了
+      end note
+      note right of FAILED
+          失敗（エラー / 時間超過 / 再試行上限）
+      end note
+      note right of CANCELLED
+          ユーザーがキャンセル
+      end note
+      note right of DELETING
+          cjob reset 後の削除処理中
+      end note
+```
 
