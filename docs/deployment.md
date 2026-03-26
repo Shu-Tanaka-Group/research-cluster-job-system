@@ -81,6 +81,12 @@ data:
   DISPATCH_BUDGET_CHECK_INTERVAL_SEC: "10"
   DISPATCH_RETRY_INTERVAL_SEC: "30"
   DISPATCH_MAX_RETRIES: "5"
+  GAP_FILLING_ENABLED: "true"
+  GAP_FILLING_STALL_THRESHOLD_SEC: "300"
+  FAIR_SHARE_RESET_INTERVAL_SEC: "604800"
+  CLUSTER_TOTAL_CPU_MILLICORES: "256000"
+  CLUSTER_TOTAL_MEMORY_MIB: "1024000"
+  CLUSTER_TOTAL_GPUS: "0"
   MAX_QUEUED_JOBS_PER_NAMESPACE: "2000"
   KUEUE_LOCAL_QUEUE_NAME: default
   JOB_NAMESPACE_PREFIX: user-
@@ -401,6 +407,7 @@ data:
         cpu           TEXT NOT NULL,
         memory        TEXT NOT NULL,
         gpu           INTEGER NOT NULL DEFAULT 0,
+        time_limit_seconds INTEGER NOT NULL,
         status        TEXT NOT NULL,
         retry_count   INTEGER NOT NULL DEFAULT 0,
         retry_after   TIMESTAMPTZ,
@@ -408,6 +415,7 @@ data:
         log_dir       TEXT,
         created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         dispatched_at TIMESTAMPTZ,
+        started_at    TIMESTAMPTZ,
         finished_at   TIMESTAMPTZ,
         last_error    TEXT,
         PRIMARY KEY (namespace, job_id)
@@ -425,6 +433,14 @@ data:
         created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         FOREIGN KEY (namespace, job_id) REFERENCES jobs(namespace, job_id)
             ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS namespace_resource_usage (
+        namespace              TEXT PRIMARY KEY,
+        cpu_millicores_seconds BIGINT NOT NULL DEFAULT 0,
+        memory_mib_seconds     BIGINT NOT NULL DEFAULT 0,
+        gpu_seconds            BIGINT NOT NULL DEFAULT 0,
+        period_start           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
     CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ON jobs (namespace, status);

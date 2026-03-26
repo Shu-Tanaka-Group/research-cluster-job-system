@@ -102,7 +102,7 @@ spec:
 |---|---|---|---|---|---|
 | `MAX_QUEUED_JOBS_PER_NAMESPACE` | ConfigMap | 2000 | Submit API | ユーザーごと | PostgreSQL の `jobs` テーブルへの登録数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計） |
 | `DISPATCH_BUDGET_PER_NAMESPACE` | ConfigMap | 256 | Dispatcher | ユーザーごと | DB 上の active ジョブ数（DISPATCHING + DISPATCHED + RUNNING の合計）。上限に達すると Dispatcher が新規 dispatch を停止する |
-| `DISPATCH_BATCH_SIZE` | ConfigMap | 50 | Dispatcher | サイクルごと（全体） | 1回の dispatch サイクルで取得するジョブの総数上限。namespace 間でラウンドロビン・active ジョブ数優先で公平に分配される |
+| `DISPATCH_BATCH_SIZE` | ConfigMap | 50 | Dispatcher | サイクルごと（全体） | 1回の dispatch サイクルで取得するジョブの総数上限。namespace 間でラウンドロビン・DRF 優先で公平に分配される |
 | `count/jobs.batch` | ResourceQuota | 600 | Kubernetes | ユーザーごと | K8s 上に存在する `batch/v1 Job` オブジェクトの総数。実行中 + TTL 待ち完了済みジョブの合計が対象 |
 
 4つの制限は独立したレイヤーで機能する。
@@ -143,8 +143,11 @@ ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User P
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
 |---|---|---|---|---|---|
 | `FAIR_SHARE_RESET_INTERVAL_SEC` | ConfigMap | 604800 (7日) | Dispatcher | 全体 | 累計リソース消費量のリセット間隔（秒）。Dispatcher が参照時に `period_start` からの経過がこの値を超えていたらリセットする |
+| `CLUSTER_TOTAL_CPU_MILLICORES` | ConfigMap | 256000 (256コア) | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体の CPU 容量（ミリコア）。ClusterQueue の `nominalQuota` CPU と一致させる |
+| `CLUSTER_TOTAL_MEMORY_MIB` | ConfigMap | 1024000 (1000GiB) | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体のメモリ容量（MiB）。ClusterQueue の `nominalQuota` memory と一致させる |
+| `CLUSTER_TOTAL_GPUS` | ConfigMap | 0 | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体の GPU 数。0 の場合、GPU は DRF の計算から除外される |
 
-累計リソース消費量の詳細は [database.md](database.md) §4 を参照。
+累計リソース消費量の詳細は [database.md](database.md) §4、DRF によるスケジューリングの詳細は [dispatcher.md](dispatcher.md) §1.1・§1.2 を参照。
 
 ### 実行時間に関する制限
 
