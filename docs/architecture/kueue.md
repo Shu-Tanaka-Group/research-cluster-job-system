@@ -138,6 +138,14 @@ ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User P
 
 隙間充填の詳細は [dispatcher.md](dispatcher.md) §2.4 を参照。
 
+### Fair sharing に関する設定
+
+| 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
+|---|---|---|---|---|---|
+| `FAIR_SHARE_RESET_INTERVAL_SEC` | ConfigMap | 604800 (7日) | Dispatcher | 全体 | 累計リソース消費量のリセット間隔（秒）。Dispatcher が参照時に `period_start` からの経過がこの値を超えていたらリセットする |
+
+累計リソース消費量の詳細は [database.md](database.md) §4 を参照。
+
 ### 実行時間に関する制限
 
 | 制限 | 設定箇所 | 値 | 管理主体 | 適用単位 | 制限対象 |
