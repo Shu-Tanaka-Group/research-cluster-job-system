@@ -11,21 +11,29 @@ logger = logging.getLogger(__name__)
 
 
 def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
-    """Fetch oldest QUEUED job per namespace where dispatch budget is available."""
+    """Fetch up to batch_size oldest QUEUED jobs per namespace where dispatch budget is available."""
     result = session.execute(
         text(
-            "SELECT DISTINCT ON (namespace) * "
-            "FROM jobs "
+            "SELECT * FROM ("
+            "  SELECT *, ROW_NUMBER() OVER ("
+            "    PARTITION BY namespace ORDER BY created_at ASC"
+            "  ) AS rn,"
+            "  COUNT(*) FILTER ("
+            "    WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
+            "  ) OVER (PARTITION BY namespace) AS active_count"
+            "  FROM jobs"
+            "  WHERE (status = 'QUEUED' AND (retry_after IS NULL OR retry_after <= NOW()))"
+            "     OR status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
+            ") sub "
             "WHERE status = 'QUEUED' "
-            "  AND (retry_after IS NULL OR retry_after <= NOW()) "
-            "  AND namespace NOT IN ("
-            "    SELECT namespace FROM jobs "
-            "    WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING') "
-            "    GROUP BY namespace HAVING COUNT(*) >= :dispatch_limit"
-            "  ) "
+            "  AND active_count < :dispatch_limit "
+            "  AND rn <= LEAST(:batch_size, :dispatch_limit - active_count) "
             "ORDER BY namespace, created_at ASC"
         ),
-        {"dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE},
+        {
+            "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
+            "batch_size": settings.DISPATCH_BATCH_SIZE_PER_NAMESPACE,
+        },
     )
 
     jobs = []
