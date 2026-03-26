@@ -2,8 +2,12 @@ from unittest.mock import patch
 
 from kubernetes.client import V1Job, V1JobCondition, V1JobStatus, V1ObjectMeta
 
-from cjob.models import Job, UserJobCounter
-from cjob.watcher.reconciler import reconcile_cycle
+from cjob.models import Job, NamespaceResourceUsage, UserJobCounter
+from cjob.watcher.reconciler import (
+    parse_cpu_millicores,
+    parse_memory_mib,
+    reconcile_cycle,
+)
 
 
 NS = "user-alice"
@@ -241,3 +245,91 @@ class TestReconcileDeleting:
         # Bob's records should remain
         bob_jobs = db_session.query(Job).filter(Job.namespace == "user-bob").all()
         assert len(bob_jobs) == 1
+
+
+# ── parse_cpu_millicores / parse_memory_mib ──
+
+
+class TestParseCpuMillicores:
+    def test_integer_cores(self):
+        assert parse_cpu_millicores("2") == 2000
+
+    def test_fractional_cores(self):
+        assert parse_cpu_millicores("0.5") == 500
+
+    def test_millicores_suffix(self):
+        assert parse_cpu_millicores("500m") == 500
+
+    def test_one_core(self):
+        assert parse_cpu_millicores("1") == 1000
+
+
+class TestParseMemoryMib:
+    def test_gi_suffix(self):
+        assert parse_memory_mib("4Gi") == 4096
+
+    def test_mi_suffix(self):
+        assert parse_memory_mib("500Mi") == 500
+
+    def test_ki_suffix(self):
+        assert parse_memory_mib("1024Ki") == 1
+
+    def test_plain_bytes(self):
+        assert parse_memory_mib("1048576") == 1  # 1 MiB
+
+
+# ── Resource usage recording ──
+
+
+@patch("cjob.watcher.reconciler._delete_k8s_job")
+class TestReconcileResourceUsage:
+    """Test that RUNNING transition records resource usage."""
+
+    def test_running_transition_records_usage(self, mock_delete, db_session):
+        _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
+                     gpu=0, time_limit_seconds=3600)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        usage = db_session.get(NamespaceResourceUsage, NS)
+        assert usage is not None
+        assert usage.cpu_millicores_seconds == 3600 * 2000  # 7_200_000
+        assert usage.memory_mib_seconds == 3600 * 4096      # 14_745_600
+        assert usage.gpu_seconds == 0
+
+    def test_second_running_accumulates_usage(self, mock_delete, db_session):
+        _insert_job(db_session, 1, status="DISPATCHED", cpu="1", memory="1Gi",
+                     time_limit_seconds=100)
+        _insert_job(db_session, 2, status="DISPATCHED", cpu="2", memory="2Gi",
+                     time_limit_seconds=200)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        # Second job transitions to RUNNING in next cycle
+        db_session.get(Job, (NS, 2)).status = "DISPATCHED"
+        db_session.flush()
+        k8s_jobs2 = [
+            _make_k8s_job(NS, 1, "cjob-alice-1", active=1),
+            _make_k8s_job(NS, 2, "cjob-alice-2", active=1),
+        ]
+
+        reconcile_cycle(db_session, k8s_jobs2)
+
+        usage = db_session.get(NamespaceResourceUsage, NS)
+        assert usage.cpu_millicores_seconds == 100 * 1000 + 200 * 2000  # 500_000
+        assert usage.memory_mib_seconds == 100 * 1024 + 200 * 2048     # 512_000
+
+    def test_already_running_no_duplicate_usage(self, mock_delete, db_session):
+        """No usage recorded when job is already RUNNING (started_at set)."""
+        from datetime import datetime, timezone
+        _insert_job(db_session, 1, status="RUNNING", cpu="2", memory="4Gi",
+                     time_limit_seconds=3600,
+                     started_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        usage = db_session.get(NamespaceResourceUsage, NS)
+        assert usage is None  # No usage recorded

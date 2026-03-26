@@ -1,4 +1,5 @@
 import logging
+import math
 from collections import defaultdict
 
 from kubernetes import client as k8s_client
@@ -63,6 +64,55 @@ def _delete_k8s_job(namespace: str, name: str):
             logger.error("Failed to delete K8s Job %s/%s: %s", namespace, name, e)
 
 
+def parse_cpu_millicores(cpu: str) -> int:
+    """Convert CPU string (e.g. "2", "0.5", "500m") to millicores."""
+    if cpu.endswith("m"):
+        return int(cpu[:-1])
+    return int(math.ceil(float(cpu) * 1000))
+
+
+def parse_memory_mib(memory: str) -> int:
+    """Convert memory string (e.g. "4Gi", "500Mi", "1024") to MiB."""
+    if memory.endswith("Gi"):
+        return int(math.ceil(float(memory[:-2]) * 1024))
+    if memory.endswith("Mi"):
+        return int(math.ceil(float(memory[:-2])))
+    if memory.endswith("Ki"):
+        return int(math.ceil(float(memory[:-2]) / 1024))
+    # Plain bytes
+    return int(math.ceil(int(memory) / (1024 * 1024)))
+
+
+def _record_resource_usage(session: Session, job: Job):
+    """Add resource usage to namespace_resource_usage on RUNNING transition."""
+    delta_cpu = job.time_limit_seconds * parse_cpu_millicores(job.cpu)
+    delta_mem = job.time_limit_seconds * parse_memory_mib(job.memory)
+    delta_gpu = job.time_limit_seconds * job.gpu
+
+    session.execute(
+        text(
+            "INSERT INTO namespace_resource_usage "
+            "(namespace, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds, "
+            "period_start, updated_at) "
+            "VALUES (:namespace, :delta_cpu, :delta_mem, :delta_gpu, "
+            "NOW(), NOW()) "
+            "ON CONFLICT (namespace) DO UPDATE SET "
+            "cpu_millicores_seconds = namespace_resource_usage.cpu_millicores_seconds "
+            "+ :delta_cpu, "
+            "memory_mib_seconds = namespace_resource_usage.memory_mib_seconds "
+            "+ :delta_mem, "
+            "gpu_seconds = namespace_resource_usage.gpu_seconds + :delta_gpu, "
+            "updated_at = NOW()"
+        ),
+        {
+            "namespace": job.namespace,
+            "delta_cpu": delta_cpu,
+            "delta_mem": delta_mem,
+            "delta_gpu": delta_gpu,
+        },
+    )
+
+
 def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
     """Run one reconciliation cycle."""
     # Build lookup: (namespace, job_id) -> k8s_job
@@ -125,6 +175,7 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
             db_job.status = new_status
             if new_status == "RUNNING" and db_job.started_at is None:
                 db_job.started_at = func.now()
+                _record_resource_usage(session, db_job)
             if new_status in ("SUCCEEDED", "FAILED"):
                 db_job.finished_at = func.now()
             if new_status == "FAILED" and reason == "DeadlineExceeded":
