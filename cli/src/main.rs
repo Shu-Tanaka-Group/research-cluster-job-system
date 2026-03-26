@@ -358,3 +358,57 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
     println!("リセットを開始しました。バックグラウンドでクリーンアップが完了するまでお待ちください。");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_duration_raw_seconds() {
+        assert_eq!(parse_duration("3600").unwrap(), 3600);
+        assert_eq!(parse_duration("1").unwrap(), 1);
+        assert_eq!(parse_duration("0").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_parse_duration_seconds_suffix() {
+        assert_eq!(parse_duration("60s").unwrap(), 60);
+        assert_eq!(parse_duration("3600s").unwrap(), 3600);
+    }
+
+    #[test]
+    fn test_parse_duration_hours() {
+        assert_eq!(parse_duration("1h").unwrap(), 3600);
+        assert_eq!(parse_duration("6h").unwrap(), 21600);
+        assert_eq!(parse_duration("24h").unwrap(), 86400);
+    }
+
+    #[test]
+    fn test_parse_duration_days() {
+        assert_eq!(parse_duration("1d").unwrap(), 86400);
+        assert_eq!(parse_duration("3d").unwrap(), 259200);
+        assert_eq!(parse_duration("7d").unwrap(), 604800);
+    }
+
+    #[test]
+    fn test_parse_duration_whitespace() {
+        assert_eq!(parse_duration(" 1h ").unwrap(), 3600);
+    }
+
+    #[test]
+    fn test_parse_duration_invalid_suffix() {
+        assert!(parse_duration("1x").is_err());
+        assert!(parse_duration("abc").is_err());
+    }
+
+    #[test]
+    fn test_parse_duration_invalid_number() {
+        assert!(parse_duration("abch").is_err());
+        assert!(parse_duration("-1h").is_err());
+    }
+
+    #[test]
+    fn test_parse_duration_overflow() {
+        assert!(parse_duration("99999999d").is_err());
+    }
+}
