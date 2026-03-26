@@ -126,7 +126,7 @@ ON CONFLICT (namespace) DO UPDATE SET
 
 ### 4.3 期間リセット
 
-Dispatcher が累計消費量を参照する際に `period_start` を確認し、集計期間を超過していたらリセットする。
+Dispatcher が `fetch_dispatchable_jobs()` を実行する直前に、`period_start` を確認し、集計期間を超過していたらリセットする。リセットは DRF のソートに使用する累計消費量を参照する前に実行されるため、期間超過した古いデータが dispatch 優先度に影響することはない。
 
 ```sql
 UPDATE namespace_resource_usage

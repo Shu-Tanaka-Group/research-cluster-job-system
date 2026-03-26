@@ -10,19 +10,21 @@ Dispatcher は PostgreSQL を定期的にスキャンし、以下の基準で di
 2. **対象 namespace の QUEUED ジョブを `created_at` 昇順で取得する**
 3. **1サイクルあたりの取得数を `DISPATCH_BATCH_SIZE`（デフォルト 50）で固定する**
 4. **namespace 間を公平にラウンドロビンする**（各 namespace から1件ずつ交互に取得）
-5. **active ジョブ数が少ない namespace を優先する**（リソース消費の公平性）
+5. **累計リソース消費量の dominant share が小さい namespace を優先する**（DRF による公平性）
 
 この方式により：
 - budget を使い切ったユーザーのジョブが他ユーザーをブロックしない
 - 同一ユーザーの投入順（`created_at` 昇順）は常に保証される
 - 複数ユーザーが同時に QUEUED 状態でも公平に処理される
-- namespace 数が `DISPATCH_BATCH_SIZE` を超えても active ジョブ数による優先で公平性が維持される
+- namespace 数が `DISPATCH_BATCH_SIZE` を超えても累計消費量による優先で公平性が維持される
 - 1サイクルあたりの dispatch 数が固定されるため K8s API への負荷が予測可能になる
+
+**Fair sharing（DRF）：** namespace ごとの累計リソース消費量（[database.md](database.md) §4 の `namespace_resource_usage` テーブル）を参照し、Dominant Resource Fairness（DRF）に基づいて dispatch 優先度を決定する。各リソース（CPU・メモリ・GPU）をクラスタ全体の容量で正規化し、最大値（dominant share）が小さい namespace を優先的に dispatch する。これにより、リソースを多く消費した namespace の優先度が下がり、消費の少ない namespace にリソースが行き渡る。累計消費量は `FAIR_SHARE_RESET_INTERVAL_SEC`（デフォルト 7 日）ごとにリセットされる。
 
 ### 1.2 DB スキャンのクエリ方針
 
 ```sql
--- active CTE: namespace ごとの active ジョブ数を集計
+-- active CTE: namespace ごとの active ジョブ数を集計（budget 制御用）
 WITH active AS (
   SELECT namespace, COUNT(*) AS active_count
   FROM jobs
@@ -40,19 +42,26 @@ queued AS (
 )
 SELECT q.* FROM queued q
   LEFT JOIN active a USING (namespace)
+  LEFT JOIN namespace_resource_usage u ON q.namespace = u.namespace
 WHERE COALESCE(a.active_count, 0) < :dispatch_limit          -- budget に余裕がある namespace のみ
   AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0)  -- 残り budget 分だけ取得
 ORDER BY q.rn ASC,                        -- ラウンドロビン（各 namespace から1件ずつ交互）
-         COALESCE(a.active_count, 0) ASC,  -- active が少ない namespace を優先
+         GREATEST(                         -- DRF: dominant share が小さい namespace を優先
+           COALESCE(u.cpu_millicores_seconds, 0)::float / :cluster_cpu_millicores,
+           COALESCE(u.memory_mib_seconds, 0)::float / :cluster_memory_mib,
+           COALESCE(u.gpu_seconds, 0)::float / NULLIF(:cluster_gpus, 0)
+         ) ASC NULLS FIRST,
          q.namespace ASC                   -- 同率の場合は namespace 名で決定的に順序付け
 LIMIT :batch_size;                         -- 1サイクルの総取得数を固定
 ```
 
-このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。
+このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_resource_usage` は namespace ごとに最大 1 行であり、JOIN のコストは無視できる。
 
 **ラウンドロビンの仕組み：** `ROW_NUMBER()` を QUEUED ジョブのみに振り、`ORDER BY rn ASC` とすることで、各 namespace の rn=1（最古の QUEUED ジョブ）が全 namespace 分先に並び、次に rn=2 が全 namespace 分並ぶ。`LIMIT :batch_size` で打ち切ることで、namespace 間で均等に dispatch される。
 
-**公平性の保証：** `active_count ASC` でソートすることで、現在の active ジョブ数が少ない namespace が優先される。これにより namespace 数が `DISPATCH_BATCH_SIZE` を超えても、リソース消費の少ないユーザーから先に dispatch され、公平性が維持される。
+**公平性の保証（DRF）：** 各リソースの累計消費量をクラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求めてソートする。これにより、支配的リソースの消費割合が小さい namespace が優先され、namespace 数が `DISPATCH_BATCH_SIZE` を超えても公平性が維持される。`namespace_resource_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。
+
+**期間リセット：** `fetch_dispatchable_jobs()` の実行前に、`period_start` が `FAIR_SHARE_RESET_INTERVAL_SEC` を超過した行のカウンタをリセットする（[database.md](database.md) §4.3 参照）。
 
 ### 1.3 再試行の管理
 
@@ -164,7 +173,7 @@ class Dispatcher:
 
     def run(self):
         while True:
-            # §1.2 のクエリ（ラウンドロビン・active_count 優先・LIMIT batch_size）
+            # §1.2 のクエリ（期間リセット → ラウンドロビン・DRF 優先・LIMIT batch_size）
             candidates = db.fetch_dispatchable_jobs()
             # §2.4 の隙間充填フィルタ（滞留ジョブがある namespace の候補を制限）
             candidates = apply_gap_filling(session, candidates, settings)
