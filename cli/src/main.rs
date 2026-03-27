@@ -101,7 +101,7 @@ async fn main() -> Result<()> {
             memory,
             time_limit,
         } => cmd_add(&api_client, command, cpu, memory, time_limit).await,
-        Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status, limit, reverse, all).await,
+        Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status.map(|s| s.to_uppercase()), limit, reverse, all).await,
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
         Commands::Delete { job_ids, all } => cmd_delete(&api_client, job_ids, all).await,

@@ -146,7 +146,8 @@ async fn main() -> Result<()> {
             let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
                 JobsCommands::List { namespace, status } => {
-                    cmd::jobs::list(&conn.client, namespace.as_deref(), status.as_deref()).await
+                    let status_upper = status.map(|s| s.to_uppercase());
+                    cmd::jobs::list(&conn.client, namespace.as_deref(), status_upper.as_deref()).await
                 }
                 JobsCommands::Stalled => cmd::jobs::stalled(&conn.client).await,
                 JobsCommands::Remaining => cmd::jobs::remaining(&conn.client).await,
