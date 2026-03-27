@@ -114,6 +114,11 @@ pub struct UsageResponse {
     pub total_gpu_seconds: i64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CliVersionResponse {
+    pub version: String,
+}
+
 pub struct CjobClient {
     base_url: String,
     token: String,
@@ -133,6 +138,22 @@ impl CjobClient {
         Ok(Self {
             base_url,
             token,
+            http,
+        })
+    }
+
+    pub fn new_without_auth() -> Result<Self> {
+        let base_url = std::env::var("CJOB_API_URL")
+            .unwrap_or_else(|_| "http://submit-api.cjob-system.svc.cluster.local:8080".to_string());
+
+        let http = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .context("HTTP クライアントの初期化に失敗しました")?;
+
+        Ok(Self {
+            base_url,
+            token: String::new(),
             http,
         })
     }
@@ -262,6 +283,47 @@ impl CjobClient {
             .context("API への接続に失敗しました")?;
 
         handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn get_cli_version(&self) -> Result<CliVersionResponse> {
+        let resp = self
+            .http
+            .get(format!("{}/v1/cli/version", self.base_url))
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn download_cli_binary(&self) -> Result<Vec<u8>> {
+        let resp = self
+            .http
+            .get(format!("{}/v1/cli/download", self.base_url))
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        let status_code = resp.status();
+        if status_code.is_success() {
+            return Ok(resp.bytes().await.context("バイナリのダウンロードに失敗しました")?.to_vec());
+        }
+
+        let body: ErrorResponse = resp
+            .json()
+            .await
+            .unwrap_or(ErrorResponse {
+                detail: Some(format!("HTTP {}", status_code)),
+                message: None,
+                blocking_job_ids: None,
+            });
+
+        let msg = body
+            .detail
+            .or(body.message)
+            .unwrap_or_else(|| format!("HTTP {}", status_code));
+
+        bail!("エラー ({}): {}", status_code, msg)
     }
 }
 

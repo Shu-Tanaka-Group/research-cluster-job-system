@@ -13,6 +13,7 @@
 - `cjob delete`
 - `cjob reset`
 - `cjob logs`（`--follow` オプション含む）
+- `cjob update`
 
 ### 1.2 submit 機能
 
@@ -168,7 +169,7 @@ Submit API は stateless（状態の正本は PostgreSQL・認証は K8s TokenRe
 #### 各コンポーネントの役割
 
 **cjob CLI**
-ユーザーが User Pod 内で操作するコマンドラインツール。ジョブの投入・一覧・状態確認・キャンセル・ログ閲覧などを Submit API への HTTP リクエストとして送信する。Rust 製シングルバイナリとして配布し、image には含めない。
+ユーザーが User Pod 内で操作するコマンドラインツール。ジョブの投入・一覧・状態確認・キャンセル・ログ閲覧などを Submit API への HTTP リクエストとして送信する。Rust 製シングルバイナリとして配布し、image には含めない。`cjob update` コマンドで Submit API 経由でセルフアップデートできる。
 
 **Submit API**
 CLI からのリクエストを受け付け、ジョブを PostgreSQL に QUEUED 状態で登録する。ServiceAccount JWT を K8s TokenReview API で検証し、操作が自分の namespace のジョブに限定されることを保証する。状態を持たない（stateless）ため Replica を複数にできる。

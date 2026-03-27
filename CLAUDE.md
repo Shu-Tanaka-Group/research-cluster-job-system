@@ -42,6 +42,7 @@ cjob cancel <job-id>                 # キャンセル（範囲: 1-10, 複数: 1
 cjob logs <job-id>                   # ログ表示（--follow / --delete / --delete-all）
 cjob usage                           # リソース使用状況の表示
 cjob reset                           # 全ジョブ履歴・ログ削除、job_id を 1 に戻す
+cjob update                          # CLI バイナリの更新
 ```
 
 ## プロジェクト情報管理の基本方針

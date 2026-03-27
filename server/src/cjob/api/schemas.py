@@ -98,3 +98,7 @@ class ResetResponse(BaseModel):
 class ResetErrorResponse(BaseModel):
     message: str
     blocking_job_ids: list[int] | None = None
+
+
+class CliVersionResponse(BaseModel):
+    version: str

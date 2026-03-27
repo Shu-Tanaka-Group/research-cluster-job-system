@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     DEFAULT_TIME_LIMIT_SECONDS: int = 86400   # 24 hours
     MAX_TIME_LIMIT_SECONDS: int = 604800      # 7 days
 
+    # CLI binary distribution
+    CLI_BINARY_DIR: str = "/cli-binary"
+
     # Kueue
     KUEUE_LOCAL_QUEUE_NAME: str = "default"
 

@@ -314,3 +314,39 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
   "message": "リセット処理が進行中のため再実行できません。しばらく待ってから再試行してください"
 }
 ```
+
+## 9. GET /v1/cli/version
+
+PVC 上に配置された CLI バイナリの最新バージョンを返す。認証不要。
+
+Submit API は PVC（`cli-binary`）の `latest` ファイルを読み取り、最新バージョン文字列を返す。
+
+### response
+
+```json
+{
+  "version": "1.2.0"
+}
+```
+
+### エラーレスポンス
+
+PVC に `latest` ファイルが存在しない場合（バイナリ未配置）は 404 を返す。
+
+```json
+{ "detail": "CLI binary not found" }
+```
+
+## 10. GET /v1/cli/download
+
+PVC 上に配置された最新の CLI バイナリを返す。認証不要。
+
+Submit API は PVC（`cli-binary`）の `latest` ファイルからバージョンを読み取り、`<version>/cjob` バイナリをレスポンスボディとして返す。`Content-Type: application/octet-stream` で返す。
+
+### エラーレスポンス
+
+バイナリが存在しない場合は 404 を返す。
+
+```json
+{ "detail": "CLI binary not found" }
+```

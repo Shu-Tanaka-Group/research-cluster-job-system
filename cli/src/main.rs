@@ -85,11 +85,18 @@ enum Commands {
         #[arg(long)]
         follow: bool,
     },
+    /// CLI を最新バージョンに更新する
+    Update,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    if matches!(cli.command, Commands::Update) {
+        let api_client = client::CjobClient::new_without_auth()?;
+        return cmd_update(&api_client).await;
+    }
 
     let token = auth::read_token()?;
     let api_client = client::CjobClient::new(token)?;
@@ -108,6 +115,7 @@ async fn main() -> Result<()> {
         Commands::Usage => cmd_usage(&api_client).await,
         Commands::Reset => cmd_reset(&api_client).await,
         Commands::Logs { job_id, follow } => logs::show_logs(job_id, follow, &api_client).await,
+        Commands::Update => unreachable!(),
     }
 }
 
@@ -401,6 +409,44 @@ async fn cmd_usage(client: &client::CjobClient) -> Result<()> {
     }
 
     println!();
+    Ok(())
+}
+
+async fn cmd_update(client: &client::CjobClient) -> Result<()> {
+    use anyhow::Context;
+    use std::os::unix::fs::PermissionsExt;
+
+    let current_version = env!("CARGO_PKG_VERSION");
+    let resp = client.get_cli_version().await?;
+    let latest_version = &resp.version;
+
+    if current_version == latest_version {
+        println!("すでに最新バージョンです ({})", current_version);
+        return Ok(());
+    }
+
+    println!("更新しています... {} → {}", current_version, latest_version);
+
+    let binary = client.download_cli_binary().await?;
+
+    let current_exe = std::env::current_exe()
+        .context("実行ファイルのパスを取得できませんでした")?;
+    let tmp_path = current_exe
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("実行ファイルの親ディレクトリを取得できませんでした"))?
+        .join(".cjob.update.tmp");
+
+    std::fs::write(&tmp_path, &binary)
+        .context("一時ファイルの書き込みに失敗しました")?;
+    std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o755))
+        .context("実行権限の設定に失敗しました")?;
+
+    if let Err(e) = std::fs::rename(&tmp_path, &current_exe) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(anyhow::anyhow!(e).context("バイナリの置き換えに失敗しました"));
+    }
+
+    println!("更新が完了しました。");
     Ok(())
 }
 
