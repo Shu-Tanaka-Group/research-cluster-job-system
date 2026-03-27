@@ -942,9 +942,34 @@ kubectl apply -f kueue/cluster-queue.yaml
 
 ---
 
-## 16. 初期セットアップ手順
+## 16. 計算ノードの準備
 
-新規クラスタへの初回セットアップ手順。
+ジョブを実行するノードに `cluster-job=true` ラベルと `role=computing:NoSchedule` Taint を付与する。これらは以下の3つの仕組みで参照される。
+
+| 設定 | 参照先 | 用途 |
+|---|---|---|
+| `cluster-job=true` ラベル | Kueue ResourceFlavor の `nodeLabels` | Kueue が Job Pod をスケジュールするノードの選定 |
+| `cluster-job=true` ラベル | ConfigMap `NODE_LABEL_SELECTOR` | Watcher がノードの allocatable リソースを取得する対象の選定 |
+| `role=computing:NoSchedule` Taint | Kueue ResourceFlavor の `nodeTaints` / Job Pod の `tolerations` | 一般の Pod が計算ノードにスケジュールされることを防止 |
+
+```bash
+# 計算ノードにラベルと Taint を付与する
+# <node-name> はクラスタ内の計算ノード名に置き換える
+kubectl label node <node-name> cluster-job=true
+kubectl taint node <node-name> role=computing:NoSchedule
+
+# 確認
+kubectl get nodes -l cluster-job=true
+kubectl describe node <node-name> | grep -A5 Taints
+```
+
+計算ノードを追加・撤去した場合、Watcher が `node_resources` テーブルを自動的に同期するため、Dispatcher や Submit API の設定変更は不要である。
+
+---
+
+## 17. 初期セットアップ手順
+
+新規クラスタへの初回セットアップ手順。§16 の計算ノード準備が完了していることが前提。
 
 ```bash
 # 1. cjob-system namespace の作成
