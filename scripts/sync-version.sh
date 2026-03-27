@@ -41,21 +41,33 @@ if [ -f "$PYPROJECT" ]; then
     fi
 fi
 
-# Update Cargo.toml (only the [package] version, not dependency versions)
-CARGO="$REPO_ROOT/cli/Cargo.toml"
-if [ -f "$CARGO" ]; then
+# Update cli/Cargo.toml (only the [package] version, not dependency versions)
+CARGO_CLI="$REPO_ROOT/cli/Cargo.toml"
+if [ -f "$CARGO_CLI" ]; then
     # Match only the version line in the first 5 lines ([package] section)
-    current=$(head -5 "$CARGO" | grep -E '^version = "' | sed 's/version = "\(.*\)"/\1/')
+    current=$(head -5 "$CARGO_CLI" | grep -E '^version = "' | sed 's/version = "\(.*\)"/\1/')
     if [ "$current" != "$VERSION" ]; then
         # Replace only the first occurrence of version = "..."
-        sed -i.bak "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" "$CARGO"
-        rm -f "$CARGO.bak"
-        echo "Updated $CARGO: $current -> $VERSION"
+        sed -i.bak "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" "$CARGO_CLI"
+        rm -f "$CARGO_CLI.bak"
+        echo "Updated $CARGO_CLI: $current -> $VERSION"
+        changed=1
+    fi
+fi
+
+# Update ctl/Cargo.toml (only the [package] version, not dependency versions)
+CARGO_CTL="$REPO_ROOT/ctl/Cargo.toml"
+if [ -f "$CARGO_CTL" ]; then
+    current=$(head -5 "$CARGO_CTL" | grep -E '^version = "' | sed 's/version = "\(.*\)"/\1/')
+    if [ "$current" != "$VERSION" ]; then
+        sed -i.bak "0,/^version = \".*\"/{s/^version = \".*\"/version = \"$VERSION\"/}" "$CARGO_CTL"
+        rm -f "$CARGO_CTL.bak"
+        echo "Updated $CARGO_CTL: $current -> $VERSION"
         changed=1
     fi
 fi
 
 if [ "$changed" -eq 1 ]; then
     # Stage the updated files so they're included in the commit
-    git add "$PYPROJECT" "$CARGO" 2>/dev/null || true
+    git add "$PYPROJECT" "$CARGO_CLI" "$CARGO_CTL" 2>/dev/null || true
 fi
