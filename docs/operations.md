@@ -10,6 +10,7 @@
 | `ctl/src/cmd/usage.rs` | `cjobctl usage list / reset` |
 | `ctl/src/cmd/counters.rs` | `cjobctl counters list` |
 | `ctl/src/cmd/weight.rs` | `cjobctl weight` サブコマンド全般 |
+| `ctl/src/cmd/cluster.rs` | `cjobctl cluster` サブコマンド全般 |
 | `ctl/src/cmd/db_migrate.rs` | `cjobctl db migrate` |
 
 ## 1. DB 状態の確認
@@ -90,6 +91,38 @@ cjobctl cluster resources
 
 テーブルが空の場合は Watcher が未起動または対象ノードが存在しない状態を示す。計算ノードに `cluster-job=true` ラベルが付与されていることを確認すること（[deployment.md](deployment.md) §16 参照）。
 
+### 1.8 ClusterQueue の nominalQuota 確認
+
+Kueue ClusterQueue に設定されている現在の nominalQuota（CPU / メモリ / GPU）を表示する。
+
+```bash
+cjobctl cluster show-quota
+```
+
+### 1.9 ClusterQueue の nominalQuota 更新
+
+```bash
+# CPU とメモリを更新
+cjobctl cluster set-quota --cpu 256 --memory 1000Gi
+
+# GPU も含めて更新
+cjobctl cluster set-quota --cpu 256 --memory 1000Gi --gpu 4
+
+# GPU quota を削除
+cjobctl cluster set-quota --cpu 256 --memory 1000Gi --gpu 0
+```
+
+指定値は `node_resources` テーブルの allocatable 合計と比較してバリデーションされる。
+
+- **allocatable 超過** → エラーで中断。`--force` を指定すると警告付きで適用を許可する（ノード追加直前に quota を先行設定する場合など）
+- **極端に小さい値**（allocatable の 10% 未満） → 警告を表示するが適用は可能
+
+更新後の確認は以下でも行える。
+
+```bash
+kubectl get clusterqueue cjob-cluster-queue -o jsonpath='{range .spec.resourceGroups[*].flavors[*].resources[*]}name={.name} nominalQuota={.nominalQuota}{"\n"}{end}'
+```
+
 ## 2. コンポーネントの状態確認
 
 ### 2.1 Pod の状態
@@ -164,4 +197,58 @@ cjobctl usage reset --all
 
 ```bash
 cjobctl db migrate
+```
+
+## 6. 計算ノードの追加
+
+### 6.1 ノードラベル・taint の付与
+
+新しいノードには以下のラベルと taint を付与する。
+
+```bash
+kubectl label node <node-name> cluster-job=true
+kubectl taint node <node-name> role=computing:NoSchedule
+```
+
+ラベル `cluster-job=true` は ConfigMap `cjob-config` の `NODE_LABEL_SELECTOR` で指定された値と一致している必要がある。値を変更している場合は、ConfigMap の設定に合わせること。
+
+```bash
+# 現在の NODE_LABEL_SELECTOR を確認
+cjobctl config show
+```
+
+このラベルは以下の 2 箇所で参照される。
+
+| 参照元 | 用途 |
+|---|---|
+| Kueue ResourceFlavor（`nodeLabels`） | Job Pod をラベル付きノードにのみスケジュールする |
+| Watcher（`NODE_LABEL_SELECTOR`） | ラベル付きノードの allocatable リソースを DB に同期する |
+
+taint `role=computing:NoSchedule` は、ジョブ以外の Pod が計算ノードにスケジュールされることを防ぐ。
+
+### 6.2 リソース情報の反映確認
+
+Watcher が `NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）間隔で自動的にノードを検出し、`node_resources` テーブルを更新する。
+
+```bash
+# ノードが認識されたことを確認
+cjobctl cluster resources
+```
+
+### 6.3 ClusterQueue の nominalQuota 更新
+
+ノード追加によりクラスタの総リソースが増加した場合、ClusterQueue の nominalQuota を更新する。
+
+```bash
+# 現在の quota を確認
+cjobctl cluster show-quota
+
+# 新しい総量に合わせて更新
+cjobctl cluster set-quota --cpu <new-total> --memory <new-total>
+```
+
+Watcher の同期が完了する前に quota を設定したい場合は `--force` を使用する。
+
+```bash
+cjobctl cluster set-quota --cpu <new-total> --memory <new-total> --force
 ```
