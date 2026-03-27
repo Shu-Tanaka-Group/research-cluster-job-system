@@ -151,6 +151,9 @@ enum ClusterCommands {
         /// GPU count (e.g. 4)
         #[arg(long)]
         gpu: Option<u32>,
+        /// Allow values exceeding cluster allocatable total
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -238,11 +241,11 @@ async fn main() -> Result<()> {
                     let k8s_client = k8s::client().await?;
                     cmd::cluster::show_quota(&k8s_client).await
                 }
-                ClusterCommands::SetQuota { cpu, memory, gpu } => {
+                ClusterCommands::SetQuota { cpu, memory, gpu, force } => {
                     let conn =
                         db::connect(&config.database, config.system_namespace()).await?;
                     let k8s_client = k8s::client().await?;
-                    cmd::cluster::set_quota(&conn.client, &k8s_client, cpu, &memory, gpu)
+                    cmd::cluster::set_quota(&conn.client, &k8s_client, cpu, &memory, gpu, force)
                         .await
                 }
             }

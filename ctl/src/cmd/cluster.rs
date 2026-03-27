@@ -215,6 +215,7 @@ pub async fn set_quota(
     cpu: u32,
     memory: &str,
     gpu: Option<u32>,
+    force: bool,
 ) -> Result<()> {
     // Validate memory format
     validate_memory_format(memory)?;
@@ -225,10 +226,13 @@ pub async fn set_quota(
     let alloc_mem_mib = totals.memory_mib;
     let alloc_gpu = totals.gpus;
 
+    let mut exceeds = false;
+
     // Validate CPU
     if (cpu as i64) > alloc_cpu_cores {
+        exceeds = true;
         eprintln!(
-            "Warning: CPU {} exceeds cluster allocatable total ({} cores)",
+            "Error: CPU {} exceeds cluster allocatable total ({} cores)",
             cpu, alloc_cpu_cores,
         );
     } else if (cpu as i64) < alloc_cpu_cores / 10 {
@@ -241,8 +245,9 @@ pub async fn set_quota(
     // Validate memory
     if let Some(mem_mib) = memory_to_mib(memory) {
         if (mem_mib as i64) > alloc_mem_mib {
+            exceeds = true;
             eprintln!(
-                "Warning: Memory {} exceeds cluster allocatable total ({:.1} GiB)",
+                "Error: Memory {} exceeds cluster allocatable total ({:.1} GiB)",
                 memory,
                 alloc_mem_mib as f64 / 1024.0,
             );
@@ -258,8 +263,9 @@ pub async fn set_quota(
     // Validate GPU
     if let Some(g) = gpu {
         if (g as i64) > alloc_gpu {
+            exceeds = true;
             eprintln!(
-                "Warning: GPU {} exceeds cluster allocatable total ({})",
+                "Error: GPU {} exceeds cluster allocatable total ({})",
                 g, alloc_gpu,
             );
         } else if alloc_gpu > 0 && (g as i64) < alloc_gpu / 10 {
@@ -268,6 +274,10 @@ pub async fn set_quota(
                 g, alloc_gpu,
             );
         }
+    }
+
+    if exceeds && !force {
+        bail!("Specified values exceed cluster allocatable totals. Use --force to override.");
     }
 
     // Fetch current ClusterQueue
