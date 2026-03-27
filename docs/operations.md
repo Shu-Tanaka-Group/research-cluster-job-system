@@ -72,6 +72,24 @@ cjobctl jobs stalled
 cjobctl jobs remaining
 ```
 
+### 1.7 クラスタリソース総量の確認
+
+Watcher が K8s ノードから自動取得したリソース情報を確認する。
+
+```bash
+cjobctl cluster resources
+```
+
+以下の3つのセクションが表示される。
+
+- **Node Resources**: ノードごとの allocatable（CPU / メモリ / GPU）と最終更新時刻
+- **Cluster Totals**: 全ノードの合計値。Dispatcher の DRF 正規化に使用される
+- **Max per Node**: 各リソースの最大ノード値。Submit API のリソース超過リジェクトの閾値となる
+
+ノードの追加・撤去は Watcher が `NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）間隔で自動反映する。手動更新は不要。
+
+テーブルが空の場合は Watcher が未起動または対象ノードが存在しない状態を示す。計算ノードに `cluster-job=true` ラベルが付与されていることを確認すること（[deployment.md](deployment.md) §16 参照）。
+
 ## 2. コンポーネントの状態確認
 
 ### 2.1 Pod の状態
