@@ -77,29 +77,28 @@ pub async fn list(client: &Client, cluster_totals: &ClusterTotals) -> Result<()>
     println!("=== DRF Dominant Share ===");
     let cluster_cpu = cluster_totals.cpu_millicores as f64;
     let cluster_mem = cluster_totals.memory_mib as f64;
-    let cluster_gpus = cluster_totals.gpus as f64;
+    let cluster_gpus_f = cluster_totals.gpus as f64;
 
-    let drf_rows = client
-        .query(
-            "SELECT \
-               u.namespace, \
-               SUM(u.cpu_millicores_seconds)::BIGINT AS cpu_total, \
-               SUM(u.memory_mib_seconds)::BIGINT AS mem_total, \
-               SUM(u.gpu_seconds)::BIGINT AS gpu_total, \
-               COALESCE(w.weight, 1) AS weight, \
-               GREATEST( \
-                 COALESCE(SUM(u.cpu_millicores_seconds), 0) * 1.0 / $1, \
-                 COALESCE(SUM(u.memory_mib_seconds), 0) * 1.0 / $2, \
-                 COALESCE(SUM(u.gpu_seconds), 0) * 1.0 / NULLIF($3, 0) \
-               ) / COALESCE(w.weight, 1) AS weighted_dominant_share \
-             FROM namespace_daily_usage u \
-             LEFT JOIN namespace_weights w ON u.namespace = w.namespace \
-             WHERE u.usage_date > CURRENT_DATE - 7 \
-             GROUP BY u.namespace, w.weight \
-             ORDER BY weighted_dominant_share ASC NULLS FIRST",
-            &[&cluster_totals.cpu_millicores, &cluster_totals.memory_mib, &cluster_totals.gpus],
-        )
-        .await?;
+    let drf_query = format!(
+        "SELECT \
+           u.namespace, \
+           SUM(u.cpu_millicores_seconds)::BIGINT AS cpu_total, \
+           SUM(u.memory_mib_seconds)::BIGINT AS mem_total, \
+           SUM(u.gpu_seconds)::BIGINT AS gpu_total, \
+           COALESCE(w.weight, 1) AS weight, \
+           GREATEST( \
+             COALESCE(SUM(u.cpu_millicores_seconds), 0) * 1.0 / {}, \
+             COALESCE(SUM(u.memory_mib_seconds), 0) * 1.0 / {}, \
+             COALESCE(SUM(u.gpu_seconds), 0) * 1.0 / NULLIF({}, 0) \
+           ) / COALESCE(w.weight, 1) AS weighted_dominant_share \
+         FROM namespace_daily_usage u \
+         LEFT JOIN namespace_weights w ON u.namespace = w.namespace \
+         WHERE u.usage_date > CURRENT_DATE - 7 \
+         GROUP BY u.namespace, w.weight \
+         ORDER BY weighted_dominant_share ASC NULLS FIRST",
+        cluster_totals.cpu_millicores, cluster_totals.memory_mib, cluster_totals.gpus
+    );
+    let drf_rows = client.query(&drf_query, &[]).await?;
 
     println!(
         "{:<20} {:>14} {:>14} {:>10} {:>8} {:>16}",
@@ -115,8 +114,8 @@ pub async fn list(client: &Client, cluster_totals: &ClusterTotals) -> Result<()>
         // Compute dominant share locally for display
         let cpu_share = cpu as f64 / cluster_cpu;
         let mem_share = mem as f64 / cluster_mem;
-        let gpu_share = if cluster_gpus > 0.0 {
-            gpu as f64 / cluster_gpus
+        let gpu_share = if cluster_gpus_f > 0.0 {
+            gpu as f64 / cluster_gpus_f
         } else {
             0.0
         };
