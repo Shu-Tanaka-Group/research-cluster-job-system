@@ -67,14 +67,10 @@ spec:
     cjob
 ```
 
-バイナリの手動配置手順:
+バイナリの配置は `cjobctl cli deploy` で行う（[cjobctl.md](architecture/cjobctl.md) §5.6 参照）。
 
 ```bash
-# PVC にアクセスできる Pod から実行する
-mkdir -p /mnt/cli-binary/<version>
-cp cjob /mnt/cli-binary/<version>/cjob
-chmod +x /mnt/cli-binary/<version>/cjob
-echo "<version>" > /mnt/cli-binary/latest
+cjobctl cli deploy --binary ./target/x86_64-unknown-linux-musl/release/cjob --version <version>
 ```
 
 ---

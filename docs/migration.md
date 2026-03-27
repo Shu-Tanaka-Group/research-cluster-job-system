@@ -113,7 +113,11 @@ cd cli/
 cargo build --release --target x86_64-unknown-linux-musl
 ```
 
-ビルド後、PVC にバイナリを配置する（[deployment.md](deployment.md) §4.1 参照）。ユーザーは `cjob update` でセルフアップデートできる。
+ビルド後、`cjobctl cli deploy` で PVC にバイナリを配置する。ユーザーは `cjob update` でセルフアップデートできる。
+
+```bash
+cjobctl cli deploy --binary ./target/x86_64-unknown-linux-musl/release/cjob --version ${VERSION}
+```
 
 ## Step 6: 動作確認
 
