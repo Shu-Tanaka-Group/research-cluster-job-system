@@ -861,7 +861,57 @@ spec:
 
 ---
 
-## 14. Kueue インストール
+## 14. Kyverno によるイメージ制限
+
+Job Pod で使用可能なイメージを制限し、ユーザーによるイメージ書き換えを防止する。
+Kyverno の ClusterPolicy を使い、ユーザー namespace 内の Job に対して許可リスト外のイメージを拒否する。
+
+### 14.1 Kyverno インストール
+
+```bash
+helm repo add kyverno https://kyverno.github.io/kyverno/
+helm repo update
+helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+```
+
+### 14.2 ClusterPolicy の適用
+
+`yusekiya/stg-*` から始まるイメージのみを許可する。
+ユーザー namespace（`cjob.io/user-namespace: "true"` ラベル付き）内の Job だけが対象であり、
+`cjob-system` namespace のシステムコンポーネントには影響しない。
+
+```yaml
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-job-image
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: allowed-images
+      match:
+        resources:
+          kinds: ["Job"]
+          namespaceSelector:
+            matchLabels:
+              cjob.io/user-namespace: "true"
+      validate:
+        message: "許可されていないイメージです。yusekiya/stg-* のイメージのみ使用できます。"
+        pattern:
+          spec:
+            template:
+              spec:
+                containers:
+                  - image: "yusekiya/stg-*"
+```
+
+```bash
+kubectl apply -f policies/restrict-job-image.yaml
+```
+
+---
+
+## 15. Kueue インストール
 
 
 マニフェストをダウンロード
@@ -888,7 +938,7 @@ kubectl apply -f kueue/cluster-queue.yaml
 
 ---
 
-## 15. 初期セットアップ手順
+## 16. 初期セットアップ手順
 
 新規クラスタへの初回セットアップ手順。
 
@@ -940,7 +990,13 @@ kubectl apply -f deployments/watcher.yaml
 # 11. NetworkPolicy の適用
 kubectl apply -f networkpolicies/allow-submit-api.yaml
 
-# 12. 各ユーザーの namespace 作成
+# 12. Kyverno のインストールとイメージ制限ポリシーの適用
+helm repo add kyverno https://kyverno.github.io/kyverno/
+helm repo update
+helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+kubectl apply -f policies/restrict-job-image.yaml
+
+# 13. 各ユーザーの namespace 作成
 ./scripts/create-user-namespace.sh alice
 ./scripts/create-user-namespace.sh bob
 ```
