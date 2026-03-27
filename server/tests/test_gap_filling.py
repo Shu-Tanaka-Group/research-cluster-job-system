@@ -82,7 +82,7 @@ class TestApplyGapFilling:
         assert 3 not in result_ids
 
     def test_stalled_no_running_jobs(self, mock_stalled, mock_remaining, db_session):
-        """Stalled job exists, no RUNNING jobs (remaining=None) → all held."""
+        """Stalled job exists, no RUNNING jobs (remaining=None) → all allowed to avoid deadlock."""
         settings = _make_settings()
         stalled_job = _make_job(NS, 99)
         mock_stalled.return_value = [stalled_job]
@@ -95,7 +95,10 @@ class TestApplyGapFilling:
 
         result = apply_gap_filling(db_session, candidates, settings)
 
-        assert result == []
+        assert len(result) == 2
+        result_ids = [j.job_id for j in result]
+        assert 1 in result_ids
+        assert 2 in result_ids
 
     def test_mixed_namespaces(self, mock_stalled, mock_remaining, db_session):
         """Only stalled namespace is filtered; other namespaces pass through."""

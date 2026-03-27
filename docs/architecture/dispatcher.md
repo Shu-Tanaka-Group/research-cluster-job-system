@@ -278,11 +278,12 @@ dispatch サイクル:
   3. 滞留ジョブが存在しない namespace → 候補をそのまま dispatch（現行動作）
   4. 滞留ジョブが存在する namespace → 候補をフィルタリング:
      a. RUNNING ジョブの最短残り時間 T を計算する
-     b. 候補のうち time_limit_seconds ≤ T のジョブだけを dispatch 対象とする
-     c. time_limit_seconds > T のジョブは dispatch を保留する（次サイクルで再評価）
+     b. T = None（RUNNING ジョブなし）→ 全候補を制限なしで dispatch（デッドロック防止）
+     c. T が値を持つ場合 → 候補のうち time_limit_seconds ≤ T のジョブだけを dispatch 対象とする
+     d. time_limit_seconds > T のジョブは dispatch を保留する（次サイクルで再評価）
 ```
 
-**RUNNING ジョブが存在しない場合**（全て DISPATCHED で待機中）: T = None となり、隙間充填の判定条件（`time_limit_seconds <= T`）が成立しないため、全ての QUEUED ジョブの dispatch が保留される。DISPATCHED ジョブのいずれかが RUNNING に遷移するか、キャンセルされて枠が空くのを待つ。
+**RUNNING ジョブが存在しない場合**（全て DISPATCHED で待機中）: T = None となり、全候補を制限なしで dispatch する。これにより、滞留ジョブのみが DISPATCHED にある状態で namespace 全体の dispatch が永久に停止するデッドロックを防止する。新しくdispatch されたジョブが RUNNING に遷移すれば、次のサイクルで T が計算可能になり、通常の隙間充填制御に戻る。
 
 **設計判断: namespace 内スコープに限定する理由**
 
@@ -340,9 +341,14 @@ def apply_gap_filling(
         # RUNNING ジョブの最短残り時間を計算
         remaining = estimate_shortest_remaining(session, ns)
 
+        # RUNNING ジョブがない場合は全候補を通す（デッドロック防止）
+        if remaining is None:
+            result.extend(ns_candidates)
+            continue
+
         # time_limit_seconds が残り時間以内のジョブだけを通す
         for c in ns_candidates:
-            if remaining is not None and c.time_limit_seconds <= remaining:
+            if c.time_limit_seconds <= remaining:
                 result.append(c)
             else:
                 logger.debug(

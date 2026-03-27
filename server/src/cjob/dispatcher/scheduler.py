@@ -244,8 +244,15 @@ def apply_gap_filling(
 
         remaining = estimate_shortest_remaining(session, ns)
 
+        if remaining is None:
+            # No RUNNING jobs: allow all candidates to avoid deadlock.
+            # Without this, a stalled large job with no RUNNING jobs
+            # would block all dispatch for this namespace indefinitely.
+            result.extend(ns_candidates)
+            continue
+
         for c in ns_candidates:
-            if remaining is not None and c.time_limit_seconds <= remaining:
+            if c.time_limit_seconds <= remaining:
                 result.append(c)
             else:
                 logger.debug(
