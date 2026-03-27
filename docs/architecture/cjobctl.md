@@ -68,6 +68,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 | `cjobctl jobs summary` | namespace × ステータスのジョブ数（ピボットテーブル） | `jobs` |
 | `cjobctl jobs stalled` | DISPATCHED のまま滞留しているジョブ | `jobs` |
 | `cjobctl jobs remaining` | RUNNING ジョブの残り時間 | `jobs` |
+| `cjobctl jobs cancel --namespace <ns> [--job-id <id> \| --status <s> \| --all]` | ジョブのキャンセル | `jobs` |
 | `cjobctl counters list` | namespace ごとの job_id カウンター | `user_job_counters` |
 
 ### 5.2 リソース消費量
@@ -145,6 +146,7 @@ GPU:    4
 
 以下のコマンドは実行前に `[y/N]` の確認プロンプトを表示する:
 
+- `cjobctl jobs cancel`
 - `cjobctl usage reset`
 - `cjobctl weight exclusive --release`
 

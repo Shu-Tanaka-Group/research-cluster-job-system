@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{bail, Result};
+use std::io::{self, Write};
 use tokio_postgres::Client;
 
 pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>) -> Result<()> {
@@ -184,6 +185,115 @@ pub async fn summary(client: &Client) -> Result<()> {
         }
         println!();
     }
+    Ok(())
+}
+
+pub async fn cancel(
+    client: &Client,
+    namespace: &str,
+    job_id: Option<i32>,
+    status: Option<&str>,
+    all: bool,
+) -> Result<()> {
+    // Validate arguments: exactly one of --job-id, --status, or --all must be specified
+    let specified = [job_id.is_some(), status.is_some(), all]
+        .iter()
+        .filter(|&&v| v)
+        .count();
+    if specified != 1 {
+        bail!("Specify exactly one of --job-id, --status, or --all");
+    }
+
+    let cancellable_statuses = ["QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING"];
+
+    // Find target jobs
+    let rows = if let Some(id) = job_id {
+        client
+            .query(
+                "SELECT job_id, status FROM jobs \
+                 WHERE namespace = $1 AND job_id = $2",
+                &[&namespace, &id],
+            )
+            .await?
+    } else if let Some(s) = status {
+        if !cancellable_statuses.contains(&s) {
+            bail!(
+                "Cannot cancel jobs with status '{}'. Cancellable statuses: {}",
+                s,
+                cancellable_statuses.join(", ")
+            );
+        }
+        client
+            .query(
+                "SELECT job_id, status FROM jobs \
+                 WHERE namespace = $1 AND status = $2 \
+                 ORDER BY job_id",
+                &[&namespace, &s],
+            )
+            .await?
+    } else {
+        // --all
+        client
+            .query(
+                "SELECT job_id, status FROM jobs \
+                 WHERE namespace = $1 AND status = ANY($2) \
+                 ORDER BY job_id",
+                &[&namespace, &cancellable_statuses.as_slice()],
+            )
+            .await?
+    };
+
+    if rows.is_empty() {
+        println!("No matching jobs found.");
+        return Ok(());
+    }
+
+    // Filter to cancellable jobs and report skipped ones
+    let mut targets: Vec<i32> = Vec::new();
+    for row in &rows {
+        let id: i32 = row.get(0);
+        let st: &str = row.get(1);
+        if cancellable_statuses.contains(&st) {
+            targets.push(id);
+        } else {
+            println!("Skipping job {} (status: {})", id, st);
+        }
+    }
+
+    if targets.is_empty() {
+        println!("No cancellable jobs found.");
+        return Ok(());
+    }
+
+    // Confirmation prompt
+    println!(
+        "Will cancel {} job(s) in namespace '{}':",
+        targets.len(),
+        namespace
+    );
+    for id in &targets {
+        println!("  job_id: {}", id);
+    }
+    print!("Proceed? [y/N] ");
+    io::stdout().flush()?;
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    if !input.trim().eq_ignore_ascii_case("y") {
+        println!("Cancelled.");
+        return Ok(());
+    }
+
+    // Execute cancel
+    let updated = client
+        .execute(
+            "UPDATE jobs SET status = 'CANCELLED' \
+             WHERE namespace = $1 AND job_id = ANY($2) \
+               AND status = ANY($3)",
+            &[&namespace, &targets, &cancellable_statuses.as_slice()],
+        )
+        .await?;
+
+    println!("{} job(s) cancelled.", updated);
     Ok(())
 }
 

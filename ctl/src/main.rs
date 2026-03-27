@@ -79,6 +79,21 @@ enum JobsCommands {
     Remaining,
     /// Show job count by namespace and status
     Summary,
+    /// Cancel jobs in a namespace
+    Cancel {
+        /// Target namespace (required)
+        #[arg(long)]
+        namespace: String,
+        /// Cancel a specific job by ID
+        #[arg(long)]
+        job_id: Option<i32>,
+        /// Cancel all jobs with this status (e.g. RUNNING, QUEUED, DISPATCHED)
+        #[arg(long)]
+        status: Option<String>,
+        /// Cancel all active jobs in the namespace
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -180,6 +195,10 @@ async fn main() -> Result<()> {
                 JobsCommands::Stalled => cmd::jobs::stalled(&conn.client).await,
                 JobsCommands::Remaining => cmd::jobs::remaining(&conn.client).await,
                 JobsCommands::Summary => cmd::jobs::summary(&conn.client).await,
+                JobsCommands::Cancel { namespace, job_id, status, all } => {
+                    let status_upper = status.map(|s| s.to_uppercase());
+                    cmd::jobs::cancel(&conn.client, &namespace, job_id, status_upper.as_deref(), all).await
+                }
             }
         }
         Commands::Counters { command } => {

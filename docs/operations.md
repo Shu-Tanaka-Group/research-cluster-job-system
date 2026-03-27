@@ -207,12 +207,10 @@ namespace のラベル `cjob.io/user-namespace=true` の有無でジョブ投入
 kubectl label namespace user-<username> cjob.io/user-namespace-
 
 # 必要に応じて実行中のジョブをキャンセル
-cjobctl jobs list --namespace user-<username> --status RUNNING
-cjobctl jobs list --namespace user-<username> --status QUEUED
-cjobctl jobs list --namespace user-<username> --status DISPATCHED
+cjobctl jobs cancel --namespace user-<username> --all
 ```
 
-ラベルを外しても、既に QUEUED / DISPATCHED / RUNNING のジョブはそのまま動き続ける。完全に停止したい場合は `cjobctl` で該当ジョブをキャンセルすること。
+ラベルを外しても、既に QUEUED / DISPATCHED / RUNNING のジョブはそのまま動き続ける。完全に停止したい場合は `cjobctl jobs cancel --all` で該当 namespace の全アクティブジョブをキャンセルすること。
 
 ### 5.2 ユーザーのアクセスを再開する
 
