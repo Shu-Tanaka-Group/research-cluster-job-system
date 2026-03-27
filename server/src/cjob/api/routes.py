@@ -15,12 +15,14 @@ from .schemas import (
     JobSubmitResponse,
     ResetErrorResponse,
     ResetResponse,
+    UsageResponse,
 )
 from .services import (
     cancel_bulk,
     cancel_single,
     delete_jobs,
     get_job,
+    get_usage,
     list_jobs,
     reset,
     submit_job,
@@ -91,6 +93,14 @@ def post_delete(
     session: Session = Depends(get_session),
 ):
     return delete_jobs(session, namespace, req.job_ids)
+
+
+@router.get("/usage", response_model=UsageResponse)
+def get_usage_endpoint(
+    namespace: str = Depends(get_namespace),
+    session: Session = Depends(get_session),
+):
+    return get_usage(session, namespace)
 
 
 @router.post(
