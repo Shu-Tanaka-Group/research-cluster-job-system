@@ -24,7 +24,7 @@
 
 🔄 **環境の完全再現** — 作業ディレクトリ・環境変数・仮想環境を Job Pod にそのまま引き継ぎ
 
-☸️ **Kubernetes ネイティブ** — Kueue による admission control と K8s のオートヒーリングで、高い耐障害性を実現
+☸️ **Kubernetes ネイティブ** — Kueue による効率的なリソース管理と、オートヒーリングによる高い耐障害性
 
 ⚖️ **公平なリソース分配** — Dominant Resource Fairness（DRF）ベースのスケジューリングで、ユーザー間のリソースを公平に分配
 
