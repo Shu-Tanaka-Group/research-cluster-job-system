@@ -230,10 +230,6 @@ stateDiagram-v2
     RUNNING --> FAILED : エラー終了 / 時間超過
     RUNNING --> CANCELLED : cjob cancel
 
-    SUCCEEDED --> [*] : cjob delete
-    FAILED --> [*] : cjob delete
-    CANCELLED --> [*] : cjob delete
-
     SUCCEEDED --> DELETING : cjob reset
     FAILED --> DELETING : cjob reset
     CANCELLED --> DELETING : cjob reset
@@ -243,7 +239,7 @@ stateDiagram-v2
 
 > [!NOTE]
 > `cjob delete` は完了済みジョブを即座に削除します。
-> `cjob reset` は全ジョブを DELETING 状態に移行し、K8s 上のリソースを安全に削除した後に DB レコードを削除します。
+> `cjob reset` は全ジョブを DELETING 状態に移行し、K8s 上のリソースを安全に削除した後にジョブを削除します。ジョブ ID カウンターも 1 にリセットされます。
 
 | ステータス | 説明 |
 |---|---|
