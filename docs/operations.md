@@ -165,21 +165,24 @@ DELETE FROM namespace_weights WHERE namespace = 'user-alice';
 
 ### 特定ユーザーにクラスタを専有させる場合
 
-他の全ユーザーの weight を 0（dispatch 禁止）に設定する。
+K8s の namespace ラベル（`cjob.io/user-namespace=true`）を元に、専有ユーザー以外の全 namespace を weight = 0（dispatch 禁止）に設定する。
 
 ```bash
 # 専有させたいユーザー以外を全て weight=0 にする
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-INSERT INTO namespace_weights (namespace, weight)
-SELECT namespace, 0 FROM user_job_counters WHERE namespace != 'user-alice'
-ON CONFLICT (namespace) DO UPDATE SET weight = 0;
-"
+# （cjob.io/user-namespace=true ラベルが付いた全 namespace が対象）
+kubectl get ns -l cjob.io/user-namespace=true -o jsonpath='{.items[*].metadata.name}' | \
+  tr ' ' '\n' | \
+  grep -v 'user-alice' | \
+  xargs -I{} kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c \
+    "INSERT INTO namespace_weights (namespace, weight) VALUES ('{}', 0) ON CONFLICT (namespace) DO UPDATE SET weight = 0;"
 
-# 専有を解除（全員のweight行を削除してデフォルト=1に戻す）
+# 専有を解除（全員の weight 行を削除してデフォルト=1 に戻す）
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
 DELETE FROM namespace_weights;
 "
 ```
+
+専有中に新しい namespace が作成された場合は、専有コマンドを再実行して追加分を weight = 0 にする。
 
 ## 4. 累計リソース消費量の手動リセット
 
