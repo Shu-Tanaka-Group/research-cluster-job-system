@@ -89,7 +89,8 @@ CREATE TABLE namespace_weights (
 
 Dispatcher の DRF ソートでは `dominant_share / weight` でソートする。テーブルに行がない namespace は weight = 1 として扱う（`COALESCE(w.weight, 1)`）。
 
-例: weight = 2 の namespace は、weight = 1 の namespace と同じ量のリソースを消費しても、dominant share が半分に評価される。結果として、weight = 1 の namespace より多くのリソースを使い切るまで優先的に dispatch される。
+- **weight = 0**: dispatch 対象から除外される（使用禁止）。ジョブは QUEUED に留まり、weight を 1 以上に戻すと dispatch が再開される。管理者が特定ユーザーにクラスタ全体を専有させたい場合に、他ユーザーの weight を 0 に設定することで実現できる
+- **weight ≥ 1**: weight が大きい namespace ほど、同じ累計消費量でも dominant share が小さく評価され、dispatch 優先度が高くなる。例えば weight = 2 の namespace は、weight = 1 の namespace より多くのリソースを使い切るまで優先的に dispatch される
 
 ## 5. `namespace_daily_usage` テーブル
 

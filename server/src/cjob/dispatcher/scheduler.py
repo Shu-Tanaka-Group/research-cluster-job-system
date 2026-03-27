@@ -61,6 +61,7 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
             "  LEFT JOIN namespace_weights w ON q.namespace = w.namespace "
             "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
             "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
+            "  AND COALESCE(w.weight, 1) > 0 "
             "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
             "  GREATEST("
             "    COALESCE(u.cpu_millicores_seconds, 0) * 1.0 / :cluster_cpu_millicores,"

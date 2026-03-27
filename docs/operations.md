@@ -163,6 +163,24 @@ DELETE FROM namespace_weights WHERE namespace = 'user-alice';
 
 テーブルに行がない namespace はデフォルト weight = 1 として扱われる。
 
+### 特定ユーザーにクラスタを専有させる場合
+
+他の全ユーザーの weight を 0（dispatch 禁止）に設定する。
+
+```bash
+# 専有させたいユーザー以外を全て weight=0 にする
+kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
+INSERT INTO namespace_weights (namespace, weight)
+SELECT namespace, 0 FROM user_job_counters WHERE namespace != 'user-alice'
+ON CONFLICT (namespace) DO UPDATE SET weight = 0;
+"
+
+# 専有を解除（全員のweight行を削除してデフォルト=1に戻す）
+kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
+DELETE FROM namespace_weights;
+"
+```
+
 ## 4. 累計リソース消費量の手動リセット
 
 特定の namespace の累計消費量を手動でリセットする場合。

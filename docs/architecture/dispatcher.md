@@ -54,6 +54,7 @@ SELECT q.* FROM queued q
   LEFT JOIN namespace_weights w ON q.namespace = w.namespace
 WHERE COALESCE(a.active_count, 0) < :dispatch_limit          -- budget に余裕がある namespace のみ
   AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0)  -- 残り budget 分だけ取得
+  AND COALESCE(w.weight, 1) > 0                               -- weight=0 の namespace は dispatch 対象外
 ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 namespace から round_size 件ずつ交互）
          GREATEST(                         -- DRF: dominant share / weight が小さい namespace を優先
            COALESCE(u.cpu_millicores_seconds, 0)::float / :cluster_cpu_millicores,
