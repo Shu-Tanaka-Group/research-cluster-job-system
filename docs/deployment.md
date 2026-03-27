@@ -134,6 +134,7 @@ data:
   JOB_NAMESPACE_PREFIX: user-
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
+  CLI_BINARY_DIR: /cli-binary
 ```
 
 ### 6.2 各コンポーネントへの注入パターン
@@ -664,6 +665,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: JOB_NAMESPACE_PREFIX
+            - name: CLI_BINARY_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: CLI_BINARY_DIR
           resources:
             requests:
               cpu: "100m"
