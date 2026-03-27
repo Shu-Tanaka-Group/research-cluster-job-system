@@ -212,13 +212,19 @@ fn confirm(prompt: &str) -> bool {
 pub async fn set_quota(
     db_client: &Client,
     k8s_client: &kube::Client,
-    cpu: u32,
-    memory: &str,
+    cpu: Option<u32>,
+    memory: Option<&str>,
     gpu: Option<u32>,
     force: bool,
 ) -> Result<()> {
+    if cpu.is_none() && memory.is_none() && gpu.is_none() {
+        bail!("Specify at least one of --cpu, --memory, or --gpu.");
+    }
+
     // Validate memory format
-    validate_memory_format(memory)?;
+    if let Some(mem) = memory {
+        validate_memory_format(mem)?;
+    }
 
     // Fetch allocatable totals from DB for validation
     let totals = ClusterTotals::from_db(db_client).await;
@@ -229,34 +235,38 @@ pub async fn set_quota(
     let mut exceeds = false;
 
     // Validate CPU
-    if (cpu as i64) > alloc_cpu_cores {
-        exceeds = true;
-        eprintln!(
-            "Error: CPU {} exceeds cluster allocatable total ({} cores)",
-            cpu, alloc_cpu_cores,
-        );
-    } else if (cpu as i64) < alloc_cpu_cores / 10 {
-        eprintln!(
-            "Warning: CPU {} is very small compared to cluster allocatable total ({} cores)",
-            cpu, alloc_cpu_cores,
-        );
+    if let Some(c) = cpu {
+        if (c as i64) > alloc_cpu_cores {
+            exceeds = true;
+            eprintln!(
+                "Error: CPU {} exceeds cluster allocatable total ({} cores)",
+                c, alloc_cpu_cores,
+            );
+        } else if (c as i64) < alloc_cpu_cores / 10 {
+            eprintln!(
+                "Warning: CPU {} is very small compared to cluster allocatable total ({} cores)",
+                c, alloc_cpu_cores,
+            );
+        }
     }
 
     // Validate memory
-    if let Some(mem_mib) = memory_to_mib(memory) {
-        if (mem_mib as i64) > alloc_mem_mib {
-            exceeds = true;
-            eprintln!(
-                "Error: Memory {} exceeds cluster allocatable total ({:.1} GiB)",
-                memory,
-                alloc_mem_mib as f64 / 1024.0,
-            );
-        } else if (mem_mib as i64) < alloc_mem_mib / 10 {
-            eprintln!(
-                "Warning: Memory {} is very small compared to cluster allocatable total ({:.1} GiB)",
-                memory,
-                alloc_mem_mib as f64 / 1024.0,
-            );
+    if let Some(mem) = memory {
+        if let Some(mem_mib) = memory_to_mib(mem) {
+            if (mem_mib as i64) > alloc_mem_mib {
+                exceeds = true;
+                eprintln!(
+                    "Error: Memory {} exceeds cluster allocatable total ({:.1} GiB)",
+                    mem,
+                    alloc_mem_mib as f64 / 1024.0,
+                );
+            } else if (mem_mib as i64) < alloc_mem_mib / 10 {
+                eprintln!(
+                    "Warning: Memory {} is very small compared to cluster allocatable total ({:.1} GiB)",
+                    mem,
+                    alloc_mem_mib as f64 / 1024.0,
+                );
+            }
         }
     }
 
@@ -289,18 +299,30 @@ pub async fn set_quota(
 
     let current = extract_quota(&cq);
 
-    // Show current → new
+    // Show current → new (only for specified resources)
     println!("=== ClusterQueue nominalQuota change ===");
-    println!(
-        "CPU:    {} → {}",
-        current.cpu.as_deref().unwrap_or("(not set)"),
-        cpu,
-    );
-    println!(
-        "Memory: {} → {}",
-        current.memory.as_deref().unwrap_or("(not set)"),
-        memory,
-    );
+    match cpu {
+        Some(c) => println!(
+            "CPU:    {} → {}",
+            current.cpu.as_deref().unwrap_or("(not set)"),
+            c,
+        ),
+        None => println!(
+            "CPU:    {} (unchanged)",
+            current.cpu.as_deref().unwrap_or("(not set)"),
+        ),
+    }
+    match memory {
+        Some(m) => println!(
+            "Memory: {} → {}",
+            current.memory.as_deref().unwrap_or("(not set)"),
+            m,
+        ),
+        None => println!(
+            "Memory: {} (unchanged)",
+            current.memory.as_deref().unwrap_or("(not set)"),
+        ),
+    }
     match gpu {
         Some(g) => println!(
             "GPU:    {} → {}",
@@ -339,14 +361,18 @@ pub async fn set_quota(
         .and_then(|f| f["resources"].as_array_mut())
         .context("Unexpected ClusterQueue structure")?;
 
-    // Update CPU and Memory
+    // Update only specified resources
     for res in flavor_resources.iter_mut() {
         match res["name"].as_str() {
             Some("cpu") => {
-                res["nominalQuota"] = Value::String(cpu.to_string());
+                if let Some(c) = cpu {
+                    res["nominalQuota"] = Value::String(c.to_string());
+                }
             }
             Some("memory") => {
-                res["nominalQuota"] = Value::String(memory.to_string());
+                if let Some(m) = memory {
+                    res["nominalQuota"] = Value::String(m.to_string());
+                }
             }
             Some("nvidia.com/gpu") => {
                 if let Some(g) = gpu {

@@ -105,12 +105,17 @@ cjobctl cluster show-quota
 # CPU とメモリを更新
 cjobctl cluster set-quota --cpu 256 --memory 1000Gi
 
+# CPU のみ更新（メモリは現在値を維持）
+cjobctl cluster set-quota --cpu 128
+
 # GPU も含めて更新
 cjobctl cluster set-quota --cpu 256 --memory 1000Gi --gpu 4
 
 # GPU quota を削除
-cjobctl cluster set-quota --cpu 256 --memory 1000Gi --gpu 0
+cjobctl cluster set-quota --gpu 0
 ```
+
+`--cpu`、`--memory`、`--gpu` はすべてオプショナルで、指定されたリソースのみ更新される。指定されなかったリソースは現在値が維持される。少なくとも 1 つは指定が必要。
 
 指定値は `node_resources` テーブルの allocatable 合計と比較してバリデーションされる。
 

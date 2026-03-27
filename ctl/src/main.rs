@@ -144,10 +144,10 @@ enum ClusterCommands {
     SetQuota {
         /// CPU cores (e.g. 256)
         #[arg(long)]
-        cpu: u32,
+        cpu: Option<u32>,
         /// Memory with unit (e.g. 1000Gi)
         #[arg(long)]
-        memory: String,
+        memory: Option<String>,
         /// GPU count (e.g. 4)
         #[arg(long)]
         gpu: Option<u32>,
@@ -245,8 +245,15 @@ async fn main() -> Result<()> {
                     let conn =
                         db::connect(&config.database, config.system_namespace()).await?;
                     let k8s_client = k8s::client().await?;
-                    cmd::cluster::set_quota(&conn.client, &k8s_client, cpu, &memory, gpu, force)
-                        .await
+                    cmd::cluster::set_quota(
+                        &conn.client,
+                        &k8s_client,
+                        cpu,
+                        memory.as_deref(),
+                        gpu,
+                        force,
+                    )
+                    .await
                 }
             }
         }
