@@ -7,7 +7,7 @@
 **Links:** [使用例](#使用例)
     — [インストール方法](#インストール)
     — [運用マニュアル](./docs/operations.md)
-    — [導入手順](./docs/deployment.md)
+    — [システム構築手順](./docs/deployment.md)
     — [システム設計](./docs/system_architecture.md)
 
 </div>
