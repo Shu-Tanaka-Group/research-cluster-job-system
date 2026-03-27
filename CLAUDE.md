@@ -63,6 +63,7 @@ cjob reset                           # 全ジョブ履歴・ログ削除、job_i
   - Kueue 設計: docs/architecture/kueue.md
   - API 設計: docs/architecture/api.md
   - CLI 設計: docs/architecture/cli.md
+  - 管理 CLI（cjobctl）設計: docs/architecture/cjobctl.md
   - Dispatcher 設計: docs/architecture/dispatcher.md
   - Watcher 設計: docs/architecture/watcher.md
   - 実装計画: docs/architecture/implementation.md
