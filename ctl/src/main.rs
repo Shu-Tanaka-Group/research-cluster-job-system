@@ -143,26 +143,26 @@ async fn main() -> Result<()> {
         // --- DB-only commands ---
         Commands::Jobs { command } => {
             let config = config::Config::load()?;
-            let client = db::connect(&config.database).await?;
+            let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
                 JobsCommands::List { namespace, status } => {
-                    cmd::jobs::list(&client, namespace.as_deref(), status.as_deref()).await
+                    cmd::jobs::list(&conn.client, namespace.as_deref(), status.as_deref()).await
                 }
-                JobsCommands::Stalled => cmd::jobs::stalled(&client).await,
-                JobsCommands::Remaining => cmd::jobs::remaining(&client).await,
-                JobsCommands::Summary => cmd::jobs::summary(&client).await,
+                JobsCommands::Stalled => cmd::jobs::stalled(&conn.client).await,
+                JobsCommands::Remaining => cmd::jobs::remaining(&conn.client).await,
+                JobsCommands::Summary => cmd::jobs::summary(&conn.client).await,
             }
         }
         Commands::Counters { command } => {
             let config = config::Config::load()?;
-            let client = db::connect(&config.database).await?;
+            let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
-                CountersCommands::List => cmd::counters::list(&client).await,
+                CountersCommands::List => cmd::counters::list(&conn.client).await,
             }
         }
         Commands::Usage { command } => {
             let config = config::Config::load()?;
-            let db_client = db::connect(&config.database).await?;
+            let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
                 UsageCommands::List => {
                     // Try to fetch cluster totals from K8s ConfigMap
@@ -179,27 +179,27 @@ async fn main() -> Result<()> {
                             cmd::usage::ClusterTotals::default()
                         }
                     };
-                    cmd::usage::list(&db_client, &totals).await
+                    cmd::usage::list(&conn.client, &totals).await
                 }
                 UsageCommands::Reset { namespace, all } => {
-                    cmd::usage::reset(&db_client, namespace.as_deref(), all).await
+                    cmd::usage::reset(&conn.client, namespace.as_deref(), all).await
                 }
             }
         }
         Commands::Weight { command } => {
             let config = config::Config::load()?;
-            let db_client = db::connect(&config.database).await?;
+            let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
-                WeightCommands::List => cmd::weight::list(&db_client).await,
+                WeightCommands::List => cmd::weight::list(&conn.client).await,
                 WeightCommands::Set { namespace, weight } => {
-                    cmd::weight::set(&db_client, &namespace, weight).await
+                    cmd::weight::set(&conn.client, &namespace, weight).await
                 }
                 WeightCommands::Reset { namespace } => {
-                    cmd::weight::reset(&db_client, &namespace).await
+                    cmd::weight::reset(&conn.client, &namespace).await
                 }
                 WeightCommands::Exclusive { namespace, release } => {
                     if release {
-                        cmd::weight::release(&db_client).await
+                        cmd::weight::release(&conn.client).await
                     } else {
                         let ns = namespace
                             .as_deref()
@@ -208,16 +208,16 @@ async fn main() -> Result<()> {
                         let k8s_client = k8s::client().await?;
                         let user_namespaces =
                             fetch_user_namespaces(&k8s_client).await?;
-                        cmd::weight::exclusive(&db_client, ns, &user_namespaces).await
+                        cmd::weight::exclusive(&conn.client, ns, &user_namespaces).await
                     }
                 }
             }
         }
         Commands::Db { command } => {
             let config = config::Config::load()?;
-            let client = db::connect(&config.database).await?;
+            let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
-                DbCommands::Migrate => cmd::db_migrate::migrate(&client).await,
+                DbCommands::Migrate => cmd::db_migrate::migrate(&conn.client).await,
             }
         }
 

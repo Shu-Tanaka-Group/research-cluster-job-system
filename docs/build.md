@@ -135,8 +135,6 @@ cargo build --release
 
 ```toml
 [database]
-host = "localhost"
-port = 5432
 database = "cjob"
 user = "cjob"
 password = "xxx"
@@ -145,7 +143,7 @@ password = "xxx"
 namespace = "cjob-system"
 ```
 
-DB に接続する際は `kubectl port-forward` を使用する。
+DB コマンド実行時は `kubectl port-forward` が自動的に起動・終了される（`kubectl` が PATH に必要）。
 
 ```bash
 kubectl port-forward svc/postgres 5432:5432 -n cjob-system
