@@ -134,7 +134,26 @@ GPU:    4
 
 `logs` の有効なコンポーネント名: `dispatcher`, `watcher`, `submit-api`。Pod のラベル `app=<component>` で特定する。
 
-### 5.5 DB スキーマ管理
+### 5.6 CLI バイナリの配布
+
+| コマンド | 概要 | 対象 |
+|---|---|---|
+| `cjobctl cli deploy --binary <path> --version <version>` | CLI バイナリを PVC に配置する | K8s Pod + PVC |
+
+内部処理:
+1. `kubectl run` で `cli-binary` PVC（ReadWriteMany）をマウントした一時 Pod を起動する
+2. `kubectl cp` でバイナリを一時 Pod 内の `/cli-binary/<version>/cjob` にコピーする
+3. 一時 Pod 内で `chmod +x` を実行する
+4. 一時 Pod 内で `echo "<version>" > /cli-binary/latest` を実行する
+5. 一時 Pod を削除する
+
+一時 Pod には最小イメージ（`busybox`）を使用し、PVC の `cli-binary` を `/cli-binary` にマウントする。
+
+```bash
+cjobctl cli deploy --binary ./target/x86_64-unknown-linux-musl/release/cjob --version 1.2.0
+```
+
+### 5.7 DB スキーマ管理
 
 | コマンド | 概要 |
 |---|---|
@@ -167,6 +186,7 @@ ctl/
         ├── counters.rs    # counters list
         ├── weight.rs      # weight list/set/reset/exclusive
         ├── cluster.rs     # cluster resources
+        ├── cli_deploy.rs  # cli deploy
         ├── db_migrate.rs  # db migrate
         ├── status.rs      # K8s Pod 状態
         ├── logs.rs        # K8s コンポーネントログ
@@ -184,4 +204,4 @@ ctl/
 | 通信先 | Submit API（HTTP） | PostgreSQL（直接）+ K8s API |
 | 認証 | ServiceAccount JWT | kubeconfig + DB パスワード |
 | 操作範囲 | 自身の namespace のジョブのみ | 全 namespace |
-| 配布方法 | GitHub Releases | ソースからビルド |
+| 配布方法 | `cjob update`（Submit API 経由） | ソースからビルド |
