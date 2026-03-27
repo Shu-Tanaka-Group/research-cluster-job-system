@@ -85,9 +85,8 @@ data:
   GAP_FILLING_ENABLED: "true"
   GAP_FILLING_STALL_THRESHOLD_SEC: "300"
   FAIR_SHARE_WINDOW_DAYS: "7"
-  CLUSTER_TOTAL_CPU_MILLICORES: "256000"
-  CLUSTER_TOTAL_MEMORY_MIB: "1024000"
-  CLUSTER_TOTAL_GPUS: "0"
+  NODE_LABEL_SELECTOR: "cluster-job=true"
+  NODE_RESOURCE_SYNC_INTERVAL_SEC: "300"
   MAX_QUEUED_JOBS_PER_NAMESPACE: "2000"
   DEFAULT_TIME_LIMIT_SECONDS: "86400"
   MAX_TIME_LIMIT_SECONDS: "604800"
@@ -252,6 +251,9 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -448,6 +450,13 @@ data:
         memory_mib_seconds     BIGINT NOT NULL DEFAULT 0,
         gpu_seconds            BIGINT NOT NULL DEFAULT 0,
         PRIMARY KEY (namespace, usage_date)
+    );
+    CREATE TABLE IF NOT EXISTS node_resources (
+        node_name           TEXT PRIMARY KEY,
+        cpu_millicores      INTEGER NOT NULL,
+        memory_mib          INTEGER NOT NULL,
+        gpu                 INTEGER NOT NULL DEFAULT 0,
+        updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
     CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ON jobs (namespace, status);
@@ -739,21 +748,6 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: FAIR_SHARE_WINDOW_DAYS
-            - name: CLUSTER_TOTAL_CPU_MILLICORES
-              valueFrom:
-                configMapKeyRef:
-                  name: cjob-config
-                  key: CLUSTER_TOTAL_CPU_MILLICORES
-            - name: CLUSTER_TOTAL_MEMORY_MIB
-              valueFrom:
-                configMapKeyRef:
-                  name: cjob-config
-                  key: CLUSTER_TOTAL_MEMORY_MIB
-            - name: CLUSTER_TOTAL_GPUS
-              valueFrom:
-                configMapKeyRef:
-                  name: cjob-config
-                  key: CLUSTER_TOTAL_GPUS
             - name: KUEUE_LOCAL_QUEUE_NAME
               valueFrom:
                 configMapKeyRef:
@@ -843,6 +837,16 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
+            - name: NODE_LABEL_SELECTOR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: NODE_LABEL_SELECTOR
+            - name: NODE_RESOURCE_SYNC_INTERVAL_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: NODE_RESOURCE_SYNC_INTERVAL_SEC
           resources:
             requests:
               cpu: "100m"

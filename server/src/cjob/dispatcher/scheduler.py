@@ -22,6 +22,19 @@ def _cleanup_old_usage(session: Session, settings: Settings):
     session.commit()
 
 
+def _fetch_cluster_totals(session: Session) -> tuple[int, int, int]:
+    """Fetch cluster resource totals from node_resources table."""
+    row = session.execute(
+        text(
+            "SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu, "
+            "       COALESCE(SUM(memory_mib), 0) AS total_memory, "
+            "       COALESCE(SUM(gpu), 0) AS total_gpu "
+            "FROM node_resources"
+        )
+    ).mappings().first()
+    return row["total_cpu"], row["total_memory"], row["total_gpu"]
+
+
 def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
     """Fetch up to batch_size QUEUED jobs, round-robin across namespaces.
 
@@ -30,57 +43,96 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
     """
     _cleanup_old_usage(session, settings)
 
-    result = session.execute(
-        text(
-            "WITH active AS ("
-            "  SELECT namespace, COUNT(*) AS active_count"
-            "  FROM jobs"
-            "  WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
-            "  GROUP BY namespace"
-            "), "
-            "queued AS ("
-            "  SELECT *, ROW_NUMBER() OVER ("
-            "    PARTITION BY namespace ORDER BY created_at ASC"
-            "  ) AS rn"
-            "  FROM jobs"
-            "  WHERE status = 'QUEUED'"
-            "    AND (retry_after IS NULL OR retry_after <= NOW())"
-            "), "
-            "usage AS ("
-            "  SELECT namespace,"
-            "    SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,"
-            "    SUM(memory_mib_seconds) AS memory_mib_seconds,"
-            "    SUM(gpu_seconds) AS gpu_seconds"
-            "  FROM namespace_daily_usage"
-            "  WHERE usage_date > CURRENT_DATE - :window_days"
-            "  GROUP BY namespace"
-            ") "
-            "SELECT q.* FROM queued q"
-            "  LEFT JOIN active a USING (namespace)"
-            "  LEFT JOIN usage u ON q.namespace = u.namespace"
-            "  LEFT JOIN namespace_weights w ON q.namespace = w.namespace "
-            "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
-            "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
-            "  AND COALESCE(w.weight, 1) > 0 "
-            "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
-            "  GREATEST("
-            "    COALESCE(u.cpu_millicores_seconds, 0) * 1.0 / :cluster_cpu_millicores,"
-            "    COALESCE(u.memory_mib_seconds, 0) * 1.0 / :cluster_memory_mib,"
-            "    COALESCE(u.gpu_seconds, 0) * 1.0 / NULLIF(:cluster_gpus, 0)"
-            "  ) / COALESCE(w.weight, 1) ASC NULLS FIRST, "
-            "  q.namespace ASC "
-            "LIMIT :batch_size"
-        ),
-        {
-            "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
-            "batch_size": settings.DISPATCH_BATCH_SIZE,
-            "round_size": settings.DISPATCH_ROUND_SIZE,
-            "window_days": settings.FAIR_SHARE_WINDOW_DAYS,
-            "cluster_cpu_millicores": settings.CLUSTER_TOTAL_CPU_MILLICORES,
-            "cluster_memory_mib": settings.CLUSTER_TOTAL_MEMORY_MIB,
-            "cluster_gpus": settings.CLUSTER_TOTAL_GPUS,
-        },
-    )
+    cluster_cpu, cluster_mem, cluster_gpus = _fetch_cluster_totals(session)
+
+    # If node_resources is empty (Watcher not yet running), fall back to
+    # simple namespace-name ordering without DRF.
+    if cluster_cpu == 0 and cluster_mem == 0:
+        logger.debug("node_resources is empty; DRF disabled, using namespace order")
+        result = session.execute(
+            text(
+                "WITH active AS ("
+                "  SELECT namespace, COUNT(*) AS active_count"
+                "  FROM jobs"
+                "  WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
+                "  GROUP BY namespace"
+                "), "
+                "queued AS ("
+                "  SELECT *, ROW_NUMBER() OVER ("
+                "    PARTITION BY namespace ORDER BY created_at ASC"
+                "  ) AS rn"
+                "  FROM jobs"
+                "  WHERE status = 'QUEUED'"
+                "    AND (retry_after IS NULL OR retry_after <= NOW())"
+                ") "
+                "SELECT q.* FROM queued q"
+                "  LEFT JOIN active a USING (namespace)"
+                "  LEFT JOIN namespace_weights w ON q.namespace = w.namespace "
+                "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
+                "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
+                "  AND COALESCE(w.weight, 1) > 0 "
+                "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
+                "  q.namespace ASC "
+                "LIMIT :batch_size"
+            ),
+            {
+                "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
+                "batch_size": settings.DISPATCH_BATCH_SIZE,
+                "round_size": settings.DISPATCH_ROUND_SIZE,
+            },
+        )
+    else:
+        result = session.execute(
+            text(
+                "WITH active AS ("
+                "  SELECT namespace, COUNT(*) AS active_count"
+                "  FROM jobs"
+                "  WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
+                "  GROUP BY namespace"
+                "), "
+                "queued AS ("
+                "  SELECT *, ROW_NUMBER() OVER ("
+                "    PARTITION BY namespace ORDER BY created_at ASC"
+                "  ) AS rn"
+                "  FROM jobs"
+                "  WHERE status = 'QUEUED'"
+                "    AND (retry_after IS NULL OR retry_after <= NOW())"
+                "), "
+                "usage AS ("
+                "  SELECT namespace,"
+                "    SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,"
+                "    SUM(memory_mib_seconds) AS memory_mib_seconds,"
+                "    SUM(gpu_seconds) AS gpu_seconds"
+                "  FROM namespace_daily_usage"
+                "  WHERE usage_date > CURRENT_DATE - :window_days"
+                "  GROUP BY namespace"
+                ") "
+                "SELECT q.* FROM queued q"
+                "  LEFT JOIN active a USING (namespace)"
+                "  LEFT JOIN usage u ON q.namespace = u.namespace"
+                "  LEFT JOIN namespace_weights w ON q.namespace = w.namespace "
+                "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
+                "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
+                "  AND COALESCE(w.weight, 1) > 0 "
+                "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
+                "  GREATEST("
+                "    COALESCE(u.cpu_millicores_seconds, 0) * 1.0 / :cluster_cpu_millicores,"
+                "    COALESCE(u.memory_mib_seconds, 0) * 1.0 / :cluster_memory_mib,"
+                "    COALESCE(u.gpu_seconds, 0) * 1.0 / NULLIF(:cluster_gpus, 0)"
+                "  ) / COALESCE(w.weight, 1) ASC NULLS FIRST, "
+                "  q.namespace ASC "
+                "LIMIT :batch_size"
+            ),
+            {
+                "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
+                "batch_size": settings.DISPATCH_BATCH_SIZE,
+                "round_size": settings.DISPATCH_ROUND_SIZE,
+                "window_days": settings.FAIR_SHARE_WINDOW_DAYS,
+                "cluster_cpu_millicores": cluster_cpu,
+                "cluster_memory_mib": cluster_mem,
+                "cluster_gpus": cluster_gpus,
+            },
+        )
 
     jobs = []
     for row in result.mappings():

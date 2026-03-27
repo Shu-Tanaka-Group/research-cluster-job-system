@@ -83,7 +83,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 ```
 
-クラスタのリソース総量（`CLUSTER_TOTAL_CPU_MILLICORES` 等）は K8s の `cjob-config` ConfigMap から取得する。取得できない場合はデフォルト値を使用する。
+クラスタのリソース総量は DB の `node_resources` テーブルから `SUM()` で取得する。テーブルが空の場合はデフォルト値を使用する。
 
 ### 5.3 namespace weight 管理
 
@@ -97,7 +97,33 @@ dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 
 `weight exclusive` は K8s API で `cjob.io/user-namespace=true` ラベルを持つ namespace を列挙し、指定以外の全 namespace を weight = 0 に設定する。
 
-### 5.4 K8s 状態確認
+### 5.4 クラスタリソース確認
+
+| コマンド | 概要 | 対象テーブル |
+|---|---|---|
+| `cjobctl cluster resources` | ノードごとの allocatable、クラスタ合計、ノード最大値（リジェクト閾値）を表示 | `node_resources` |
+
+出力例:
+
+```
+=== Node Resources ===
+NODE              CPU (cores)   Memory (GiB)   GPU   Updated
+node-compute-01        64         256.0          0   2026-03-27 10:05:00
+node-compute-02        64         256.0          0   2026-03-27 10:05:00
+node-gpu-01            32         128.0          4   2026-03-27 10:05:00
+
+=== Cluster Totals (for DRF normalization) ===
+CPU:    160 cores (160000m)
+Memory: 640.0 GiB (655360 MiB)
+GPU:    4
+
+=== Max per Node (Submit API rejection threshold) ===
+CPU:    64 cores (64000m)
+Memory: 256.0 GiB (262144 MiB)
+GPU:    4
+```
+
+### 5.5 K8s 状態確認
 
 | コマンド | 概要 | K8s API |
 |---|---|---|
@@ -138,10 +164,11 @@ ctl/
         ├── usage.rs       # usage list/reset + ClusterTotals
         ├── counters.rs    # counters list
         ├── weight.rs      # weight list/set/reset/exclusive
+        ├── cluster.rs     # cluster resources
         ├── db_migrate.rs  # db migrate
         ├── status.rs      # K8s Pod 状態
         ├── logs.rs        # K8s コンポーネントログ
-        └── config_show.rs # K8s ConfigMap 表示 + cluster totals 取得
+        └── config_show.rs # K8s ConfigMap 表示
 ```
 
 各コマンドが実行する SQL クエリは `ctl/src/cmd/` 配下の対応ファイルを参照。

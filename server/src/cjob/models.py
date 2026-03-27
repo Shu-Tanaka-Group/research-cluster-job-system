@@ -76,6 +76,18 @@ class NamespaceDailyUsage(Base):
     gpu_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
 
 
+class NodeResource(Base):
+    __tablename__ = "node_resources"
+
+    node_name: Mapped[str] = mapped_column(String, primary_key=True)
+    cpu_millicores: Mapped[int] = mapped_column(Integer, nullable=False)
+    memory_mib: Mapped[int] = mapped_column(Integer, nullable=False)
+    gpu: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class JobEvent(Base):
     __tablename__ = "job_events"
 

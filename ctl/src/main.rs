@@ -50,6 +50,11 @@ enum Commands {
         #[command(subcommand)]
         command: WeightCommands,
     },
+    /// Inspect cluster resource information
+    Cluster {
+        #[command(subcommand)]
+        command: ClusterCommands,
+    },
     /// Manage database schema
     Db {
         #[command(subcommand)]
@@ -130,6 +135,12 @@ enum WeightCommands {
 }
 
 #[derive(Subcommand)]
+enum ClusterCommands {
+    /// Show node resources, cluster totals, and rejection thresholds
+    Resources,
+}
+
+#[derive(Subcommand)]
 enum DbCommands {
     /// Run idempotent schema migration
     Migrate,
@@ -166,20 +177,7 @@ async fn main() -> Result<()> {
             let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
                 UsageCommands::List => {
-                    // Try to fetch cluster totals from K8s ConfigMap
-                    let totals = match k8s::client().await {
-                        Ok(k8s_client) => {
-                            let fetcher = cmd::config_show::parse_cluster_totals(
-                                &k8s_client,
-                                config.system_namespace(),
-                            );
-                            fetcher.fetch().await
-                        }
-                        Err(_) => {
-                            eprintln!("Warning: K8s unavailable. Using default cluster totals.");
-                            cmd::usage::ClusterTotals::default()
-                        }
-                    };
+                    let totals = cmd::usage::ClusterTotals::from_db(&conn.client).await;
                     cmd::usage::list(&conn.client, &totals).await
                 }
                 UsageCommands::Reset { namespace, all } => {
@@ -212,6 +210,13 @@ async fn main() -> Result<()> {
                         cmd::weight::exclusive(&conn.client, ns, &user_namespaces).await
                     }
                 }
+            }
+        }
+        Commands::Cluster { command } => {
+            let config = config::Config::load()?;
+            let conn = db::connect(&config.database, config.system_namespace()).await?;
+            match command {
+                ClusterCommands::Resources => cmd::cluster::resources(&conn.client).await,
             }
         }
         Commands::Db { command } => {

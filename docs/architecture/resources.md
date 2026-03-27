@@ -76,11 +76,19 @@ ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User P
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
 |---|---|---|---|---|---|
 | `FAIR_SHARE_WINDOW_DAYS` | ConfigMap | 7 | Dispatcher | 全体 | DRF の消費量集計に使用するスライディングウィンドウの日数。直近 N 日分の日別消費量を合計して dominant share を計算する |
-| `CLUSTER_TOTAL_CPU_MILLICORES` | ConfigMap | 256000 (256コア) | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体の CPU 容量（ミリコア）。ClusterQueue の `nominalQuota` CPU と一致させる |
-| `CLUSTER_TOTAL_MEMORY_MIB` | ConfigMap | 1024000 (1000GiB) | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体のメモリ容量（MiB）。ClusterQueue の `nominalQuota` memory と一致させる |
-| `CLUSTER_TOTAL_GPUS` | ConfigMap | 0 | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体の GPU 数。0 の場合、GPU は DRF の計算から除外される |
+
+DRF 正規化に使用するクラスタ全体のリソース容量は、`node_resources` テーブル（[database.md](database.md) §6）から `SUM()` で動的に取得する。従来の `CLUSTER_TOTAL_CPU_MILLICORES` / `CLUSTER_TOTAL_MEMORY_MIB` / `CLUSTER_TOTAL_GPUS` は廃止された。
 
 日別リソース消費量の詳細は [database.md](database.md) §5、namespace の weight は [database.md](database.md) §4、DRF によるスケジューリングの詳細は [dispatcher.md](dispatcher.md) §1.1・§1.2 を参照。
+
+### ノードリソース同期に関する設定
+
+| 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
+|---|---|---|---|---|---|
+| `NODE_LABEL_SELECTOR` | ConfigMap | `cluster-job=true` | Watcher | 全体 | ノードリソース取得時の label selector。Kueue ResourceFlavor の `nodeLabels` と一致させる |
+| `NODE_RESOURCE_SYNC_INTERVAL_SEC` | ConfigMap | 300 (5分) | Watcher | 全体 | ノードリソース同期間隔（秒）。Watcher のメインループの N サイクルに 1 回実行する |
+
+ノードリソース同期の詳細は [watcher.md](watcher.md) §1.1、DB テーブル定義は [database.md](database.md) §6 を参照。
 
 ### 実行時間に関する制限
 

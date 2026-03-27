@@ -150,6 +150,77 @@ class TestSubmitJob:
             submit_job(db_session, NS, req)
         assert exc_info.value.status_code == 429
 
+    def test_cpu_exceeds_max_node(self, db_session):
+        """Job requesting more CPU than the largest node should be rejected."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 32000, 131072, 0)"
+            )
+        )
+        db_session.flush()
+        req = _make_request(resources=ResourceSpec(cpu="64", memory="1Gi", gpu=0))
+        with pytest.raises(HTTPException) as exc_info:
+            submit_job(db_session, NS, req)
+        assert exc_info.value.status_code == 400
+        assert "CPU" in exc_info.value.detail
+
+    def test_memory_exceeds_max_node(self, db_session):
+        """Job requesting more memory than the largest node should be rejected."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 64000, 131072, 0)"
+            )
+        )
+        db_session.flush()
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="256Gi", gpu=0))
+        with pytest.raises(HTTPException) as exc_info:
+            submit_job(db_session, NS, req)
+        assert exc_info.value.status_code == 400
+        assert "メモリ" in exc_info.value.detail
+
+    def test_resource_within_max_node(self, db_session):
+        """Job within node limits should be accepted."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 64000, 262144, 0)"
+            )
+        )
+        db_session.flush()
+        req = _make_request(resources=ResourceSpec(cpu="32", memory="128Gi", gpu=0))
+        resp = submit_job(db_session, NS, req)
+        assert resp.status == "QUEUED"
+
+    def test_resource_check_uses_max_across_nodes(self, db_session):
+        """Resource check should use the maximum across all nodes."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('small', 8000, 32768, 0), ('large', 64000, 262144, 0)"
+            )
+        )
+        db_session.flush()
+        # 32 cores: exceeds small node but fits large node → should be accepted
+        req = _make_request(resources=ResourceSpec(cpu="32", memory="1Gi", gpu=0))
+        resp = submit_job(db_session, NS, req)
+        assert resp.status == "QUEUED"
+
+    def test_resource_check_skipped_when_empty(self, db_session):
+        """When node_resources is empty, resource validation should be skipped."""
+        req = _make_request(resources=ResourceSpec(cpu="9999", memory="1Gi", gpu=0))
+        resp = submit_job(db_session, NS, req)
+        assert resp.status == "QUEUED"
+
 
 # ── list_jobs ──
 

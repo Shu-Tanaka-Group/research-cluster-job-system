@@ -15,6 +15,13 @@ pub async fn migrate(client: &Client) -> Result<()> {
             gpu_seconds            BIGINT NOT NULL DEFAULT 0, \
             PRIMARY KEY (namespace, usage_date) \
         ); \
+        CREATE TABLE IF NOT EXISTS node_resources ( \
+            node_name           TEXT PRIMARY KEY, \
+            cpu_millicores      INTEGER NOT NULL, \
+            memory_mib          INTEGER NOT NULL, \
+            gpu                 INTEGER NOT NULL DEFAULT 0, \
+            updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW() \
+        ); \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS time_limit_seconds INTEGER NOT NULL DEFAULT 86400; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;";
 
