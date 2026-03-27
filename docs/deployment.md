@@ -437,6 +437,10 @@ data:
         FOREIGN KEY (namespace, job_id) REFERENCES jobs(namespace, job_id)
             ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS namespace_weights (
+        namespace TEXT PRIMARY KEY,
+        weight    INTEGER NOT NULL DEFAULT 1
+    );
     CREATE TABLE IF NOT EXISTS namespace_daily_usage (
         namespace              TEXT NOT NULL,
         usage_date             DATE NOT NULL,

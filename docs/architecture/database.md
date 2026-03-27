@@ -76,7 +76,23 @@ CREATE TABLE job_events (
 );
 ```
 
-## 4. `namespace_daily_usage` テーブル
+## 4. `namespace_weights` テーブル
+
+namespace ごとの fair sharing の重み（weight）を管理する。weight が大きい namespace ほど、同じ累計消費量でも DRF の dominant share が小さく評価され、dispatch 優先度が高くなる。
+
+```sql
+CREATE TABLE namespace_weights (
+    namespace TEXT PRIMARY KEY,
+    weight    INTEGER NOT NULL DEFAULT 1
+);
+```
+
+Dispatcher の DRF ソートでは `dominant_share / weight` でソートする。テーブルに行がない namespace は weight = 1 として扱う（`COALESCE(w.weight, 1)`）。
+
+- **weight = 0**: dispatch 対象から除外される（使用禁止）。ジョブは QUEUED に留まり、weight を 1 以上に戻すと dispatch が再開される。管理者が特定ユーザーにクラスタ全体を専有させたい場合に、他ユーザーの weight を 0 に設定することで実現できる
+- **weight ≥ 1**: weight が大きい namespace ほど、同じ累計消費量でも dominant share が小さく評価され、dispatch 優先度が高くなる。例えば weight = 2 の namespace は、weight = 1 の namespace より多くのリソースを使い切るまで優先的に dispatch される
+
+## 5. `namespace_daily_usage` テーブル
 
 namespace ごとの日別リソース消費量を記録する。Dispatcher の fair sharing（dispatch 優先度の調整）に使用する。直近 `FAIR_SHARE_WINDOW_DAYS` 日分の合計をスライディングウィンドウで計算し、DRF の dominant share を求める。
 
@@ -93,7 +109,7 @@ CREATE TABLE namespace_daily_usage (
 );
 ```
 
-### 4.1 カラム説明
+### 5.1 カラム説明
 
 | カラム | 型 | 説明 |
 |---|---|---|
@@ -103,7 +119,7 @@ CREATE TABLE namespace_daily_usage (
 | `memory_mib_seconds` | BIGINT | `time_limit_seconds × memory（MiB 換算）` のその日の合計。"4Gi" → 4096, "500Mi" → 500 |
 | `gpu_seconds` | BIGINT | `time_limit_seconds × gpu（個数）` のその日の合計 |
 
-### 4.2 加算処理
+### 5.2 加算処理
 
 Watcher がジョブを RUNNING に遷移させる際に、`started_at` の記録と同じトランザクション内で当日分の消費量を加算する。
 
@@ -122,7 +138,7 @@ ON CONFLICT (namespace, usage_date) DO UPDATE SET
 
 アトミックな UPSERT により、その日の初回は INSERT、以降は加算。
 
-### 4.3 ウィンドウ集計
+### 5.3 ウィンドウ集計
 
 Dispatcher が `fetch_dispatchable_jobs()` で DRF の dominant share を計算する際に、直近 `FAIR_SHARE_WINDOW_DAYS` 日分の消費量を集計する。
 
@@ -138,7 +154,7 @@ GROUP BY namespace
 
 ウィンドウの外側にある古い日は自然に集計対象から外れる。毎日、最も古い日が脱落するため、一括リセットの断崖が生じない。
 
-### 4.4 古い行の削除
+### 5.4 古い行の削除
 
 Dispatcher が `fetch_dispatchable_jobs()` を実行する直前に、ウィンドウ外の古い行を削除する。
 
@@ -147,7 +163,7 @@ DELETE FROM namespace_daily_usage
 WHERE usage_date <= CURRENT_DATE - :window_days;
 ```
 
-### 4.5 設計判断
+### 5.5 設計判断
 
 - **jobs テーブルと独立**: FK を持たないため、`cjob reset` の `DELETE FROM jobs` に影響されない
 - **日別に分割**: スライディングウィンドウにより、一括リセットの断崖（リセット直後に全員の消費量が 0 になる問題）を解消する。毎日、最も古い日が自然に脱落するため、消費量の変化が滑らかになる
@@ -155,7 +171,7 @@ WHERE usage_date <= CURRENT_DATE - :window_days;
 - **BIGINT の十分性**: `time_limit_seconds`（最大 604800）× `cpu_millicores`（最大 300000）でも 1 日あたり最大約 1.8 × 10^11。BIGINT（最大 9.2 × 10^18）で十分
 - **行数の見積もり**: namespace 数 × ウィンドウ日数。20 namespace × 7 日 = 140 行程度であり、集計クエリのコストは無視できる
 
-## 5. 状態遷移
+## 6. 状態遷移
 
 ```text
 QUEUED

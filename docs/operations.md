@@ -139,7 +139,49 @@ kubectl logs -n cjob-system deployment/submit-api --tail=50
 kubectl get configmap cjob-config -n cjob-system -o yaml
 ```
 
-## 3. 累計リソース消費量の手動リセット
+## 3. namespace の weight 管理
+
+namespace ごとの fair sharing の重み（weight）を管理する。weight が大きい namespace ほど多くのリソースを公平に受け取れる。
+
+```bash
+# 現在の weight 一覧
+kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
+SELECT * FROM namespace_weights ORDER BY namespace;
+"
+
+# 特定 namespace の weight を設定（初回）
+kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
+INSERT INTO namespace_weights (namespace, weight) VALUES ('user-alice', 2)
+ON CONFLICT (namespace) DO UPDATE SET weight = 2;
+"
+
+# weight をデフォルト（1）に戻す
+kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
+DELETE FROM namespace_weights WHERE namespace = 'user-alice';
+"
+```
+
+テーブルに行がない namespace はデフォルト weight = 1 として扱われる。
+
+### 特定ユーザーにクラスタを専有させる場合
+
+他の全ユーザーの weight を 0（dispatch 禁止）に設定する。
+
+```bash
+# 専有させたいユーザー以外を全て weight=0 にする
+kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
+INSERT INTO namespace_weights (namespace, weight)
+SELECT namespace, 0 FROM user_job_counters WHERE namespace != 'user-alice'
+ON CONFLICT (namespace) DO UPDATE SET weight = 0;
+"
+
+# 専有を解除（全員のweight行を削除してデフォルト=1に戻す）
+kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
+DELETE FROM namespace_weights;
+"
+```
+
+## 4. 累計リソース消費量の手動リセット
 
 特定の namespace の累計消費量を手動でリセットする場合。
 
@@ -155,12 +197,16 @@ DELETE FROM namespace_daily_usage;
 "
 ```
 
-## 4. DB スキーマの更新
+## 5. DB スキーマの更新
 
 バージョンアップ時に新しいテーブルやカラムを追加する場合。`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` により冪等に実行できる。
 
 ```bash
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
+CREATE TABLE IF NOT EXISTS namespace_weights (
+    namespace TEXT PRIMARY KEY,
+    weight    INTEGER NOT NULL DEFAULT 1
+);
 CREATE TABLE IF NOT EXISTS namespace_daily_usage (
     namespace              TEXT NOT NULL,
     usage_date             DATE NOT NULL,
