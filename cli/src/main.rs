@@ -72,6 +72,8 @@ enum Commands {
         #[arg(long)]
         all: bool,
     },
+    /// リソース使用状況を表示する
+    Usage,
     /// 全ジョブ履歴をリセットする
     Reset,
     /// ジョブのログを表示する
@@ -103,6 +105,7 @@ async fn main() -> Result<()> {
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
         Commands::Delete { job_ids, all } => cmd_delete(&api_client, job_ids, all).await,
+        Commands::Usage => cmd_usage(&api_client).await,
         Commands::Reset => cmd_reset(&api_client).await,
         Commands::Logs { job_id, follow } => logs::show_logs(job_id, follow, &api_client).await,
     }
@@ -358,6 +361,60 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
     // Call reset API
     client.reset().await?;
     println!("リセットを開始しました。バックグラウンドでクリーンアップが完了するまでお待ちください。");
+    Ok(())
+}
+
+async fn cmd_usage(client: &client::CjobClient) -> Result<()> {
+    let resp = client.get_usage().await?;
+
+    println!(
+        "\nResource Usage (past {} days)",
+        resp.window_days
+    );
+    println!("{}", "─".repeat(50));
+
+    if resp.daily.is_empty() {
+        println!("  使用実績がありません。");
+    } else {
+        // Check if GPU column is needed
+        let has_gpu = resp.total_gpu_seconds > 0;
+
+        if has_gpu {
+            println!(
+                "  {:<12} {:>14} {:>14} {:>10}",
+                "Date", "CPU (core·h)", "Mem (GiB·h)", "GPU (h)"
+            );
+        } else {
+            println!(
+                "  {:<12} {:>14} {:>14}",
+                "Date", "CPU (core·h)", "Mem (GiB·h)"
+            );
+        }
+
+        for d in &resp.daily {
+            let cpu_h = d.cpu_millicores_seconds as f64 / 1000.0 / 3600.0;
+            let mem_h = d.memory_mib_seconds as f64 / 1024.0 / 3600.0;
+            if has_gpu {
+                let gpu_h = d.gpu_seconds as f64 / 3600.0;
+                println!("  {:<12} {:>14.1} {:>14.1} {:>10.1}", d.date, cpu_h, mem_h, gpu_h);
+            } else {
+                println!("  {:<12} {:>14.1} {:>14.1}", d.date, cpu_h, mem_h);
+            }
+        }
+
+        println!("  {}", "─".repeat(48));
+
+        let total_cpu_h = resp.total_cpu_millicores_seconds as f64 / 1000.0 / 3600.0;
+        let total_mem_h = resp.total_memory_mib_seconds as f64 / 1024.0 / 3600.0;
+        if has_gpu {
+            let total_gpu_h = resp.total_gpu_seconds as f64 / 3600.0;
+            println!("  {:<12} {:>14.1} {:>14.1} {:>10.1}", "Total", total_cpu_h, total_mem_h, total_gpu_h);
+        } else {
+            println!("  {:<12} {:>14.1} {:>14.1}", "Total", total_cpu_h, total_mem_h);
+        }
+    }
+
+    println!();
     Ok(())
 }
 

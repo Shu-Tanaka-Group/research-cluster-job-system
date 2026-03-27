@@ -8,6 +8,7 @@ from cjob.models import Job, JobEvent, UserJobCounter
 
 from .schemas import (
     CancelResponse,
+    DailyUsage,
     DeleteResponse,
     JobDetailResponse,
     JobListResponse,
@@ -15,6 +16,7 @@ from .schemas import (
     JobSubmitResponse,
     JobSummary,
     SkippedItem,
+    UsageResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -309,3 +311,45 @@ def reset(session: Session, namespace: str) -> tuple[int, dict]:
     ).update({"status": "DELETING"}, synchronize_session="fetch")
 
     return 202, {"status": "accepted"}
+
+
+def get_usage(session: Session, namespace: str) -> UsageResponse:
+    settings = get_settings()
+    window_days = settings.FAIR_SHARE_WINDOW_DAYS
+
+    result = session.execute(
+        text(
+            "SELECT usage_date, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds "
+            "FROM namespace_daily_usage "
+            "WHERE namespace = :namespace "
+            "  AND usage_date > CURRENT_DATE - :window_days "
+            "ORDER BY usage_date ASC"
+        ),
+        {"namespace": namespace, "window_days": window_days},
+    )
+
+    daily = []
+    total_cpu = 0
+    total_mem = 0
+    total_gpu = 0
+    for row in result.mappings():
+        cpu = row["cpu_millicores_seconds"]
+        mem = row["memory_mib_seconds"]
+        gpu = row["gpu_seconds"]
+        daily.append(DailyUsage(
+            date=str(row["usage_date"]),
+            cpu_millicores_seconds=cpu,
+            memory_mib_seconds=mem,
+            gpu_seconds=gpu,
+        ))
+        total_cpu += cpu
+        total_mem += mem
+        total_gpu += gpu
+
+    return UsageResponse(
+        window_days=window_days,
+        daily=daily,
+        total_cpu_millicores_seconds=total_cpu,
+        total_memory_mib_seconds=total_mem,
+        total_gpu_seconds=total_gpu,
+    )

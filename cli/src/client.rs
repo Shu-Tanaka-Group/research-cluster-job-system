@@ -97,6 +97,23 @@ pub struct ErrorResponse {
     pub blocking_job_ids: Option<Vec<u32>>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DailyUsage {
+    pub date: String,
+    pub cpu_millicores_seconds: i64,
+    pub memory_mib_seconds: i64,
+    pub gpu_seconds: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UsageResponse {
+    pub window_days: u32,
+    pub daily: Vec<DailyUsage>,
+    pub total_cpu_millicores_seconds: i64,
+    pub total_memory_mib_seconds: i64,
+    pub total_gpu_seconds: i64,
+}
+
 pub struct CjobClient {
     base_url: String,
     token: String,
@@ -216,6 +233,18 @@ impl CjobClient {
             .post(format!("{}/v1/jobs/delete", self.base_url))
             .header("Authorization", self.auth_header())
             .json(&req)
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn get_usage(&self) -> Result<UsageResponse> {
+        let resp = self
+            .http
+            .get(format!("{}/v1/usage", self.base_url))
+            .header("Authorization", self.auth_header())
             .send()
             .await
             .context("API への接続に失敗しました")?;

@@ -76,6 +76,21 @@ class DeleteResponse(BaseModel):
     not_found: list[int]
 
 
+class DailyUsage(BaseModel):
+    date: str
+    cpu_millicores_seconds: int
+    memory_mib_seconds: int
+    gpu_seconds: int
+
+
+class UsageResponse(BaseModel):
+    window_days: int
+    daily: list[DailyUsage]
+    total_cpu_millicores_seconds: int
+    total_memory_mib_seconds: int
+    total_gpu_seconds: int
+
+
 class ResetResponse(BaseModel):
     status: str
 
