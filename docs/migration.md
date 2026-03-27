@@ -113,7 +113,7 @@ cd cli/
 cargo build --release --target x86_64-unknown-linux-musl
 ```
 
-ビルド後、GitHub Releases にアップロードしてユーザーに更新を案内する。
+ビルド後、PVC にバイナリを配置する（[deployment.md](deployment.md) §4.1 参照）。ユーザーは `cjob update` でセルフアップデートできる。
 
 ## Step 6: 動作確認
 

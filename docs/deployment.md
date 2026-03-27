@@ -36,6 +36,46 @@ PostgreSQL は PVC を持つ。StorageClass は NFS subdir external provisioner 
 | PVC 名 | 対象 | 用途 |
 |---|---|---|
 | `postgres-data` | PostgreSQL | DB ファイルの永続化 |
+| `cli-binary` | Submit API | CLI バイナリの配布用ストレージ |
+
+### 4.1 `cli-binary` PVC
+
+CLI セルフアップデート機能（`cjob update`）で配布するバイナリを格納する。Submit API Pod から読み取り専用でマウントし、`/v1/cli/version` および `/v1/cli/download` エンドポイントで配信する。
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cli-binary
+  namespace: cjob-system
+spec:
+  accessModes: ["ReadWriteMany"]
+  storageClassName: managed-nfs-storage
+  resources:
+    requests:
+      storage: 1Gi
+```
+
+ディレクトリ構成:
+
+```
+/cli-binary/
+  latest          # 最新バージョン番号を記載したテキストファイル（例: "1.2.0"）
+  1.1.0/
+    cjob          # linux/amd64 バイナリ
+  1.2.0/
+    cjob
+```
+
+バイナリの手動配置手順:
+
+```bash
+# PVC にアクセスできる Pod から実行する
+mkdir -p /mnt/cli-binary/<version>
+cp cjob /mnt/cli-binary/<version>/cjob
+chmod +x /mnt/cli-binary/<version>/cjob
+echo "<version>" > /mnt/cli-binary/latest
+```
 
 ---
 
@@ -123,7 +163,7 @@ env:
 | Dispatcher | `cjob-config` | `postgres-secret` |
 | Watcher | `cjob-config` | `postgres-secret` |
 | PostgreSQL | - | `postgres-secret` |
-| CLI（GitHub Releases で配布） | - | - |
+| CLI（`cjob update` で配布） | - | - |
 
 ---
 
@@ -149,7 +189,7 @@ env:
 | HPC 系ツール | openmpi-bin | MPI ジョブへの対応 |
 | 基本ツール | git curl wget vim | 作業用 |
 
-含めないもの：`cjob` CLI（GitHub Releases で個別配布）・ユーザーの Python パッケージ（各自が `/home/jovyan` 配下で venv を管理）・CUDA / GPU ドライバ（初期スコープ外）・Jupyter 本体（JupyterHub 側が管理）。
+含めないもの：`cjob` CLI（Submit API 経由で `cjob update` により配布）・ユーザーの Python パッケージ（各自が `/home/jovyan` 配下で venv を管理）・CUDA / GPU ドライバ（初期スコープ外）・Jupyter 本体（JupyterHub 側が管理）。
 
 ### 7.3 Dockerfile
 
@@ -175,13 +215,15 @@ RUN apt-get update && apt-get install -y \
 
 ### 7.4 cjob CLI の配布
 
-`cjob` CLI は Rust 製シングルバイナリとして GitHub Releases で配布する。
-ユーザーは User Pod 内で以下のようにインストールする。
+`cjob` CLI は Rust 製シングルバイナリとして Submit API 経由で配布する。
+ビルド済みバイナリは `cjob-system` namespace の PVC（`cli-binary`）に配置し、Submit API がエンドポイント（`/v1/cli/version`、`/v1/cli/download`）として配信する。
+ユーザーは `cjob update` コマンドでセルフアップデートできる。
+
+初回インストール時はバイナリが存在しないため、管理者が直接配布するか、以下のように Submit API から取得する。
 
 ```bash
-# GitHub Releases から最新バイナリをダウンロードして配置する例
 mkdir -p /home/jovyan/.local/bin
-curl -L https://github.com/<org>/cjob/releases/latest/download/cjob-x86_64-unknown-linux-gnu \
+curl -L http://submit-api.cjob-system.svc.cluster.local:8080/v1/cli/download \
   -o /home/jovyan/.local/bin/cjob
 chmod +x /home/jovyan/.local/bin/cjob
 ```
@@ -629,6 +671,10 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
+          volumeMounts:
+            - name: cli-binary
+              mountPath: /cli-binary
+              readOnly: true
           livenessProbe:
             httpGet:
               path: /healthz
@@ -641,6 +687,10 @@ spec:
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 5
+      volumes:
+        - name: cli-binary
+          persistentVolumeClaim:
+            claimName: cli-binary
 ---
 apiVersion: v1
 kind: Service
@@ -987,15 +1037,18 @@ kubectl apply -f rbac/submit-api-sa.yaml
 kubectl apply -f rbac/dispatcher-sa.yaml
 
 
-# 5. PostgreSQL のデプロイ
+# 5. PVC の作成
+kubectl apply -f pvcs/cli-binary.yaml
+
+# 6. PostgreSQL のデプロイ
 kubectl apply -f statefulsets/postgres.yaml
 
-# 6. DB スキーマの初期化
+# 7. DB スキーマの初期化
 # postgres-schema ConfigMap の schema.sql が /docker-entrypoint-initdb.d/ にマウントされ、
 # PostgreSQL 初回起動時に自動実行される。
 # IF NOT EXISTS を使用しているため再デプロイ時も安全に再実行できる。
 
-# 7. システムコンポーネント image のビルドと push
+# 8. システムコンポーネント image のビルドと push
 docker build -t yusekiya/cjob-submit-api:latest -f Dockerfile.submit-api .
 docker push yusekiya/cjob-submit-api:latest
 
@@ -1007,25 +1060,28 @@ docker push yusekiya/cjob-watcher:latest
 
 # Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
 
-# 8. Submit API のデプロイ
+# 9. Submit API のデプロイ
 kubectl apply -f deployments/submit-api.yaml
 
-# 9. Dispatcher のデプロイ
+# 10. Dispatcher のデプロイ
 kubectl apply -f deployments/dispatcher.yaml
 
-# 10. Watcher のデプロイ
+# 11. Watcher のデプロイ
 kubectl apply -f deployments/watcher.yaml
 
-# 11. NetworkPolicy の適用
+# 12. NetworkPolicy の適用
 kubectl apply -f networkpolicies/allow-submit-api.yaml
 
-# 12. Kyverno のインストールとイメージ制限ポリシーの適用
+# 13. Kyverno のインストールとイメージ制限ポリシーの適用
 helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
 helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --version 3.7.1
 kubectl apply -f policies/restrict-job-image.yaml
 
-# 13. 各ユーザーの namespace 作成
+# 14. 各ユーザーの namespace 作成
 ./scripts/create-user-namespace.sh alice
 ./scripts/create-user-namespace.sh bob
+
+# 15. CLI バイナリの配置（§4.1 参照）
+# PVC にアクセスできる Pod から実行する
 ```
