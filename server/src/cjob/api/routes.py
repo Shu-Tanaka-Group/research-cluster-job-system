@@ -1,12 +1,17 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
+from cjob.config import get_settings
 from cjob.db import get_session
 
 from .auth import get_namespace
 from .schemas import (
     CancelRequest,
     CancelResponse,
+    CliVersionResponse,
     DeleteRequest,
     DeleteResponse,
     JobDetailResponse,
@@ -29,6 +34,34 @@ from .services import (
 )
 
 router = APIRouter(prefix="/v1")
+
+
+def _read_latest_version(cli_dir: str) -> str:
+    latest_file = Path(cli_dir) / "latest"
+    if not latest_file.is_file():
+        raise HTTPException(status_code=404, detail="CLI binary not found")
+    return latest_file.read_text().strip()
+
+
+@router.get("/cli/version", response_model=CliVersionResponse)
+def get_cli_version():
+    settings = get_settings()
+    version = _read_latest_version(settings.CLI_BINARY_DIR)
+    return CliVersionResponse(version=version)
+
+
+@router.get("/cli/download")
+def download_cli_binary():
+    settings = get_settings()
+    version = _read_latest_version(settings.CLI_BINARY_DIR)
+    binary_path = Path(settings.CLI_BINARY_DIR) / version / "cjob"
+    if not binary_path.is_file():
+        raise HTTPException(status_code=404, detail="CLI binary not found")
+    return FileResponse(
+        path=str(binary_path),
+        media_type="application/octet-stream",
+        filename="cjob",
+    )
 
 
 @router.post("/jobs", response_model=JobSubmitResponse, status_code=201)
