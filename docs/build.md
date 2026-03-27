@@ -116,6 +116,39 @@ cross build --release --target x86_64-unknown-linux-gnu
 
 成果物は `cli/target/x86_64-unknown-linux-gnu/release/cjob` に生成される。
 
+## 管理 CLI（cjobctl）のビルド
+
+`cjobctl` は管理者のローカル PC で動作する管理用 CLI である。DB に直接接続し、K8s API を利用する。
+
+### ビルド
+
+```bash
+cd ctl/
+cargo build --release
+```
+
+ビルド成果物は `ctl/target/release/cjobctl` に生成される。
+
+### 設定
+
+`~/.config/cjobctl/config.toml` を作成する。
+
+```toml
+[database]
+database = "cjob"
+user = "cjob"
+password = "xxx"
+
+[kubernetes]
+namespace = "cjob-system"
+```
+
+DB コマンド実行時は `kubectl port-forward` が自動的に起動・終了される（`kubectl` が PATH に必要）。
+
+```bash
+kubectl port-forward svc/postgres 5432:5432 -n cjob-system
+```
+
 ## Job Pod のランタイムイメージ
 
 Job Pod が使用するランタイムイメージ（`yusekiya/stg-jupyter:2.1.0` 等）は本リポジトリの管理対象外である。

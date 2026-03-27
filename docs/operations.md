@@ -1,14 +1,28 @@
 # 運用ガイド
 
+管理操作は `cjobctl` CLI で行う。セットアップは [ビルド手順](build.md) を参照。
+
+各コマンドが実行する SQL クエリの詳細は `ctl/src/cmd/` 配下のソースコードを参照。
+
+| ソースファイル | 対応コマンド |
+|---|---|
+| `ctl/src/cmd/jobs.rs` | `cjobctl jobs` サブコマンド全般 |
+| `ctl/src/cmd/usage.rs` | `cjobctl usage list / reset` |
+| `ctl/src/cmd/counters.rs` | `cjobctl counters list` |
+| `ctl/src/cmd/weight.rs` | `cjobctl weight` サブコマンド全般 |
+| `ctl/src/cmd/db_migrate.rs` | `cjobctl db migrate` |
+
 ## 1. DB 状態の確認
 
 ### 1.1 PostgreSQL への接続
+
+アドホッククエリが必要な場合は、直接 PostgreSQL に接続できる。
 
 ```bash
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob
 ```
 
-以下のコマンドは `-c` オプションで直接実行することもできる。
+`-c` オプションで直接実行することもできる。
 
 ```bash
 kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "<SQL>"
@@ -18,69 +32,30 @@ kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "<SQL>"
 
 ```bash
 # 全ジョブの概要
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT namespace, job_id, status, command, created_at, started_at, finished_at
-FROM jobs ORDER BY namespace, job_id;
-"
+cjobctl jobs list
 
-# namespace ごとのステータス別ジョブ数
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT namespace, status, COUNT(*) AS count
-FROM jobs GROUP BY namespace, status ORDER BY namespace, status;
-"
+# namespace でフィルタ
+cjobctl jobs list --namespace user-alice
 
-# 特定ステータスのジョブを確認（例: RUNNING）
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT namespace, job_id, command, started_at, time_limit_seconds
-FROM jobs WHERE status = 'RUNNING' ORDER BY started_at;
-"
+# ステータスでフィルタ
+cjobctl jobs list --status RUNNING
+
+# namespace × ステータスのジョブ数（ピボットテーブル）
+cjobctl jobs summary
 ```
 
 ### 1.3 累計リソース消費量の確認
 
+日別消費量・7日間ウィンドウ集計・DRF dominant share を一括表示する。
+
 ```bash
-# 日別の消費量（生データ）
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT * FROM namespace_daily_usage ORDER BY namespace, usage_date;
-"
-
-# 直近 7 日間のウィンドウ集計（Dispatcher が使用する値と同等）
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT
-  namespace,
-  SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,
-  SUM(memory_mib_seconds) AS memory_mib_seconds,
-  SUM(gpu_seconds) AS gpu_seconds
-FROM namespace_daily_usage
-WHERE usage_date > CURRENT_DATE - 7
-GROUP BY namespace ORDER BY namespace;
-"
-
-# DRF の dominant share を確認（Dispatcher のソート順序と同等）
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT
-  namespace,
-  SUM(cpu_millicores_seconds) AS cpu_total,
-  SUM(memory_mib_seconds) AS mem_total,
-  SUM(gpu_seconds) AS gpu_total,
-  GREATEST(
-    SUM(cpu_millicores_seconds) * 1.0 / 256000,
-    SUM(memory_mib_seconds) * 1.0 / 1024000,
-    SUM(gpu_seconds) * 1.0 / NULLIF(0, 0)
-  ) AS dominant_share
-FROM namespace_daily_usage
-WHERE usage_date > CURRENT_DATE - 7
-GROUP BY namespace
-ORDER BY dominant_share ASC NULLS FIRST;
-"
+cjobctl usage list
 ```
 
 ### 1.4 ジョブカウンターの確認
 
 ```bash
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT * FROM user_job_counters ORDER BY namespace;
-"
+cjobctl counters list
 ```
 
 ### 1.5 滞留ジョブの確認
@@ -88,28 +63,13 @@ SELECT * FROM user_job_counters ORDER BY namespace;
 DISPATCHED のまま長時間経過しているジョブ（隙間充填の対象）を確認する。
 
 ```bash
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT namespace, job_id, dispatched_at,
-  EXTRACT(EPOCH FROM NOW() - dispatched_at)::int AS elapsed_sec
-FROM jobs
-WHERE status = 'DISPATCHED'
-ORDER BY dispatched_at;
-"
+cjobctl jobs stalled
 ```
 
 ### 1.6 RUNNING ジョブの残り時間
 
 ```bash
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT namespace, job_id, command, time_limit_seconds,
-  started_at,
-  EXTRACT(EPOCH FROM
-    (started_at + MAKE_INTERVAL(secs => time_limit_seconds)) - NOW()
-  )::int AS remaining_sec
-FROM jobs
-WHERE status = 'RUNNING' AND started_at IS NOT NULL
-ORDER BY remaining_sec;
-"
+cjobctl jobs remaining
 ```
 
 ## 2. コンポーネントの状態確認
@@ -117,87 +77,67 @@ ORDER BY remaining_sec;
 ### 2.1 Pod の状態
 
 ```bash
-kubectl get pods -n cjob-system
+cjobctl status
 ```
 
 ### 2.2 ログの確認
 
 ```bash
-# Dispatcher
-kubectl logs -n cjob-system deployment/dispatcher --tail=50
+# Dispatcher（デフォルト: 直近50行）
+cjobctl logs dispatcher
 
-# Watcher
-kubectl logs -n cjob-system deployment/watcher --tail=50
+# 表示行数を指定
+cjobctl logs watcher --tail 100
 
 # Submit API
-kubectl logs -n cjob-system deployment/submit-api --tail=50
+cjobctl logs submit-api
 ```
 
 ### 2.3 ConfigMap の確認
 
 ```bash
-kubectl get configmap cjob-config -n cjob-system -o yaml
+cjobctl config show
 ```
 
 ## 3. namespace の weight 管理
 
 namespace ごとの fair sharing の重み（weight）を管理する。weight が大きい namespace ほど多くのリソースを公平に受け取れる。
 
+テーブルに行がない namespace はデフォルト weight = 1 として扱われる。
+
 ```bash
 # 現在の weight 一覧
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-SELECT * FROM namespace_weights ORDER BY namespace;
-"
+cjobctl weight list
 
-# 特定 namespace の weight を設定（初回）
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-INSERT INTO namespace_weights (namespace, weight) VALUES ('user-alice', 2)
-ON CONFLICT (namespace) DO UPDATE SET weight = 2;
-"
+# 特定 namespace の weight を設定
+cjobctl weight set user-alice 2
 
 # weight をデフォルト（1）に戻す
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-DELETE FROM namespace_weights WHERE namespace = 'user-alice';
-"
+cjobctl weight reset user-alice
 ```
-
-テーブルに行がない namespace はデフォルト weight = 1 として扱われる。
 
 ### 特定ユーザーにクラスタを専有させる場合
 
 K8s の namespace ラベル（`cjob.io/user-namespace=true`）を元に、専有ユーザー以外の全 namespace を weight = 0（dispatch 禁止）に設定する。
 
 ```bash
-# 専有させたいユーザー以外を全て weight=0 にする
-# （cjob.io/user-namespace=true ラベルが付いた全 namespace が対象）
-kubectl get ns -l cjob.io/user-namespace=true -o jsonpath='{.items[*].metadata.name}' | \
-  tr ' ' '\n' | \
-  grep -v 'user-alice' | \
-  xargs -I{} kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c \
-    "INSERT INTO namespace_weights (namespace, weight) VALUES ('{}', 0) ON CONFLICT (namespace) DO UPDATE SET weight = 0;"
+# user-alice にクラスタを専有させる
+cjobctl weight exclusive user-alice
 
-# 専有を解除（全員の weight 行を削除してデフォルト=1 に戻す）
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-DELETE FROM namespace_weights;
-"
+# 専有を解除（全員の weight をデフォルトに戻す）
+cjobctl weight exclusive --release
 ```
 
 専有中に新しい namespace が作成された場合は、専有コマンドを再実行して追加分を weight = 0 にする。
 
 ## 4. 累計リソース消費量の手動リセット
 
-特定の namespace の累計消費量を手動でリセットする場合。
-
 ```bash
 # 特定 namespace のリセット
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-DELETE FROM namespace_daily_usage WHERE namespace = '<namespace>';
-"
+cjobctl usage reset --namespace user-alice
 
 # 全 namespace のリセット
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-DELETE FROM namespace_daily_usage;
-"
+cjobctl usage reset --all
 ```
 
 ## 5. DB スキーマの更新
@@ -205,20 +145,5 @@ DELETE FROM namespace_daily_usage;
 バージョンアップ時に新しいテーブルやカラムを追加する場合。`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` により冪等に実行できる。
 
 ```bash
-kubectl exec -it -n cjob-system postgres-0 -- psql -U cjob -d cjob -c "
-CREATE TABLE IF NOT EXISTS namespace_weights (
-    namespace TEXT PRIMARY KEY,
-    weight    INTEGER NOT NULL DEFAULT 1
-);
-CREATE TABLE IF NOT EXISTS namespace_daily_usage (
-    namespace              TEXT NOT NULL,
-    usage_date             DATE NOT NULL,
-    cpu_millicores_seconds BIGINT NOT NULL DEFAULT 0,
-    memory_mib_seconds     BIGINT NOT NULL DEFAULT 0,
-    gpu_seconds            BIGINT NOT NULL DEFAULT 0,
-    PRIMARY KEY (namespace, usage_date)
-);
-ALTER TABLE jobs ADD COLUMN IF NOT EXISTS time_limit_seconds INTEGER NOT NULL DEFAULT 86400;
-ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
-"
+cjobctl db migrate
 ```

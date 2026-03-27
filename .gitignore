@@ -1,8 +1,10 @@
 # Rust build artifacts
 cli/target/
+ctl/target/
 
 # Rust local config (cross-compile linker settings etc.)
 cli/.cargo/
+ctl/.cargo/
 
 # Python
 __pycache__/
