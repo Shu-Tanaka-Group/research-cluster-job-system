@@ -196,7 +196,31 @@ cjobctl usage reset --namespace user-alice
 cjobctl usage reset --all
 ```
 
-## 5. DB スキーマの更新
+## 5. ユーザーのアクセス制御
+
+namespace のラベル `cjob.io/user-namespace=true` の有無でジョブ投入の可否を制御する。このラベルは NetworkPolicy で参照されており、ラベルがない namespace からは Submit API への通信がブロックされる。
+
+### 5.1 ユーザーのアクセスを停止する
+
+```bash
+# ラベルを削除してジョブ投入を停止
+kubectl label namespace user-<username> cjob.io/user-namespace-
+
+# 必要に応じて実行中のジョブをキャンセル
+cjobctl jobs list --namespace user-<username> --status RUNNING
+cjobctl jobs list --namespace user-<username> --status QUEUED
+cjobctl jobs list --namespace user-<username> --status DISPATCHED
+```
+
+ラベルを外しても、既に QUEUED / DISPATCHED / RUNNING のジョブはそのまま動き続ける。完全に停止したい場合は `cjobctl` で該当ジョブをキャンセルすること。
+
+### 5.2 ユーザーのアクセスを再開する
+
+```bash
+kubectl label namespace user-<username> cjob.io/user-namespace=true
+```
+
+## 6. DB スキーマの更新
 
 バージョンアップ時に新しいテーブルやカラムを追加する場合。`CREATE TABLE IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` により冪等に実行できる。
 
@@ -204,9 +228,9 @@ cjobctl usage reset --all
 cjobctl db migrate
 ```
 
-## 6. 計算ノードの追加
+## 7. 計算ノードの追加
 
-### 6.1 ノードラベル・taint の付与
+### 7.1 ノードラベル・taint の付与
 
 新しいノードには以下のラベルと taint を付与する。
 
@@ -231,7 +255,7 @@ cjobctl config show
 
 taint `role=computing:NoSchedule` は、ジョブ以外の Pod が計算ノードにスケジュールされることを防ぐ。
 
-### 6.2 リソース情報の反映確認
+### 7.2 リソース情報の反映確認
 
 Watcher が `NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）間隔で自動的にノードを検出し、`node_resources` テーブルを更新する。
 
@@ -240,7 +264,7 @@ Watcher が `NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）間隔
 cjobctl cluster resources
 ```
 
-### 6.3 ClusterQueue の nominalQuota 更新
+### 7.3 ClusterQueue の nominalQuota 更新
 
 ノード追加によりクラスタの総リソースが増加した場合、ClusterQueue の nominalQuota を更新する。
 
