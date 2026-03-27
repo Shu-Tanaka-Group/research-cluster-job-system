@@ -36,7 +36,6 @@ User Pod (JupyterHub) → cjob CLI → Submit API → PostgreSQL
 
 ```bash
 cjob add -- <command>                # ジョブ投入
-cjob sweep -- <command> --grid ...   # parameter sweep
 cjob list                            # 一覧表示
 cjob status <job-id>                 # 状態確認
 cjob cancel <job-id>                 # キャンセル（範囲: 1-10, 複数: 1,3,5, 組み合わせ対応）
