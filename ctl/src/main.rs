@@ -60,6 +60,11 @@ enum Commands {
         #[command(subcommand)]
         command: DbCommands,
     },
+    /// Manage CLI binary distribution
+    Cli {
+        #[command(subcommand)]
+        command: CliCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -176,6 +181,19 @@ enum ClusterCommands {
 enum DbCommands {
     /// Run idempotent schema migration
     Migrate,
+}
+
+#[derive(Subcommand)]
+enum CliCommands {
+    /// Deploy CLI binary to PVC
+    Deploy {
+        /// Path to the CLI binary
+        #[arg(long)]
+        binary: String,
+        /// Version string (e.g. 1.2.0)
+        #[arg(long)]
+        version: String,
+    },
 }
 
 #[tokio::main]
@@ -301,6 +319,14 @@ async fn main() -> Result<()> {
             match command {
                 ConfigCommands::Show => {
                     cmd::config_show::run(&k8s_client, config.system_namespace()).await
+                }
+            }
+        }
+        Commands::Cli { command } => {
+            let config = config::Config::load()?;
+            match command {
+                CliCommands::Deploy { binary, version } => {
+                    cmd::cli_deploy::run(config.system_namespace(), &binary, &version).await
                 }
             }
         }

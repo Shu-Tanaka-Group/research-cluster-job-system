@@ -1,3 +1,4 @@
+pub mod cli_deploy;
 pub mod cluster;
 pub mod config_show;
 pub mod counters;
