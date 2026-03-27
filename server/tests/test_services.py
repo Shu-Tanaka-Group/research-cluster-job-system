@@ -9,11 +9,12 @@ from cjob.api.services import (
     cancel_single,
     delete_jobs,
     get_job,
+    get_usage,
     list_jobs,
     reset,
     submit_job,
 )
-from cjob.models import Job, JobEvent
+from cjob.models import Job, JobEvent, NamespaceDailyUsage
 
 
 NS = "user-alice"
@@ -380,3 +381,53 @@ class TestReset:
         code, body = reset(db_session, NS)
         assert code == 409
         assert "進行中" in body["message"]
+
+
+# ── get_usage ──
+
+
+def _insert_usage(session, namespace, usage_date, cpu=0, mem=0, gpu=0):
+    from datetime import date
+
+    if isinstance(usage_date, str):
+        usage_date = date.fromisoformat(usage_date)
+    usage = NamespaceDailyUsage(
+        namespace=namespace,
+        usage_date=usage_date,
+        cpu_millicores_seconds=cpu,
+        memory_mib_seconds=mem,
+        gpu_seconds=gpu,
+    )
+    session.add(usage)
+    session.flush()
+
+
+class TestGetUsage:
+    def test_empty(self, db_session):
+        resp = get_usage(db_session, NS)
+        assert resp.window_days == 7
+        assert resp.daily == []
+        assert resp.total_cpu_millicores_seconds == 0
+        assert resp.total_memory_mib_seconds == 0
+        assert resp.total_gpu_seconds == 0
+
+    def test_returns_daily_records(self, db_session):
+        # Use dates far in the future to ensure they pass the window filter.
+        # SQLite's CURRENT_DATE - int is integer subtraction, not date
+        # arithmetic, but future dates will always be "greater than" the result.
+        _insert_usage(db_session, NS, "2099-01-01", cpu=1000, mem=2000, gpu=100)
+        _insert_usage(db_session, NS, "2099-01-02", cpu=3000, mem=4000, gpu=200)
+
+        resp = get_usage(db_session, NS)
+        assert len(resp.daily) == 2
+        assert resp.total_cpu_millicores_seconds == 4000
+        assert resp.total_memory_mib_seconds == 6000
+        assert resp.total_gpu_seconds == 300
+
+    def test_namespace_isolation(self, db_session):
+        _insert_usage(db_session, NS, "2099-01-01", cpu=1000, mem=2000, gpu=0)
+        _insert_usage(db_session, "user-bob", "2099-01-01", cpu=9999, mem=9999, gpu=0)
+
+        resp = get_usage(db_session, NS)
+        assert len(resp.daily) == 1
+        assert resp.total_cpu_millicores_seconds == 1000
