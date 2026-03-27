@@ -60,6 +60,7 @@ cjob reset                           # 全ジョブ履歴・ログ削除、job_i
   - システム設計: docs/architecture/system_design.md
   - PostgreSQL 設計: docs/architecture/database.md
   - Kueue 設計: docs/architecture/kueue.md
+  - リソース設計: docs/architecture/resources.md
   - API 設計: docs/architecture/api.md
   - CLI 設計: docs/architecture/cli.md
   - 管理 CLI（cjobctl）設計: docs/architecture/cjobctl.md
