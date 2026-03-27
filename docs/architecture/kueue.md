@@ -148,7 +148,7 @@ ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User P
 | `CLUSTER_TOTAL_MEMORY_MIB` | ConfigMap | 1024000 (1000GiB) | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体のメモリ容量（MiB）。ClusterQueue の `nominalQuota` memory と一致させる |
 | `CLUSTER_TOTAL_GPUS` | ConfigMap | 0 | Dispatcher | 全体 | DRF 正規化に使用するクラスタ全体の GPU 数。0 の場合、GPU は DRF の計算から除外される |
 
-日別リソース消費量の詳細は [database.md](database.md) §4、DRF によるスケジューリングの詳細は [dispatcher.md](dispatcher.md) §1.1・§1.2 を参照。
+日別リソース消費量の詳細は [database.md](database.md) §5、namespace の weight は [database.md](database.md) §4、DRF によるスケジューリングの詳細は [dispatcher.md](dispatcher.md) §1.1・§1.2 を参照。
 
 ### 実行時間に関する制限
 

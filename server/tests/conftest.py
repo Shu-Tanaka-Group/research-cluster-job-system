@@ -6,7 +6,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Session, sessionmaker
 
 from cjob.config import Settings
-from cjob.models import Base, Job, JobEvent, NamespaceDailyUsage
+from cjob.models import Base, Job, JobEvent, NamespaceDailyUsage, NamespaceWeight
 
 
 def _patch_sqlite_incompatible_types():
