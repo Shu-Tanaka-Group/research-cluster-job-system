@@ -25,9 +25,10 @@ class Settings(BaseSettings):
 
     # Dispatcher - Fair Sharing
     FAIR_SHARE_WINDOW_DAYS: int = 7
-    CLUSTER_TOTAL_CPU_MILLICORES: int = 256000     # 256 cores
-    CLUSTER_TOTAL_MEMORY_MIB: int = 1024000        # 1000 GiB
-    CLUSTER_TOTAL_GPUS: int = 0                    # 0 = exclude GPU from DRF
+
+    # Watcher - Node Resource Sync
+    NODE_LABEL_SELECTOR: str = "cluster-job=true"
+    NODE_RESOURCE_SYNC_INTERVAL_SEC: int = 300     # 5 minutes
 
     # Submit API
     MAX_QUEUED_JOBS_PER_NAMESPACE: int = 2000

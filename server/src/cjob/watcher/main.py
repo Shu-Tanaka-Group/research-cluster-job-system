@@ -8,6 +8,7 @@ from kubernetes import config as k8s_config
 from cjob.config import get_settings
 from cjob.db import create_session
 
+from .node_sync import sync_node_resources
 from .reconciler import list_cjob_k8s_jobs, reconcile_cycle
 
 logger = logging.getLogger(__name__)
@@ -36,8 +37,15 @@ def run():
     signal.signal(signal.SIGINT, _handle_signal)
 
     interval = settings.DISPATCH_BUDGET_CHECK_INTERVAL_SEC
-    logger.info("Watcher main loop started (interval=%ds)", interval)
+    sync_interval = settings.NODE_RESOURCE_SYNC_INTERVAL_SEC
+    cycles_per_sync = max(1, sync_interval // interval)
+    logger.info(
+        "Watcher main loop started (interval=%ds, node_sync every %d cycles)",
+        interval,
+        cycles_per_sync,
+    )
 
+    cycle_count = 0
     while not _shutdown:
         session = create_session()
         try:
@@ -50,6 +58,18 @@ def run():
         finally:
             session.close()
 
+        # Sync node resources every N cycles (including first cycle)
+        if cycle_count % cycles_per_sync == 0:
+            session = create_session()
+            try:
+                sync_node_resources(session, settings)
+            except Exception:
+                logger.exception("Error in node resource sync")
+                session.rollback()
+            finally:
+                session.close()
+
+        cycle_count += 1
         LIVENESS_PATH.touch()
         time.sleep(interval)
 

@@ -192,3 +192,43 @@ impl Default for ClusterTotals {
         }
     }
 }
+
+impl ClusterTotals {
+    pub async fn from_db(client: &Client) -> Self {
+        match client
+            .query_one(
+                "SELECT COALESCE(SUM(cpu_millicores), 0)::BIGINT, \
+                        COALESCE(SUM(memory_mib), 0)::BIGINT, \
+                        COALESCE(SUM(gpu), 0)::BIGINT \
+                 FROM node_resources",
+                &[],
+            )
+            .await
+        {
+            Ok(row) => {
+                let cpu: i64 = row.get(0);
+                let mem: i64 = row.get(1);
+                let gpus: i64 = row.get(2);
+                if cpu == 0 && mem == 0 {
+                    eprintln!(
+                        "Warning: node_resources is empty. Using default cluster totals."
+                    );
+                    Self::default()
+                } else {
+                    Self {
+                        cpu_millicores: cpu,
+                        memory_mib: mem,
+                        gpus,
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: Could not query node_resources ({}). Using defaults.",
+                    e
+                );
+                Self::default()
+            }
+        }
+    }
+}

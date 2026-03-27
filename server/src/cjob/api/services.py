@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from cjob.config import get_settings
 from cjob.models import Job, JobEvent, UserJobCounter
+from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 
 from .schemas import (
     CancelResponse,
@@ -86,6 +87,37 @@ def submit_job(
             status_code=400,
             detail="GPU ジョブは現在サポートされていません",
         )
+
+    # Check resource exceeds max node allocatable
+    max_resources = session.execute(
+        text(
+            "SELECT MAX(cpu_millicores) AS max_cpu, "
+            "       MAX(memory_mib) AS max_memory, "
+            "       MAX(gpu) AS max_gpu "
+            "FROM node_resources"
+        )
+    ).mappings().first()
+
+    if max_resources and max_resources["max_cpu"] is not None:
+        req_cpu = parse_cpu_millicores(req.resources.cpu)
+        req_mem = parse_memory_mib(req.resources.memory)
+
+        if req_cpu > max_resources["max_cpu"]:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"要求 CPU ({req.resources.cpu}) がクラスタ内の最大ノード "
+                       f"({max_resources['max_cpu']}m) を超えています",
+            )
+        if req_mem > max_resources["max_memory"]:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=400,
+                detail=f"要求メモリ ({req.resources.memory}) がクラスタ内の最大ノード "
+                       f"({max_resources['max_memory']}Mi) を超えています",
+            )
 
     # Resolve time_limit_seconds
     time_limit = req.time_limit_seconds if req.time_limit_seconds is not None else settings.DEFAULT_TIME_LIMIT_SECONDS
