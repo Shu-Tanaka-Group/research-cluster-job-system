@@ -50,7 +50,7 @@ enum Commands {
         #[command(subcommand)]
         command: WeightCommands,
     },
-    /// Inspect cluster resource information
+    /// Manage cluster resources and ClusterQueue quota
     Cluster {
         #[command(subcommand)]
         command: ClusterCommands,
@@ -138,6 +138,23 @@ enum WeightCommands {
 enum ClusterCommands {
     /// Show node resources, cluster totals, and rejection thresholds
     Resources,
+    /// Show current ClusterQueue nominalQuota
+    ShowQuota,
+    /// Update ClusterQueue nominalQuota
+    SetQuota {
+        /// CPU cores (e.g. 256)
+        #[arg(long)]
+        cpu: u32,
+        /// Memory with unit (e.g. 1000Gi)
+        #[arg(long)]
+        memory: String,
+        /// GPU count (e.g. 4)
+        #[arg(long)]
+        gpu: Option<u32>,
+        /// Allow values exceeding cluster allocatable total
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -214,9 +231,23 @@ async fn main() -> Result<()> {
         }
         Commands::Cluster { command } => {
             let config = config::Config::load()?;
-            let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
-                ClusterCommands::Resources => cmd::cluster::resources(&conn.client).await,
+                ClusterCommands::Resources => {
+                    let conn =
+                        db::connect(&config.database, config.system_namespace()).await?;
+                    cmd::cluster::resources(&conn.client).await
+                }
+                ClusterCommands::ShowQuota => {
+                    let k8s_client = k8s::client().await?;
+                    cmd::cluster::show_quota(&k8s_client).await
+                }
+                ClusterCommands::SetQuota { cpu, memory, gpu, force } => {
+                    let conn =
+                        db::connect(&config.database, config.system_namespace()).await?;
+                    let k8s_client = k8s::client().await?;
+                    cmd::cluster::set_quota(&conn.client, &k8s_client, cpu, &memory, gpu, force)
+                        .await
+                }
             }
         }
         Commands::Db { command } => {
