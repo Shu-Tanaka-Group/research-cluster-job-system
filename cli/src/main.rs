@@ -111,8 +111,6 @@ async fn main() -> Result<()> {
     }
 }
 
-const MAX_TIME_LIMIT_SECONDS: u32 = 604800;
-
 fn parse_duration(s: &str) -> Result<u32> {
     let s = s.trim();
     if let Ok(secs) = s.parse::<u32>() {
@@ -171,19 +169,7 @@ async fn cmd_add(
         .join(" ");
 
     let time_limit_seconds = match time_limit {
-        Some(ref s) => {
-            let secs = parse_duration(s)?;
-            if secs > MAX_TIME_LIMIT_SECONDS {
-                anyhow::bail!(
-                    "time-limit は {} 秒（7日）以下で指定してください",
-                    MAX_TIME_LIMIT_SECONDS
-                );
-            }
-            if secs == 0 {
-                anyhow::bail!("time-limit は 1 以上で指定してください");
-            }
-            Some(secs)
-        }
+        Some(ref s) => Some(parse_duration(s)?),
         None => None,
     };
 
