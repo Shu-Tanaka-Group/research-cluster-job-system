@@ -16,6 +16,16 @@ Watcher のメインループは各スキャンサイクル完了時に `/tmp/li
 
 Watcher は K8s Job の `cjob.io/namespace` ラベルから直接 namespace を取得するため、`JOB_NAMESPACE_PREFIX` 環境変数を必要としない（Dispatcher は Job 作成時に namespace を `user-<username>` 形式で構築する際に `JOB_NAMESPACE_PREFIX` を使用するが、Watcher は既存のラベルを読み取るのみで構築は行わない）。
 
+## 1.1 ノードリソース同期
+
+Watcher は K8s API からノードの `allocatable` リソースを定期取得し、DB の `node_resources` テーブルに書き込む（[database.md](database.md) §6 参照）。
+
+- 取得間隔は `NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）で制御する。メインループ（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 間隔）の N サイクルに 1 回実行する
+- 対象ノードは `NODE_LABEL_SELECTOR`（デフォルト `cluster-job=true`）で絞り込む。Kueue ResourceFlavor の `nodeLabels` と一致させることで、Job が実際にスケジュールされうるノードだけを捕捉する
+- 初回は Watcher 起動直後に即実行し、以降は設定間隔で繰り返す
+- K8s API から取得したノード一覧に存在しないが DB に残っているノード（撤去・ラベル除去）は DELETE する
+- K8s API 呼び出し失敗時はログを出力してスキップし、次回サイクルで再試行する（DB の既存データはそのまま維持される）
+
 ## 2. 必要性
 
 Dispatcher が DB スキャンで Job を作成しても、その後の実行状態（RUNNING / SUCCEEDED / FAILED）は Kubernetes 側でのみ確定する。

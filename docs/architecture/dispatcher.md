@@ -21,6 +21,8 @@ Dispatcher は PostgreSQL を定期的にスキャンし、以下の基準で di
 
 **Fair sharing（DRF）：** namespace ごとの直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量（[database.md](database.md) §5 の `namespace_daily_usage` テーブル）を参照し、Dominant Resource Fairness（DRF）に基づいて dispatch 優先度を決定する。各リソース（CPU・メモリ・GPU）をクラスタ全体の容量で正規化し、最大値（dominant share）を namespace の weight（[database.md](database.md) §4）で割った値が小さい namespace を優先的に dispatch する。これにより、リソースを多く消費した namespace の優先度が下がり、消費の少ない namespace にリソースが行き渡る。weight が大きい namespace はより多くのリソースを消費するまで優先され続ける。日別の消費量をスライディングウィンドウで集計するため、一括リセットの断崖が生じない。
 
+DRF 正規化に使用するクラスタ全体の容量は、`node_resources` テーブル（[database.md](database.md) §6）から `SUM()` で動的に取得する。Watcher がノードの `allocatable` を定期的に同期するため、ノードの追加・撤去が自動的に反映される。`node_resources` テーブルが空の場合（Watcher 未起動時）は DRF ソートを無効化し、namespace 名順にフォールバックする。
+
 ### 1.2 DB スキャンのクエリ方針
 
 ```sql
@@ -69,7 +71,7 @@ LIMIT :batch_size;                         -- 1サイクルの総取得数を固
 
 **ラウンドロビンの仕組み：** `ROW_NUMBER()` を QUEUED ジョブのみに振り、`CEIL(rn / round_size)` でグループ化することで、各 namespace から `DISPATCH_ROUND_SIZE` 件ずつ交互に取得する。デフォルト（`round_size = 1`）では各 namespace から 1 件ずつ交互に並び、`round_size = 5` なら 5 件ずつまとめて並ぶ。`LIMIT :batch_size` で打ち切ることで、1 サイクルの dispatch 数が制限される。
 
-**公平性の保証（DRF）：** 直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量をクラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求め、namespace の weight（`namespace_weights` テーブル、デフォルト 1）で割ってソートする。これにより、支配的リソースの消費割合が小さい namespace が優先され、weight が大きい namespace はより多くのリソースを消費するまで優先され続ける。`namespace_daily_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。
+**公平性の保証（DRF）：** 直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量をクラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求め、namespace の weight（`namespace_weights` テーブル、デフォルト 1）で割ってソートする。クラスタ容量は `node_resources` テーブルから `SUM()` で動的に取得する（[database.md](database.md) §6.2 参照）。これにより、支配的リソースの消費割合が小さい namespace が優先され、weight が大きい namespace はより多くのリソースを消費するまで優先され続ける。`namespace_daily_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。`node_resources` テーブルが空の場合は DRF ソートを無効化し、namespace 名順にフォールバックする。
 
 **古い行の削除：** `fetch_dispatchable_jobs()` の実行前に、ウィンドウ外の古い行を削除する（[database.md](database.md) §5.4 参照）。
 

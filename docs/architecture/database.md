@@ -171,7 +171,66 @@ WHERE usage_date <= CURRENT_DATE - :window_days;
 - **BIGINT の十分性**: `time_limit_seconds`（最大 604800）× `cpu_millicores`（最大 300000）でも 1 日あたり最大約 1.8 × 10^11。BIGINT（最大 9.2 × 10^18）で十分
 - **行数の見積もり**: namespace 数 × ウィンドウ日数。20 namespace × 7 日 = 140 行程度であり、集計クエリのコストは無視できる
 
-## 6. 状態遷移
+## 6. `node_resources` テーブル
+
+クラスタ内の計算ノードごとの allocatable リソースを記録する。Watcher が K8s API からノード情報を定期取得（`NODE_RESOURCE_SYNC_INTERVAL_SEC`、デフォルト 300 秒）し、UPSERT で更新する。
+
+```sql
+CREATE TABLE node_resources (
+    node_name           TEXT PRIMARY KEY,
+    cpu_millicores      INTEGER NOT NULL,    -- allocatable CPU（ミリコア）
+    memory_mib          INTEGER NOT NULL,    -- allocatable memory（MiB）
+    gpu                 INTEGER NOT NULL DEFAULT 0,  -- allocatable GPU（nvidia.com/gpu）
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### 6.1 同期処理
+
+Watcher が `NODE_LABEL_SELECTOR`（デフォルト `cluster-job=true`）に一致するノードの `status.allocatable` を取得し、ノードごとに UPSERT する。DB に存在するが K8s から消えたノード（撤去・ラベル除去）は DELETE する。
+
+```sql
+-- UPSERT（ノードごと）
+INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, updated_at)
+VALUES (:name, :cpu, :mem, :gpu, NOW())
+ON CONFLICT (node_name) DO UPDATE SET
+    cpu_millicores = :cpu,
+    memory_mib = :mem,
+    gpu = :gpu,
+    updated_at = NOW();
+
+-- K8s から消えたノードの削除
+DELETE FROM node_resources WHERE node_name != ALL(:current_node_names);
+```
+
+### 6.2 参照パターン
+
+**Submit API（リソース超過リジェクト判定）**: 各リソースについて、全ノードの最大値を取得する。要求リソースがいずれかのノードの allocatable を超える場合、そのジョブは原理的に実行不可能であるため 400 でリジェクトする。
+
+```sql
+SELECT MAX(cpu_millicores) AS max_cpu,
+       MAX(memory_mib) AS max_memory,
+       MAX(gpu) AS max_gpu
+FROM node_resources;
+```
+
+**Dispatcher（DRF 正規化）**: クラスタ全体のリソース合計を取得する。従来 ConfigMap で手動設定していた `CLUSTER_TOTAL_CPU_MILLICORES` / `CLUSTER_TOTAL_MEMORY_MIB` / `CLUSTER_TOTAL_GPUS` の代わりに使用する。
+
+```sql
+SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu,
+       COALESCE(SUM(memory_mib), 0) AS total_memory,
+       COALESCE(SUM(gpu), 0) AS total_gpu
+FROM node_resources;
+```
+
+### 6.3 設計判断
+
+- **ノードごとに行を持つ理由**: Submit API のリジェクト判定には「単一ノードの最大 allocatable」が必要であり、クラスタ合計だけでは不十分。ノードごとのデータを保持することで、MAX() によるリジェクト判定と SUM() による DRF 正規化の両方を単一テーブルで実現する
+- **updated_at**: cjobctl でノード情報の鮮度を確認するために使用する。Watcher が停止した場合に古いデータを検知可能にする
+- **行数の見積もり**: 計算ノード数と同数。10〜50 ノード程度を想定しており、クエリのコストは無視できる
+- **テーブルが空の場合のフォールバック**: Watcher 未起動時は `node_resources` が空となる。Submit API はバリデーションをスキップし、Dispatcher は DRF ソートを無効化して namespace 名順にフォールバックする。これにより Watcher 起動前でもシステムが動作する
+
+## 7. 状態遷移
 
 ```text
 QUEUED
