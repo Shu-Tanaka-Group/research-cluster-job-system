@@ -3,11 +3,8 @@ from unittest.mock import patch
 from kubernetes.client import V1Job, V1JobCondition, V1JobStatus, V1ObjectMeta
 
 from cjob.models import Job, NamespaceDailyUsage, UserJobCounter
-from cjob.watcher.reconciler import (
-    parse_cpu_millicores,
-    parse_memory_mib,
-    reconcile_cycle,
-)
+from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
+from cjob.watcher.reconciler import reconcile_cycle
 
 
 NS = "user-alice"

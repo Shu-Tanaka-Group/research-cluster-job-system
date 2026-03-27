@@ -45,9 +45,12 @@ def sync_node_resources(session: Session, settings: Settings):
 
     # Delete nodes that no longer exist in K8s
     if current_nodes:
+        # Build parameterised placeholders for the IN clause
+        placeholders = ", ".join(f":n{i}" for i in range(len(current_nodes)))
+        params = {f"n{i}": name for i, name in enumerate(current_nodes)}
         session.execute(
-            text("DELETE FROM node_resources WHERE node_name != ALL(:names)"),
-            {"names": list(current_nodes)},
+            text(f"DELETE FROM node_resources WHERE node_name NOT IN ({placeholders})"),
+            params,
         )
     else:
         session.execute(text("DELETE FROM node_resources"))
