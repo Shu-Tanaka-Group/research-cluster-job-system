@@ -204,10 +204,10 @@
 - **K8s Job 名**: `cjob-<username>-<job_id>`（グローバルに一意）
 - **実行制御**: Dispatcher + Kueue
 - **実行基盤**: Kubernetes Job
-- **実行環境**: `JUPYTER_IMAGE` 環境変数で指定された image（User Pod と同一）+ namespace PVC mounted at `/home/jovyan`
+- **実行環境**: `JUPYTER_IMAGE` 環境変数で指定された image（User Pod と同一）+ namespace PVC mounted at `${WORKSPACE_MOUNT_PATH}`（デフォルト `/home/jovyan`）
 - **再現対象**: submit 時の `cwd` / exported env（仮想環境 PATH 含む）/ command
-- **ログ保存**: PVC 上の `/home/jovyan/.cjob/logs/<job_id>/`
-- **ログ取得**: CLI が PVC を直接読む（API 経由なし）・閲覧のみ・削除は delete / reset が担う
+- **ログ保存**: PVC 上の `${LOG_BASE_DIR}/<job_id>/`（デフォルト `/home/jovyan/.cjob/logs/<job_id>/`）
+- **ログ取得**: CLI が PVC を直接読む（環境変数 `CJOB_LOG_BASE_DIR` でパスを設定、API 経由なし）・閲覧のみ・削除は delete / reset が担う
 - **キャンセル**: 単体・範囲指定（1-10）・個別複数指定（1,3,5）・組み合わせに対応
 - **削除**: `cjob delete` で完了済みジョブを個別削除（実行中ジョブは削除不可・cancel を促す。reset 処理中の DELETING ジョブも削除不可）
 - **リセット**: `cjob reset` で全ジョブ履歴・ログを削除し job_id を 1 から採番し直す（全ジョブ完了時のみ実行可能）
