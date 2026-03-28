@@ -125,7 +125,7 @@ cjob add --time-limit 3d -- python main.py       # 3日
 | CANCELLED | ファイルがあれば表示、なければ "No logs available" |
 | DELETING | reset 処理中。ファイルがあれば表示、なければ "No logs available（reset 処理中）" を表示して終了 |
 
-ログファイルは PVC 上（`${CJOB_LOG_BASE_DIR}/<job_id>/`）にあり、CLI が直接読む。API を経由しない。
+ログファイルは PVC 上にあり、CLI が直接読む。ログディレクトリのパスは `GET /v1/jobs/{job_id}` で取得した `log_dir` を使用する。
 
 ### QUEUED / DISPATCHING / DISPATCHED 中の待機フィードバック
 
@@ -221,24 +221,16 @@ $ cjob status 999
 
 ## 7. CLI の設定
 
-以下の環境変数で CLI の動作を設定する。いずれも未設定時はデフォルト値を使用する。
-
-| 環境変数 | デフォルト値 | 説明 |
-|---|---|---|
-| `CJOB_API_URL` | `http://submit-api.cjob-system.svc.cluster.local:8080` | Submit API のエンドポイント |
-| `CJOB_LOG_BASE_DIR` | `/home/jovyan/.cjob/logs` | ログファイルのベースディレクトリ。CLI はこのパス配下の `<job_id>/` ディレクトリからログを読み書きする |
+Submit API のエンドポイントは環境変数 `CJOB_API_URL` から読む。未設定時はデフォルト値を使用する。
 
 ```
 # ※ CLI の実装は Rust（reqwest クレート等）で行う。以下は概念説明のための擬似コードである。
 
 SUBMIT_API_URL = env("CJOB_API_URL")
               ?? "http://submit-api.cjob-system.svc.cluster.local:8080"
-
-LOG_BASE_DIR   = env("CJOB_LOG_BASE_DIR")
-              ?? "/home/jovyan/.cjob/logs"
 ```
 
-`CJOB_LOG_BASE_DIR` はサーバー側の ConfigMap で定義される `LOG_BASE_DIR` と同じ値に設定する必要がある。User Pod のプロファイルスクリプト等で設定する運用を想定する（[deployment.md](../deployment.md) 参照）。
+ログディレクトリのパスは CLI 側で保持せず、API から取得する。個別ジョブの `log_dir` は `GET /v1/jobs/{job_id}` から、ログベースディレクトリは `GET /v1/jobs` の `log_base_dir` から取得する。これにより CLI 側の設定とサーバー側の ConfigMap（`LOG_BASE_DIR`）の不整合を防ぐ。
 
 ## 8. `cjob cancel` の動作
 
@@ -271,7 +263,7 @@ fn cmd_delete(expr, all: bool):
         POST /v1/jobs/delete に job_ids を送る
 
     result を受け取り:
-        deleted の各 job_id に対応するログディレクトリ（${CJOB_LOG_BASE_DIR}/<job_id>/）を削除する
+        result.log_dirs の各パスに対応するログディレクトリを削除する
         deleted があれば "削除しました" を表示する
         skipped があれば:
             reason が "running" のジョブ → "実行中のため削除できませんでした。先に cjob cancel を実行してください"
@@ -282,12 +274,12 @@ fn cmd_delete(expr, all: bool):
 
 ## 10. `cjob reset` の動作
 
-1. `GET /v1/jobs` でジョブ一覧を取得し、以下の順で確認する
+1. `GET /v1/jobs` でジョブ一覧を取得し、レスポンスの `log_base_dir` を保持した上で以下の順で確認する
    - `DELETING` のジョブが1件でも存在する場合は「前回のリセット処理がまだ完了していません。しばらく待ってから再試行してください。」を表示して中止する
    - `QUEUED` / `DISPATCHING` / `DISPATCHED` / `RUNNING` のジョブが1件でも存在する場合は job_id を表示して中止する
 2. 全ジョブが完了済みの場合はユーザーに確認プロンプトを表示する
 3. y の場合のみ以下を順に実行する
-   1. PVC 上のログディレクトリ（`${CJOB_LOG_BASE_DIR}/`）を削除する（API 呼び出し前に削除することで、API 呼び出し後に CLI がクラッシュしても Watcher が counter をリセットした後の job_id=1 再利用時に log_dir が存在しない状態を保証する）
+   1. `log_base_dir` で取得したパスのログディレクトリを削除する（API 呼び出し前に削除することで、API 呼び出し後に CLI がクラッシュしても Watcher が counter をリセットした後の job_id=1 再利用時に log_dir が存在しない状態を保証する）
    2. `POST /v1/reset` を呼び出す（202 Accepted が返る）
 4. リセット開始メッセージを表示して終了する（完了を待たない）
 

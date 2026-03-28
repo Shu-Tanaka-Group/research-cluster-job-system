@@ -197,7 +197,7 @@ env:
 | Dispatcher | `cjob-config` | `postgres-secret` |
 | Watcher | `cjob-config` | `postgres-secret` |
 | PostgreSQL | - | `postgres-secret` |
-| CLI（`cjob update` で配布） | -（環境変数 `CJOB_LOG_BASE_DIR` で設定） | - |
+| CLI（`cjob update` で配布） | -（ログパスは API から取得） | - |
 
 ---
 
@@ -264,19 +264,10 @@ chmod +x /home/jovyan/.local/bin/cjob
 
 #### CLI の環境変数
 
-CLI は以下の環境変数で設定する。いずれもデフォルト値があるため、デフォルトのマウントパス（`/home/jovyan`）を使用する場合は設定不要である。
+Submit API のエンドポイントは環境変数 `CJOB_API_URL` で設定する。
+未設定時はデフォルト値（`http://submit-api.cjob-system.svc.cluster.local:8080`）を使用する。
 
-| 環境変数 | デフォルト値 | 説明 |
-|---|---|---|
-| `CJOB_API_URL` | `http://submit-api.cjob-system.svc.cluster.local:8080` | Submit API のエンドポイント |
-| `CJOB_LOG_BASE_DIR` | `/home/jovyan/.cjob/logs` | ログファイルのベースディレクトリ |
-
-`CJOB_LOG_BASE_DIR` は ConfigMap の `LOG_BASE_DIR` と同じ値に設定する必要がある。マウントパスをデフォルトから変更する場合は、User Pod のプロファイルスクリプト（例: `/etc/profile.d/cjob.sh`）等で `CJOB_LOG_BASE_DIR` を設定する。
-
-```bash
-# /etc/profile.d/cjob.sh（マウントパスをデフォルトから変更する場合の例）
-export CJOB_LOG_BASE_DIR="/data/.cjob/logs"
-```
+ログディレクトリのパスは CLI 側で設定不要である。CLI は API からログパスを取得するため、サーバー側の ConfigMap（`LOG_BASE_DIR`）を変更するだけで CLI にも反映される。
 
 ---
 

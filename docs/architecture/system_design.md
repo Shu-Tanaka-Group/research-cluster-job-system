@@ -110,7 +110,7 @@ submit 時に取得した以下を Job Pod に反映する。
 Job Pod のコマンドを tee でラップし、stdout / stderr を PVC 上に保存する。
 
 - 保存先：`${LOG_BASE_DIR}/<job_id>/stdout.log` および `stderr.log`（`LOG_BASE_DIR` はデフォルト `/home/jovyan/.cjob/logs`）
-- CLI は User Pod 内から PVC 上のファイルを直接読む（環境変数 `CJOB_LOG_BASE_DIR` でパスを設定）
+- CLI は User Pod 内から PVC 上のファイルを直接読む（ログパスは API から取得）
 - リアルタイム追跡は CLI が tail -f 相当の処理を行う
 - ログの削除は `cjob delete`（個別ジョブの削除時）および `cjob reset`（全件リセット時）のいずれかで行う
 
