@@ -102,6 +102,62 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 { "detail": "リセット処理中のためジョブを投入できません。しばらく待ってから再試行してください" }
 ```
 
+## 2.1 POST /v1/sweep
+
+パラメータスイープジョブを 1 件投入する。K8s Indexed Job として実行され、各タスクは `$CJOB_INDEX`（0-origin）で識別される。
+
+### request
+
+```json
+{
+  "command": "python main.py --trial $CJOB_INDEX",
+  "image": "yusekiya/stg-jupyter:2.1.0",
+  "cwd": "/home/jovyan/project-a",
+  "env": {
+    "OMP_NUM_THREADS": "4"
+  },
+  "resources": {
+    "cpu": "2",
+    "memory": "4Gi",
+    "gpu": 0
+  },
+  "completions": 100,
+  "parallelism": 10,
+  "time_limit_seconds": 21600
+}
+```
+
+### response
+
+```json
+{
+  "job_id": 3,
+  "status": "QUEUED"
+}
+```
+
+### バリデーション
+
+`POST /v1/jobs` と共通のバリデーション（GPU リジェクト、単一ノードリソース超過、time_limit、ジョブ数上限、DELETING チェック）に加え、以下の sweep 固有バリデーションを行う。
+
+- `completions` が 1 未満 → 400
+- `completions` が `MAX_SWEEP_COMPLETIONS`（デフォルト 1000）を超える → 400
+- `parallelism` が 1 未満 → 400
+- `parallelism` が `completions` を超える → 400
+- `parallelism × Pod リソース` がクラスタ全体の allocatable 合計を超える → 400
+
+```json
+{ "detail": "completions は 1 以上 1000 以下で指定してください" }
+```
+
+```json
+{ "detail": "parallelism は 1 以上 completions 以下で指定してください" }
+```
+
+```json
+{ "detail": "parallelism × 要求 CPU (20000m) がクラスタ全体の CPU (256000m) を超えています" }
+```
+
 ## 3. GET /v1/jobs
 
 ジョブ一覧を取得する。JWT の namespace に属するジョブのみ返す。
@@ -133,7 +189,11 @@ GET /v1/jobs?limit=50&order=desc
       "status": "RUNNING",
       "command": "python main.py --alpha 0.1 --beta 16",
       "created_at": "2026-03-23T12:34:56Z",
-      "finished_at": null
+      "finished_at": null,
+      "completions": null,
+      "parallelism": null,
+      "succeeded_count": null,
+      "failed_count": null
     }
   ],
   "total_count": 1,
@@ -165,7 +225,13 @@ GET /v1/jobs?limit=50&order=desc
   "dispatched_at": "2026-03-23T12:35:02Z",
   "started_at": "2026-03-23T12:35:10Z",
   "finished_at": "2026-03-23T12:37:10Z",
-  "last_error": null
+  "last_error": null,
+  "completions": null,
+  "parallelism": null,
+  "succeeded_count": null,
+  "failed_count": null,
+  "completed_indexes": null,
+  "failed_indexes": null
 }
 ```
 

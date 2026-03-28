@@ -90,6 +90,12 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 
 ノードリソース同期の詳細は [watcher.md](watcher.md) §1.1、DB テーブル定義は [database.md](database.md) §6 を参照。
 
+### sweep に関する制限
+
+| 制限 | 設定��所 | 値 | 管理主体 | 適用単位 | 制限対象 |
+|---|---|---|---|---|---|
+| `MAX_SWEEP_COMPLETIONS` | ConfigMap | 1000 | Submit API | sweep ジョブごと | `completions`（タスク数）の上限 |
+
 ### 実行時間に関する制限
 
 | 制限 | 設定箇所 | 値 | 管理主体 | 適用単位 | 制限対象 |

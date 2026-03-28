@@ -390,3 +390,46 @@ def on_startup():
     db.reset_stale_dispatching_jobs()
     # UPDATE jobs SET status = 'QUEUED', retry_after = NULL WHERE status = 'DISPATCHING'
 ```
+
+## 3. sweep ジョブの dispatch
+
+### 3.1 dispatch_budget の消費単位
+
+sweep 1 件 = budget 1 として消費する。`parallelism` の値に関わらず、DB 上の `jobs` テーブルの 1 行が budget 1 に対応する。
+
+### 3.2 K8s Indexed Job の構築
+
+sweep ジョブ（`jobs.completions IS NOT NULL`）の場合、`build_k8s_job` は以下のフィールドを追加した K8s Job マニフェストを生成する。
+
+```yaml
+spec:
+  completionMode: Indexed
+  completions: <completions>
+  parallelism: <parallelism>
+  backoffLimitPerIndex: 0
+  activeDeadlineSeconds: <time_limit_seconds>
+```
+
+`backoffLimitPerIndex: 0` により、1 回失敗したタスクは再試行せず即座に `failedIndexes` に追加される。
+
+### 3.3 コマンドラッパー
+
+sweep ジョブのコマンドラッパーは `CJOB_INDEX` の export とインデックス付きログディレクトリを使用する。
+
+```bash
+export CJOB_INDEX=$JOB_COMPLETION_INDEX
+LOG_DIR=/home/jovyan/.cjob/logs/{job_id}/$CJOB_INDEX
+mkdir -p "$LOG_DIR"
+exec > >(tee "$LOG_DIR/stdout.log") 2> >(tee "$LOG_DIR/stderr.log" >&2)
+{user_command}
+EXIT_CODE=$?
+exec >&- 2>&-
+wait
+exit $EXIT_CODE
+```
+
+通常ジョブのラッパーとの違いは `export CJOB_INDEX=$JOB_COMPLETION_INDEX` 行の追加と `LOG_DIR` にインデックスが含まれる点のみ。
+
+### 3.4 隙間充填との関係
+
+隙間充填ロジックは既存のまま動作する。sweep ジョブの `time_limit_seconds` はsweep 全体の実行時間上限であり、隙間充填の推定に使用される。

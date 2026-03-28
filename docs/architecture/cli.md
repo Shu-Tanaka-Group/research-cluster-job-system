@@ -4,6 +4,7 @@
 
 ```bash
 cjob add [--time-limit <duration>] -- <command...>
+cjob sweep -n <count> --parallel <n> [--time-limit <duration>] -- <command...>
 cjob list
 cjob status <job-id>
 cjob cancel <job-id>              # 単体指定
@@ -18,6 +19,8 @@ cjob delete --all                 # 完了済みジョブを全て削除
 cjob reset
 cjob logs <job-id>
 cjob logs --follow <job-id>
+cjob logs <job-id> --index <n>           # sweep: 特定インデックスのログ表示
+cjob logs --follow <job-id> --index <n>  # sweep: 特定インデックスのログ追跡
 cjob update
 ```
 
@@ -43,25 +46,37 @@ cjob add -- python main.py --config config.yaml
 # PATH / VIRTUAL_ENV が export 済みのため Job Pod で venv が再現される
 ```
 
-### 2.4 ジョブ一覧表示
+### 2.4 パラメータスイープ
+
+```bash
+# 100 タスクを並列 10 で実行
+cjob sweep -n 100 --parallel 10 -- python main.py --trial \$CJOB_INDEX
+
+# 時間制限付き
+cjob sweep -n 50 --parallel 5 --time-limit 6h -- bash run.sh
+```
+
+各タスクは `$CJOB_INDEX`（0-origin、0 〜 completions-1）で識別される。
+
+### 2.5 ジョブ一覧表示
 
 ```bash
 cjob list
 ```
 
-### 2.5 状態確認
+### 2.6 状態確認
 
 ```bash
 cjob status <job-id>
 ```
 
-### 2.6 キャンセル
+### 2.7 キャンセル
 
 ```bash
 cjob cancel <job-id>
 ```
 
-### 2.7 ログ取得
+### 2.8 ログ取得
 
 ```bash
 # 完了後に確認
@@ -71,7 +86,7 @@ cjob logs <job-id>
 cjob logs --follow <job-id>
 ```
 
-### 2.8 完了済みジョブの削除
+### 2.9 完了済みジョブの削除
 
 ```bash
 # 単体指定
@@ -86,7 +101,30 @@ cjob delete 1-5,8,10-12
 cjob delete --all
 ```
 
-## 3. `cjob add` の動作
+## 3. `cjob sweep` の動作
+
+1. `cjob add` と同様に `pwd`、export 済み環境変数、`CJOB_IMAGE` / `JUPYTER_IMAGE` を収集する
+2. `--` 以降の argv を shell-safe に連結して command を生成する
+3. `-n` を `completions`、`--parallel` を `parallelism` として `POST /v1/sweep` に送信する
+4. `job_id` とタスク数・並列数を表示する
+
+### 引数
+
+| 引数 | 必須 | 説明 |
+|---|---|---|
+| `-n <count>` | 必須 | タスク総数（completions）。上限はサーバ側 `MAX_SWEEP_COMPLETIONS`（デフォルト 1000） |
+| `--parallel <n>` | 任意 | 同時実行数（parallelism）。デフォルト 1 |
+| `--time-limit <duration>` | 任意 | sweep **全体**の実行時間上限。省略時はサーバ側デフォルト |
+| `--cpu <cpu>` | 任意 | CPU リソース。デフォルト "1" |
+| `--memory <memory>` | 任意 | メモリリソース。デフォルト "1Gi" |
+| `-- <command>` | 必須 | 各タスクで実行するコマンド |
+
+### `$CJOB_INDEX` 環境変数
+
+- 0-origin（K8s の `JOB_COMPLETION_INDEX` と同一）
+- 値の範囲: `0` 〜 `completions - 1`
+
+## 4. `cjob add` の動作
 
 1. `pwd` を取得する
 2. export 済み環境変数を収集する（`PATH` / `VIRTUAL_ENV` を含む）
@@ -111,7 +149,7 @@ cjob add --time-limit 3d -- python main.py       # 3日
 
 受け付ける表記: 整数（秒）、`<数値>s`（秒）、`<数値>h`（時間）、`<数値>d`（日）。最大 7 日。
 
-## 4. `cjob logs` の動作
+## 5. `cjob logs` の動作
 
 `cjob logs` はログの閲覧に特化する。ログの削除は `cjob delete` または `cjob reset` が担う。
 
@@ -159,18 +197,21 @@ $ cjob logs --follow 3
 ^C      ← ユーザーが Ctrl-C で終了
 ```
 
-## 5. `cjob list` の動作
+## 6. `cjob list` の動作
 
 `GET /v1/jobs` を呼び出し、結果を表形式で表示する。デフォルトでは最新50件を JOB_ID 昇順で表示する。
 
 ```
 $ cjob list
-JOB_ID  STATUS      COMMAND                                    CREATED              FINISHED
-51      SUCCEEDED   python main.py --alpha 0.1 --beta 16       2026-03-23 12:34     2026-03-23 12:37
-52      RUNNING     python main.py --alpha 0.2 --beta 16       2026-03-23 12:35     -
-53      QUEUED      python main.py --alpha 0.5 --beta 16       2026-03-23 12:35     -
+JOB_ID  TYPE   STATUS      PROGRESS    COMMAND                                  CREATED              FINISHED
+51      job    SUCCEEDED   -           python main.py --alpha 0.1 --beta 16     2026-03-23 12:34     2026-03-23 12:37
+52      job    RUNNING     -           python main.py --alpha 0.2 --beta 16     2026-03-23 12:35     -
+53      sweep  RUNNING     48/2/100    python main.py --trial $CJOB_INDEX       2026-03-23 12:35     -
+54      sweep  SUCCEEDED   98/2/100    python main.py --trial $CJOB_INDEX       2026-03-23 12:36     2026-03-23 13:00
 （100件中最新の50件を表示。全件表示するには --all を使用してください）
 ```
+
+TYPE 列は通常ジョブが `job`、sweep ジョブが `sweep`。PROGRESS 列は sweep ジョブの場合に `成功数/失敗数/全体数` を表示し、通常ジョブは `-` を表示する。
 
 オプション：
 
@@ -191,7 +232,7 @@ cjob list --limit 10         # 最新 10 件のみ表示
 
 command は長い場合に末尾を省略して表示する（例: 40文字で切り捨て）。
 
-## 6. `cjob status` の動作
+## 7. `cjob status` の動作
 
 `GET /v1/jobs/{job_id}` を呼び出し、主要フィールドを整形して表示する。
 
@@ -211,6 +252,28 @@ log_dir:      /home/jovyan/.cjob/logs/2
 ```
 
 `time_limit` は `time_limit_seconds` を人間が読みやすい形式で表示する。ジョブが RUNNING の場合は残り時間も併記する。
+
+sweep ジョブの場合は追加フィールドを表示する。
+
+```
+$ cjob status 3
+job_id:         3
+type:           sweep
+status:         RUNNING
+command:        python main.py --trial $CJOB_INDEX
+cwd:            /home/jovyan/project-a
+completions:    100
+parallelism:    10
+progress:       48/2/100 (succeeded/failed/total)
+failed_indexes: 12,37
+time_limit:     6h (残り 4h 32m)
+created_at:     2026-03-23 12:35:00
+dispatched_at:  2026-03-23 12:35:05
+started_at:     2026-03-23 12:35:10
+finished_at:    -
+k8s_job_name:   cjob-alice-3
+log_dir:        /home/jovyan/.cjob/logs/3
+```
 
 `last_error` はジョブが FAILED の場合にエラー理由を表示する。値が `null` の場合は行自体を表示しない。
 
@@ -237,7 +300,35 @@ $ cjob status 999
 エラー: job_id 999 が見つかりません。
 ```
 
-## 7. CLI の設定
+### sweep ジョブのログ
+
+sweep ジョブは `cjob logs <job_id>` で全タスクのログをインデックス昇順で連結表示する。各タスクの境界にヘッダー行を挿入する。
+
+```
+$ cjob logs 3
+=== [index 0] ===
+Training with alpha=0.1 ...
+Done.
+=== [index 1] ===
+Training with alpha=0.2 ...
+Done.
+```
+
+`--index <n>` で特定インデックスのタスクのログのみ表示する。
+
+```
+$ cjob logs 3 --index 2
+Training with alpha=0.5 ...
+Error: convergence failed
+```
+
+`--follow` は `--index` と組み合わせて使用する。`--follow` のみ（`--index` なし）の場合はエラーとし、`--index` の指定を促す。
+
+ログディレクトリ構造:
+- 通常ジョブ: `/home/jovyan/.cjob/logs/<job_id>/`
+- sweep ジョブ: `/home/jovyan/.cjob/logs/<job_id>/<index>/`
+
+## 8. CLI の設定
 
 Submit API のエンドポイントは環境変数 `CJOB_API_URL` から読む。未設定時はデフォルト値を使用する。
 
@@ -250,7 +341,7 @@ SUBMIT_API_URL = env("CJOB_API_URL")
 
 ログディレクトリのパスは CLI 側で保持せず、API から取得する。個別ジョブの `log_dir` は `GET /v1/jobs/{job_id}` から、ログベースディレクトリは `GET /v1/jobs` の `log_base_dir` から取得する。これにより CLI 側の設定とサーバー側の ConfigMap（`LOG_BASE_DIR`）の不整合を防ぐ。
 
-## 8. `cjob cancel` の動作
+## 9. `cjob cancel` の動作
 
 job_id の指定形式をパースして job_id のリストに展開し、`POST /v1/jobs/cancel` を呼ぶ。
 
@@ -265,7 +356,7 @@ fn parse_job_ids(expr) -> Vec<u32>:
     重複除去して昇順ソートして返す
 ```
 
-## 9. `cjob delete` の動作
+## 10. `cjob delete` の動作
 
 `--all` フラグがある場合は job_ids を省略して `POST /v1/jobs/delete` を呼ぶ。
 それ以外は job_id の指定形式をパースして job_id のリストに展開してから呼ぶ。
@@ -290,7 +381,7 @@ fn cmd_delete(expr, all: bool):
         not_found があれば "見つかりませんでした" を表示する
 ```
 
-## 10. `cjob reset` の動作
+## 11. `cjob reset` の動作
 
 1. `GET /v1/jobs` でジョブ一覧を取得し、レスポンスの `log_base_dir` を保持した上で以下の順で確認する
    - `DELETING` のジョブが1件でも存在する場合は「前回のリセット処理がまだ完了していません。しばらく待ってから再試行してください。」を表示して中止する
@@ -314,7 +405,7 @@ $ cjob reset   # 全ジョブ完了後
 リセットを開始しました。バックグラウンドでクリーンアップが完了するまでお待ちください。
 ```
 
-## 11. `cjob update` の動作
+## 12. `cjob update` の動作
 
 CLI バイナリのバージョン管理と更新を行う。バイナリは Submit API 経由で配布される。
 
