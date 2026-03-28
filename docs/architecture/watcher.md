@@ -14,7 +14,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 
 Watcher のメインループは各スキャンサイクル完了時に `/tmp/liveness` ファイルをタッチする。Kubernetes の Liveness probe がこのファイルの最終更新時刻を確認し、ループ停止を検知して再起動できるようにする（[deployment.md](../deployment.md) §13.5 参照）。
 
-Watcher は K8s Job の `cjob.io/namespace` ラベルから直接 namespace を取得するため、`JOB_NAMESPACE_PREFIX` 環境変数を必要としない（Dispatcher は Job 作成時に namespace を `user-<username>` 形式で構築する際に `JOB_NAMESPACE_PREFIX` を使用するが、Watcher は既存のラベルを読み取るのみで構築は行わない）。
+Watcher は K8s Job の `cjob.io/namespace` ラベルから直接 namespace を取得するため、namespace の命名規則に依存しない（Watcher は既存のラベルを読み取るのみで、namespace 名の構築は行わない）。
 
 ## 1.1 ノードリソース同期
 
