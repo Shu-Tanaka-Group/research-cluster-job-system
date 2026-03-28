@@ -1,7 +1,8 @@
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
+from packaging.version import InvalidVersion, Version
 from sqlalchemy.orm import Session
 
 from cjob.config import get_settings
@@ -12,6 +13,7 @@ from .schemas import (
     CancelRequest,
     CancelResponse,
     CliVersionResponse,
+    CliVersionsResponse,
     DeleteRequest,
     DeleteResponse,
     JobDetailResponse,
@@ -50,10 +52,31 @@ def get_cli_version():
     return CliVersionResponse(version=version)
 
 
-@router.get("/cli/download")
-def download_cli_binary():
+@router.get("/cli/versions", response_model=CliVersionsResponse)
+def get_cli_versions():
     settings = get_settings()
-    version = _read_latest_version(settings.CLI_BINARY_DIR)
+    cli_dir = Path(settings.CLI_BINARY_DIR)
+    latest = _read_latest_version(settings.CLI_BINARY_DIR)
+
+    versions = []
+    for entry in cli_dir.iterdir():
+        if entry.name == "latest" or not entry.is_dir():
+            continue
+        try:
+            Version(entry.name)
+        except InvalidVersion:
+            continue
+        versions.append(entry.name)
+
+    versions.sort(key=Version, reverse=True)
+    return CliVersionsResponse(versions=versions, latest=latest)
+
+
+@router.get("/cli/download")
+def download_cli_binary(version: str | None = Query(default=None)):
+    settings = get_settings()
+    if version is None:
+        version = _read_latest_version(settings.CLI_BINARY_DIR)
     binary_path = Path(settings.CLI_BINARY_DIR) / version / "cjob"
     if not binary_path.is_file():
         raise HTTPException(status_code=404, detail="CLI binary not found")

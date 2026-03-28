@@ -86,16 +86,32 @@ enum Commands {
         follow: bool,
     },
     /// CLI を最新バージョンに更新する
-    Update,
+    Update {
+        /// プレリリース版を含める
+        #[arg(long = "pre")]
+        pre: bool,
+
+        /// 確認をスキップする
+        #[arg(short = 'y', long = "yes")]
+        yes: bool,
+
+        /// 利用可能なバージョン一覧を表示する
+        #[arg(long = "list", conflicts_with = "version")]
+        list: bool,
+
+        /// 指定バージョンをインストールする
+        #[arg(long = "version")]
+        version: Option<String>,
+    },
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    if matches!(cli.command, Commands::Update) {
+    if let Commands::Update { pre, yes, list, version } = cli.command {
         let api_client = client::CjobClient::new_without_auth()?;
-        return cmd_update(&api_client).await;
+        return cmd_update(&api_client, pre, yes, list, version).await;
     }
 
     let token = auth::read_token()?;
@@ -115,7 +131,7 @@ async fn main() -> Result<()> {
         Commands::Usage => cmd_usage(&api_client).await,
         Commands::Reset => cmd_reset(&api_client).await,
         Commands::Logs { job_id, follow } => logs::show_logs(job_id, follow, &api_client).await,
-        Commands::Update => unreachable!(),
+        Commands::Update { .. } => unreachable!(),
     }
 }
 
@@ -339,11 +355,7 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
     }
 
     // Confirmation prompt
-    eprint!("全 {} 件のジョブとログを削除します。よろしいですか？ [y/N] ", total);
-    std::io::Write::flush(&mut std::io::stderr())?;
-    let mut input = String::new();
-    std::io::stdin().read_line(&mut input)?;
-    if input.trim().to_lowercase() != "y" {
+    if !confirm(&format!("全 {} 件のジョブとログを削除します。よろしいですか？", total))? {
         println!("中止しました。");
         return Ok(());
     }
@@ -411,22 +423,101 @@ async fn cmd_usage(client: &client::CjobClient) -> Result<()> {
     Ok(())
 }
 
-async fn cmd_update(client: &client::CjobClient) -> Result<()> {
-    use anyhow::Context;
-    use std::os::unix::fs::PermissionsExt;
+fn confirm(message: &str) -> Result<bool> {
+    eprint!("{} [y/N] ", message);
+    std::io::Write::flush(&mut std::io::stderr())?;
+    let mut input = String::new();
+    std::io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_lowercase() == "y")
+}
 
+async fn cmd_update(
+    client: &client::CjobClient,
+    pre: bool,
+    yes: bool,
+    list: bool,
+    version: Option<String>,
+) -> Result<()> {
     let current_version = env!("CARGO_PKG_VERSION");
-    let resp = client.get_cli_version().await?;
-    let latest_version = &resp.version;
 
-    if current_version == latest_version {
+    if list {
+        return cmd_update_list(client, pre, current_version).await;
+    }
+
+    let target_version = if let Some(ref v) = version {
+        v.clone()
+    } else if pre {
+        let resp = client.get_cli_versions().await?;
+        match resp.versions.first() {
+            Some(v) => v.clone(),
+            None => anyhow::bail!("利用可能なバージョンがありません"),
+        }
+    } else {
+        let resp = client.get_cli_version().await?;
+        resp.version
+    };
+
+    if current_version == target_version {
         println!("すでに最新バージョンです ({})", current_version);
         return Ok(());
     }
 
-    println!("更新しています... {} → {}", current_version, latest_version);
+    if !yes {
+        if !confirm(&format!(
+            "更新しますか？ {} → {}",
+            current_version, target_version
+        ))? {
+            println!("中止しました。");
+            return Ok(());
+        }
+    }
 
-    let binary = client.download_cli_binary().await?;
+    let binary = client.download_cli_binary(Some(&target_version)).await?;
+    replace_binary(&binary)?;
+
+    println!("更新が完了しました。({})", target_version);
+    Ok(())
+}
+
+async fn cmd_update_list(
+    client: &client::CjobClient,
+    pre: bool,
+    current_version: &str,
+) -> Result<()> {
+    let resp = client.get_cli_versions().await?;
+
+    let versions: Vec<&str> = if pre {
+        resp.versions.iter().map(|s| s.as_str()).collect()
+    } else {
+        resp.versions.iter().filter(|v| !v.contains('-')).map(|s| s.as_str()).collect()
+    };
+
+    if versions.is_empty() {
+        println!("利用可能なバージョンがありません。");
+        return Ok(());
+    }
+
+    for v in &versions {
+        let mut markers = Vec::new();
+        if *v == resp.latest {
+            markers.push("latest");
+        }
+        if *v == current_version {
+            markers.push("current");
+        }
+        if markers.is_empty() {
+            println!("{}", v);
+        } else {
+            println!("{} ({})", v, markers.join(", "));
+        }
+    }
+
+    Ok(())
+}
+
+fn replace_binary(binary: &[u8]) -> Result<()> {
+    use anyhow::Context;
+    use std::os::unix::fs::PermissionsExt;
 
     let current_exe = std::env::current_exe()
         .context("実行ファイルのパスを取得できませんでした")?;
@@ -435,7 +526,7 @@ async fn cmd_update(client: &client::CjobClient) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("実行ファイルの親ディレクトリを取得できませんでした"))?
         .join(".cjob.update.tmp");
 
-    std::fs::write(&tmp_path, &binary)
+    std::fs::write(&tmp_path, binary)
         .context("一時ファイルの書き込みに失敗しました")?;
     std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o755))
         .context("実行権限の設定に失敗しました")?;
@@ -445,7 +536,6 @@ async fn cmd_update(client: &client::CjobClient) -> Result<()> {
         return Err(anyhow::anyhow!(e).context("バイナリの置き換えに失敗しました"));
     }
 
-    println!("更新が完了しました。");
     Ok(())
 }
 

@@ -121,6 +121,12 @@ pub struct CliVersionResponse {
     pub version: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct CliVersionsResponse {
+    pub versions: Vec<String>,
+    pub latest: String,
+}
+
 pub struct CjobClient {
     base_url: String,
     token: String,
@@ -298,10 +304,25 @@ impl CjobClient {
         handle_error_response(&resp.status(), resp).await
     }
 
-    pub async fn download_cli_binary(&self) -> Result<Vec<u8>> {
+    pub async fn get_cli_versions(&self) -> Result<CliVersionsResponse> {
         let resp = self
             .http
-            .get(format!("{}/v1/cli/download", self.base_url))
+            .get(format!("{}/v1/cli/versions", self.base_url))
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn download_cli_binary(&self, version: Option<&str>) -> Result<Vec<u8>> {
+        let mut url = format!("{}/v1/cli/download", self.base_url);
+        if let Some(v) = version {
+            url = format!("{}?version={}", url, v);
+        }
+        let resp = self
+            .http
+            .get(&url)
             .send()
             .await
             .context("API への接続に失敗しました")?;

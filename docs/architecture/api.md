@@ -343,11 +343,47 @@ PVC に `latest` ファイルが存在しない場合（バイナリ未配置）
 { "detail": "CLI binary not found" }
 ```
 
-## 10. GET /v1/cli/download
+## 10. GET /v1/cli/versions
 
-PVC 上に配置された最新の CLI バイナリを返す。認証不要。
+PVC 上に配置された CLI バイナリの全バージョン一覧を返す。認証不要。
 
-Submit API は PVC（`cli-binary`）の `latest` ファイルからバージョンを読み取り、`<version>/cjob` バイナリをレスポンスボディとして返す。`Content-Type: application/octet-stream` で返す。
+Submit API は PVC（`cli-binary`）のディレクトリエントリをスキャンし、利用可能なバージョンの一覧を返す。`latest` ファイルおよびディレクトリ以外のエントリは除外する。バージョンは semver 降順でソートされる（`packaging.version.Version` によるパース。パース不能なエントリは除外）。
+
+### response
+
+```json
+{
+  "versions": ["1.3.1-beta.2", "1.3.1-beta.1", "1.3.0", "1.2.0", "1.1.0"],
+  "latest": "1.3.0"
+}
+```
+
+### エラーレスポンス
+
+PVC に `latest` ファイルが存在しない場合は 404 を返す。
+
+```json
+{ "detail": "CLI binary not found" }
+```
+
+## 11. GET /v1/cli/download
+
+PVC 上に配置された CLI バイナリを返す。認証不要。
+
+### クエリパラメータ
+
+| パラメータ | 型 | 省略時の挙動 |
+|---|---|---|
+| `version` | 文字列（任意） | `latest` ファイルが指すバージョンのバイナリを返す |
+
+`version` 指定時はそのバージョンの `<version>/cjob` バイナリを返す。省略時は `latest` ファイルからバージョンを読み取る（後方互換）。
+
+`Content-Type: application/octet-stream` で返す。
+
+```
+GET /v1/cli/download
+GET /v1/cli/download?version=1.3.1-beta.1
+```
 
 ### エラーレスポンス
 

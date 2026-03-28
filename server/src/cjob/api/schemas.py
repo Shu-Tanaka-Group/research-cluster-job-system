@@ -104,3 +104,8 @@ class ResetErrorResponse(BaseModel):
 
 class CliVersionResponse(BaseModel):
     version: str
+
+
+class CliVersionsResponse(BaseModel):
+    versions: list[str]
+    latest: str
