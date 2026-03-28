@@ -3,22 +3,25 @@ use std::path::Path;
 
 use super::cli_common::{self, PVC_MOUNT_PATH};
 
-fn should_update_latest(version: &str, latest_flag: bool) -> bool {
-    latest_flag || !version.contains('-')
-}
+pub async fn run(namespace: &str, binary_path: &str, version: &str, release: bool) -> Result<()> {
+    let is_prerelease = version.contains('-');
 
-pub async fn run(namespace: &str, binary_path: &str, version: &str, latest_flag: bool) -> Result<()> {
+    if release && is_prerelease {
+        bail!(
+            "Cannot use --release with pre-release version {}. Deploy as a stable version first.",
+            version
+        );
+    }
+
     if !Path::new(binary_path).is_file() {
         bail!("Binary file not found: {}", binary_path);
     }
-
-    let update_latest = should_update_latest(version, latest_flag);
 
     println!("Deploying CLI v{} to PVC...", version);
 
     let pod_name = cli_common::create_temp_pod(namespace, "deploy").await?;
 
-    let deploy_result = deploy_binary(namespace, &pod_name, binary_path, version, update_latest).await;
+    let deploy_result = deploy_binary(namespace, &pod_name, binary_path, version, release).await;
 
     println!("  Cleaning up temporary pod...");
     cli_common::cleanup_pod(namespace, &pod_name).await;
@@ -31,7 +34,7 @@ async fn deploy_binary(
     pod_name: &str,
     binary_path: &str,
     version: &str,
-    update_latest: bool,
+    release: bool,
 ) -> Result<()> {
     // Create version directory
     println!("  Creating directory...");
@@ -56,7 +59,7 @@ async fn deploy_binary(
     ])
     .await?;
 
-    if update_latest {
+    if release {
         // Update latest file
         println!("  Updating latest version...");
         cli_common::run_kubectl(&[
@@ -87,33 +90,36 @@ async fn deploy_binary(
 mod tests {
     use super::*;
 
-    #[test]
-    fn stable_without_flag() {
-        assert!(should_update_latest("1.3.0", false));
+    // run() is async and requires kubectl, so we test the validation logic
+    // by calling run() with a non-existent binary to verify early checks.
+
+    #[tokio::test]
+    async fn release_with_prerelease_version_errors() {
+        let result = run("/tmp", "/nonexistent", "1.3.0-beta.1", true).await;
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Cannot use --release with pre-release version"));
     }
 
-    #[test]
-    fn stable_with_flag() {
-        assert!(should_update_latest("1.3.0", true));
+    #[tokio::test]
+    async fn stable_without_release_proceeds_to_binary_check() {
+        // Without --release, stable version should proceed past validation
+        // and fail at binary file check
+        let result = run("/tmp", "/nonexistent", "1.3.0", false).await;
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Binary file not found"));
     }
 
-    #[test]
-    fn prerelease_without_flag() {
-        assert!(!should_update_latest("1.3.1-beta.1", false));
+    #[tokio::test]
+    async fn prerelease_without_release_proceeds_to_binary_check() {
+        let result = run("/tmp", "/nonexistent", "1.3.0-beta.1", false).await;
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Binary file not found"));
     }
 
-    #[test]
-    fn prerelease_with_flag() {
-        assert!(should_update_latest("1.3.1-beta.1", true));
-    }
-
-    #[test]
-    fn prerelease_alpha() {
-        assert!(!should_update_latest("2.0.0-alpha", false));
-    }
-
-    #[test]
-    fn prerelease_rc() {
-        assert!(!should_update_latest("1.0.0-rc.1", false));
+    #[tokio::test]
+    async fn stable_with_release_proceeds_to_binary_check() {
+        let result = run("/tmp", "/nonexistent", "1.3.0", true).await;
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Binary file not found"));
     }
 }

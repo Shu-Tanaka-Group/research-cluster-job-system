@@ -14,6 +14,7 @@
 | `ctl/src/cmd/cli_deploy.rs` | `cjobctl cli deploy` |
 | `ctl/src/cmd/cli_list.rs` | `cjobctl cli list` |
 | `ctl/src/cmd/cli_remove.rs` | `cjobctl cli remove` |
+| `ctl/src/cmd/cli_set_latest.rs` | `cjobctl cli set-latest` |
 | `ctl/src/cmd/db_migrate.rs` | `cjobctl db migrate` |
 
 ## 1. DB 状態の確認
@@ -309,30 +310,42 @@ VERSION            LATEST
 # 1. CLI バイナリのビルド（ビルド環境の準備は build.md §3 を参照）
 cargo build --release --target x86_64-unknown-linux-musl --manifest-path cli/Cargo.toml
 
-# 2. PVC にバイナリを配置（latest が自動更新される）
+# 2. PVC にバイナリを配置（latest は更新されない）
 cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version <version>
+
+# 3. latest を更新してユーザーに公開
+cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version <version> --release
 ```
+
+`--release` を付けない場合、バイナリは PVC に配置されるが `latest` は更新されない。動作確認後に `--release` 付きで再デプロイするか、`cjobctl cli set-latest` で latest を変更する。
 
 ### 8.3 ベータ版のデプロイ
 
-ベータ版（バージョン文字列に `-` を含むもの）をデプロイすると、`latest` ファイルは更新されない。そのため、ユーザーが `cjob update` を実行しても安定版のまま維持される。
+ベータ版（バージョン文字列に `-` を含むもの）は `--release` を付けられない。latest は変更されないため、ユーザーが `cjob update` を実行しても安定版のまま維持される。
 
 ```bash
-# ベータ版をデプロイ（latest は更新されない）
 cjobctl cli deploy --binary ./cjob --version 1.3.1-beta.1
-
-# ベータ版でも latest を強制更新したい場合
-cjobctl cli deploy --binary ./cjob --version 1.3.1-beta.1 --latest
 ```
 
-### 8.4 配置後の確認
+### 8.4 latest バージョンの変更
+
+既にデプロイ済みのバージョンに対して latest を変更する。誤って latest を更新してしまった場合や、問題のあるバージョンからロールバックする場合に使用する。
+
+```bash
+# latest を 1.2.0 に変更（ロールバック）
+cjobctl cli set-latest 1.2.0
+```
+
+プレリリース版は latest に設定できない。
+
+### 8.5 配置後の確認
 
 ```bash
 # Submit API の /v1/cli/version エンドポイントで最新バージョンが返ることを確認
 kubectl exec -it -n cjob-system deploy/submit-api -- curl -s http://localhost:8080/v1/cli/version
 ```
 
-### 8.5 古いバージョンの削除
+### 8.6 古いバージョンの削除
 
 ```bash
 cjobctl cli remove 1.1.0
@@ -340,12 +353,12 @@ cjobctl cli remove 1.1.0
 
 `latest` に指定されているバージョンは削除できない。削除前に確認プロンプトが表示される。
 
-### 8.6 内部処理の詳細
+### 8.7 内部処理の詳細
 
 `cjobctl cli deploy` は以下を自動的に実行する（[cjobctl.md](architecture/cjobctl.md) §5.6 参照）。
 
 1. `kubectl run` で `cli-binary` PVC をマウントした一時 Pod（busybox）を起動
 2. `kubectl cp` でバイナリを `/cli-binary/<version>/cjob` にコピー
 3. 一時 Pod 内で `chmod +x` を実行
-4. latest ファイルの更新（安定版のみ。`--latest` オプションでプレリリース版も強制更新可能）
+4. `--release` 指定時のみ latest ファイルを更新
 5. 一時 Pod を削除

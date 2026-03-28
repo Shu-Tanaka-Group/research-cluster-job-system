@@ -139,8 +139,9 @@ GPU:    4
 | コマンド | 概要 | 対象 |
 |---|---|---|
 | `cjobctl cli list` | PVC 上の登録済みバージョン一覧を表示する | K8s Pod + PVC |
-| `cjobctl cli deploy --binary <path> --version <version> [--latest]` | CLI バイナリを PVC に配置する | K8s Pod + PVC |
+| `cjobctl cli deploy --binary <path> --version <version> [--release]` | CLI バイナリを PVC に配置する | K8s Pod + PVC |
 | `cjobctl cli remove <version>` | PVC 上の指定バージョンのバイナリを削除する | K8s Pod + PVC |
+| `cjobctl cli set-latest <version>` | latest バージョンポインタを変更する | K8s Pod + PVC |
 
 すべてのサブコマンドは一時 Pod（busybox）+ `kubectl exec` のパターンで PVC を操作する。一時 Pod には最小イメージ（`busybox`）を使用し、PVC の `cli-binary` を `/cli-binary` にマウントする。
 
@@ -172,27 +173,51 @@ VERSION            LATEST
 1. `kubectl run` で `cli-binary` PVC（ReadWriteMany）をマウントした一時 Pod を起動する
 2. `kubectl cp` でバイナリを一時 Pod 内の `/cli-binary/<version>/cjob` にコピーする
 3. 一時 Pod 内で `chmod +x` を実行する
-4. latest ファイルの更新:
-   - **安定版**（バージョン文字列に `-` を含まない）: `latest` ファイルを更新する
-   - **プレリリース版**（バージョン文字列に `-` を含む）: `latest` ファイルを更新しない
-   - `--latest` オプション指定時: プレリリース版でも `latest` ファイルを強制更新する
+4. `--release` オプション指定時のみ `latest` ファイルを更新する
 5. 一時 Pod を削除する
 
+`--release` はプレリリース版（バージョン文字列に `-` を含むもの）との併用不可。プレリリース判定はバージョン文字列に `-` を含むかどうかで行う。
+
 ```bash
-# 安定版: latest が自動更新される
+# バイナリを配置するのみ（latest は更新されない）
 $ cjobctl cli deploy --binary ./cjob --version 1.3.0
-Deployed 1.3.0 (latest updated)
+Deployed v1.3.0 (latest unchanged: 1.2.0)
 
-# ベータ版: latest は更新されない
+# バイナリ配置 + latest を更新
+$ cjobctl cli deploy --binary ./cjob --version 1.3.0 --release
+Deployed v1.3.0 (latest updated)
+
+# ベータ版の配置（--release は使用不可）
 $ cjobctl cli deploy --binary ./cjob --version 1.3.1-beta.1
-Deployed 1.3.1-beta.1 (latest unchanged: 1.3.0)
+Deployed v1.3.1-beta.1 (latest unchanged: 1.3.0)
 
-# ベータ版でも latest を強制更新
-$ cjobctl cli deploy --binary ./cjob --version 1.3.1-beta.1 --latest
-Deployed 1.3.1-beta.1 (latest updated)
+$ cjobctl cli deploy --binary ./cjob --version 1.3.1-beta.1 --release
+Error: Cannot use --release with pre-release version 1.3.1-beta.1.
 ```
 
-プレリリース判定はバージョン文字列に `-` を含むかどうかで行う。
+#### `cjobctl cli set-latest`
+
+PVC 上の `latest` ファイルを指定バージョンに変更する。バイナリの配置は行わない。誤って latest を更新してしまった場合や、問題のあるバージョンからロールバックする場合に使用する。
+
+```bash
+# latest を 1.2.0 に変更
+$ cjobctl cli set-latest 1.2.0
+Latest updated to v1.2.0.
+
+# 存在しないバージョンはエラー
+$ cjobctl cli set-latest 9.9.9
+Error: Version 9.9.9 not found on PVC. Deploy it first.
+
+# プレリリース版は指定不可
+$ cjobctl cli set-latest 1.3.0-beta.1
+Error: Cannot set pre-release version 1.3.0-beta.1 as latest.
+```
+
+内部処理:
+1. 一時 Pod を起動する
+2. 指定バージョンのディレクトリが存在するか確認する
+3. `echo "<version>" > /cli-binary/latest` で latest ファイルを更新する
+4. 一時 Pod を削除する
 
 #### `cjobctl cli remove`
 
@@ -252,6 +277,7 @@ ctl/
         ├── cli_deploy.rs  # cli deploy (ベータ版サポート含む)
         ├── cli_list.rs    # cli list
         ├── cli_remove.rs  # cli remove
+        ├── cli_set_latest.rs # cli set-latest
         ├── db_migrate.rs  # db migrate
         ├── status.rs      # K8s Pod 状態
         ├── logs.rs        # K8s コンポーネントログ

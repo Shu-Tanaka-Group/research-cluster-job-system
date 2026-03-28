@@ -45,8 +45,9 @@ cargo test
 | `src/main.rs` | `parse_duration` | 9 | 時間指定のパース（秒数 / s / m / h / d サフィックス / 空白 / 不正値 / オーバーフロー） |
 | `src/display.rs` | `format_duration` / `format_time_limit` | 9 | 時間表示フォーマット（日 / 時間 / 分）/ RUNNING 時の残り時間計算 / 非 RUNNING / 不正日付のフォールバック |
 | **Rust (cjobctl)** | | | |
-| `src/cmd/cli_deploy.rs` | `should_update_latest` | 6 | latest 更新判定。安定版 / プレリリース（beta / alpha / rc）× flag 有無 |
+| `src/cmd/cli_deploy.rs` | `run`（バリデーション） | 4 | --release + プレリリースのエラー / 安定版・プレリリース × release フラグのバリデーション順序 |
 | `src/cmd/cli_list.rs` | `parse_versions` / `sort_versions` | 9 | ls 出力パース（latest 除外 / 空入力 / パース不能エントリ）/ ソート（降順 / プレリリース優先 / 設計書出力例の再現） |
+| `src/cmd/cli_set_latest.rs` | `run`（バリデーション） | 2 | プレリリース版の拒否（beta / rc） |
 
 **合計: Python 142 + Rust 40 = 182 テスト**
 

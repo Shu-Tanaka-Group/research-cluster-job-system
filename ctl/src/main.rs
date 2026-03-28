@@ -195,13 +195,18 @@ enum CliCommands {
         /// Version string (e.g. 1.2.0, 1.3.0-beta.1)
         #[arg(long)]
         version: String,
-        /// Force update latest even for pre-release versions
+        /// Update latest to this version (not allowed for pre-release versions)
         #[arg(long)]
-        latest: bool,
+        release: bool,
     },
     /// Remove a deployed CLI version from PVC
     Remove {
         /// Version to remove (e.g. 1.1.0)
+        version: String,
+    },
+    /// Change the latest version pointer
+    SetLatest {
+        /// Version to set as latest (must already be deployed)
         version: String,
     },
 }
@@ -338,11 +343,14 @@ async fn main() -> Result<()> {
                 CliCommands::List => {
                     cmd::cli_list::run(config.system_namespace()).await
                 }
-                CliCommands::Deploy { binary, version, latest } => {
-                    cmd::cli_deploy::run(config.system_namespace(), &binary, &version, latest).await
+                CliCommands::Deploy { binary, version, release } => {
+                    cmd::cli_deploy::run(config.system_namespace(), &binary, &version, release).await
                 }
                 CliCommands::Remove { version } => {
                     cmd::cli_remove::run(config.system_namespace(), &version).await
+                }
+                CliCommands::SetLatest { version } => {
+                    cmd::cli_set_latest::run(config.system_namespace(), &version).await
                 }
             }
         }
