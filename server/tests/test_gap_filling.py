@@ -5,12 +5,12 @@ from cjob.dispatcher.scheduler import apply_gap_filling
 from cjob.models import Job
 
 
-def _make_job(namespace, job_id, time_limit_seconds=86400):
+def _make_job(namespace, job_id, user="alice", time_limit_seconds=86400):
     """Build a minimal Job object for filtering tests."""
     return Job(
         namespace=namespace,
         job_id=job_id,
-        user=namespace.removeprefix("user-"),
+        user=user,
         image="test:1.0",
         command="python main.py",
         cwd="/home/jovyan",
@@ -32,8 +32,8 @@ def _make_settings(enabled=True, threshold=300):
     )
 
 
-NS = "user-alice"
-NS2 = "user-bob"
+NS = "alice"
+NS2 = "bob"
 
 
 @patch("cjob.dispatcher.scheduler.estimate_shortest_remaining")
@@ -110,7 +110,7 @@ class TestApplyGapFilling:
         candidates = [
             _make_job(NS, 1, time_limit_seconds=3600),    # NS: held (3600 > 1800)
             _make_job(NS, 2, time_limit_seconds=900),     # NS: fits
-            _make_job(NS2, 1, time_limit_seconds=86400),  # NS2: unaffected
+            _make_job(NS2, 1, user="bob", time_limit_seconds=86400),  # NS2: unaffected
         ]
 
         result = apply_gap_filling(db_session, candidates, settings)
@@ -142,7 +142,7 @@ class TestApplyGapFilling:
         mock_stalled.return_value = [stalled_job]
 
         # Only NS2 has candidates
-        candidates = [_make_job(NS2, 1)]
+        candidates = [_make_job(NS2, 1, user="bob")]
 
         result = apply_gap_filling(db_session, candidates, settings)
 

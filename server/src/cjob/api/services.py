@@ -45,7 +45,7 @@ def allocate_job_id(session: Session, namespace: str) -> int:
 
 
 def submit_job(
-    session: Session, namespace: str, req: JobSubmitRequest
+    session: Session, namespace: str, username: str, req: JobSubmitRequest
 ) -> JobSubmitResponse:
     settings = get_settings()
 
@@ -136,8 +136,7 @@ def submit_job(
             detail="time_limit_seconds は 1 以上で指定してください",
         )
 
-    # Extract username from namespace
-    user = namespace.removeprefix(settings.JOB_NAMESPACE_PREFIX)
+    user = username
 
     # Allocate job_id
     job_id = allocate_job_id(session, namespace)

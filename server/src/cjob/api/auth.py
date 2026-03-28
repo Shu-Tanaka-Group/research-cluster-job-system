@@ -1,9 +1,18 @@
 import logging
+from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Request
 from kubernetes import client as k8s_client
 
 logger = logging.getLogger(__name__)
+
+USERNAME_ANNOTATION = "cjob.io/username"
+
+
+@dataclass
+class UserInfo:
+    namespace: str
+    username: str
 
 
 def extract_bearer(request: Request) -> str:
@@ -45,3 +54,28 @@ def verify_token(token: str = Depends(extract_bearer)) -> str:
 
 def get_namespace(namespace: str = Depends(verify_token)) -> str:
     return namespace
+
+
+def get_user_info(token: str = Depends(extract_bearer)) -> UserInfo:
+    """Verify token and resolve username from namespace annotation.
+
+    Returns UserInfo with namespace and username.
+    """
+    namespace = verify_token(token)
+
+    core_v1 = k8s_client.CoreV1Api()
+    try:
+        ns_obj = core_v1.read_namespace(name=namespace)
+    except Exception:
+        logger.exception("Failed to read namespace %s", namespace)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    annotations = ns_obj.metadata.annotations or {}
+    username = annotations.get(USERNAME_ANNOTATION)
+    if not username:
+        raise HTTPException(
+            status_code=403,
+            detail="Namespace is not configured as a CJob user namespace",
+        )
+
+    return UserInfo(namespace=namespace, username=username)

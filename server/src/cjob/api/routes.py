@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from cjob.config import get_settings
 from cjob.db import get_session
 
-from .auth import get_namespace
+from .auth import UserInfo, get_namespace, get_user_info
 from .schemas import (
     CancelRequest,
     CancelResponse,
@@ -90,10 +90,10 @@ def download_cli_binary(version: str | None = Query(default=None)):
 @router.post("/jobs", response_model=JobSubmitResponse, status_code=201)
 def post_job(
     req: JobSubmitRequest,
-    namespace: str = Depends(get_namespace),
+    user_info: UserInfo = Depends(get_user_info),
     session: Session = Depends(get_session),
 ):
-    return submit_job(session, namespace, req)
+    return submit_job(session, user_info.namespace, user_info.username, req)
 
 
 @router.get("/jobs", response_model=JobListResponse)

@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     JOB_NODE_TAINT: str = "role=computing:NoSchedule"
 
     # Namespace
-    JOB_NAMESPACE_PREFIX: str = "user-"
+    USER_NAMESPACE_LABEL: str = "type=user"
 
     # Paths
     WORKSPACE_MOUNT_PATH: str = "/home/jovyan"
