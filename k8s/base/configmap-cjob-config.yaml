@@ -28,3 +28,4 @@ data:
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
   CLI_BINARY_DIR: /cli-binary
+  JOB_NODE_TAINT: "role=computing:NoSchedule"

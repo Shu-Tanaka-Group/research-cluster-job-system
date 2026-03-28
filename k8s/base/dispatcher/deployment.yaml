@@ -108,6 +108,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: LOG_BASE_DIR
+            - name: JOB_NODE_TAINT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: JOB_NODE_TAINT
           resources:
             requests:
               cpu: "100m"
