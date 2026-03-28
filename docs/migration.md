@@ -71,6 +71,17 @@ docker push yusekiya/cjob-dispatcher:${VERSION}
 docker push yusekiya/cjob-watcher:${VERSION}
 ```
 
+サーバーコンポーネントに変更がない場合は、タグを付け替えてpushする。
+
+
+```bash
+read -r VERSION < VERSION
+
+# Submit APIの例．他のコンポーネントも同様
+docker tag yusekiya/cjob-submit-api:#{OLD_VERSION} yusekiya/cjob-submit-api:#{VERSION}
+docker push yusekiya/cjob-submit-api:#{VERSION}
+```
+
 ## Step 4: コンポーネントの再デプロイ
 
 イメージまたは Deployment YAML に変更があるコンポーネントのみ再デプロイする。
