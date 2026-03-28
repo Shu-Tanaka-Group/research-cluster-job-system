@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+images:
+  - name: cjob-submit-api
+    newName: yusekiya/cjob-submit-api
+    newTag: "1.2.0"
+  - name: cjob-dispatcher
+    newName: yusekiya/cjob-dispatcher
+    newTag: "1.2.0"
+  - name: cjob-watcher
+    newName: yusekiya/cjob-watcher
+    newTag: "1.2.0"
+
+patches:
+  - patch: |
+      - op: replace
+        path: /spec/storageClassName
+        value: managed-nfs-storage
+    target:
+      kind: PersistentVolumeClaim
+      name: cli-binary
+  - patch: |
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: managed-nfs-storage
+    target:
+      kind: StatefulSet
+      name: postgres

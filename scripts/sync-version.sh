@@ -67,8 +67,8 @@ if [ -f "$CARGO_CTL" ]; then
     fi
 fi
 
-# Update k8s/base/kustomization.yaml image tags
-KUSTOMIZATION="$REPO_ROOT/k8s/base/kustomization.yaml"
+# Update k8s/overlays/stg/kustomization.yaml image tags
+KUSTOMIZATION="$REPO_ROOT/k8s/overlays/stg/kustomization.yaml"
 if [ -f "$KUSTOMIZATION" ]; then
     current=$(grep -m1 'newTag:' "$KUSTOMIZATION" | sed 's/.*newTag: *"\(.*\)"/\1/')
     if [ "$current" != "$VERSION" ]; then

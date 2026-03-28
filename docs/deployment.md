@@ -6,26 +6,35 @@
 
 ### マニフェスト管理
 
-K8s マニフェストは `k8s/base/` に配置し、Kustomize で管理する。`kubectl apply -k` でローカルディレクトリまたは GitHub リポジトリの URL を指定してデプロイできる。
+K8s マニフェストは Kustomize の base / overlay 構成で管理する。
+
+```
+k8s/
+  base/          # 環境非依存のマニフェスト（リポジトリで管理）
+  overlays/
+    stg/         # stg 環境の overlay（image 名・タグ、StorageClass を指定）
+```
+
+デプロイは overlay を指定して行う。
 
 ```bash
 # ローカルから
-kubectl apply -k k8s/base/
+kubectl apply -k k8s/overlays/stg/
 
 # GitHub リポジトリから（タグ指定）
-kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/base?ref=1.2.0'
+kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/overlays/stg?ref=1.2.0'
 ```
 
-以下のリソースは環境依存のためKustomize の管理対象外とし、管理者が手動で作成・管理する。テンプレートは `k8s/base/` 内のファイルを参照。
+以下のリソースは環境依存のため Kustomize の管理対象外とし、管理者が手動で作成・管理する。テンプレートは `k8s/base/` 内のファイルを参照。
 
 | リソース | テンプレート | 管理対象外の理由 |
 |---|---|---|
 | Secret `postgres-secret` | `k8s/base/secret-postgres.yaml` | 機密情報を含むため |
 | ConfigMap `cjob-config` | `k8s/base/configmap-cjob-config.yaml` | クラスタごとにチューニングした値を保持するため |
 
-以下の環境依存値は `k8s/base/kustomization.yaml` で一元管理する。
+以下の環境依存値は overlay（`k8s/overlays/stg/kustomization.yaml`）で管理する。
 
-| 設定項目 | kustomization.yaml の設定箇所 | デフォルト値 |
+| 設定項目 | kustomization.yaml の設定箇所 | stg 環境の値 |
 |---|---|---|
 | image 名 | `images[].newName` | `yusekiya/cjob-submit-api` 等 |
 | image タグ | `images[].newTag` | VERSION ファイルと同期（`scripts/sync-version.sh`） |
@@ -1077,7 +1086,7 @@ docker push yusekiya/cjob-watcher:${VERSION}
 
 # 3. Kustomize で全リソースをデプロイ
 # （namespace / postgres-schema ConfigMap / RBAC / PVC / PostgreSQL / Submit API / Dispatcher / Watcher / NetworkPolicy）
-kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/base?ref=<VERSION>'
+kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/overlays/stg?ref=<VERSION>'
 
 # DB スキーマの初期化:
 # postgres-schema ConfigMap の schema.sql が /docker-entrypoint-initdb.d/ にマウントされ、

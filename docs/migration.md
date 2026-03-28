@@ -15,7 +15,7 @@
 Kustomize で管理されているリソース（RBAC / Deployment / postgres-schema ConfigMap 等）を一括で更新する。変更の有無は `git diff <old-tag>...<new-tag> -- k8s/` で確認できる。
 
 ```bash
-kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/base?ref=<VERSION>'
+kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/overlays/stg?ref=<VERSION>'
 ```
 
 これにより、RBAC の権限変更、Deployment の image タグ更新（Step 3・4 に相当）が一括で適用される。Deployment に変更がある場合は自動的にローリングアップデートが行われる。
