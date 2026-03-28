@@ -212,6 +212,24 @@ log_dir:      /home/jovyan/.cjob/logs/2
 
 `time_limit` は `time_limit_seconds` を人間が読みやすい形式で表示する。ジョブが RUNNING の場合は残り時間も併記する。
 
+`last_error` はジョブが FAILED の場合にエラー理由を表示する。値が `null` の場合は行自体を表示しない。
+
+```
+$ cjob status 5
+job_id:        5
+status:        FAILED
+command:       echo hello
+cwd:           /home/jovyan
+time_limit:    1m
+created_at:    2026-03-23 13:00:00
+dispatched_at: -
+started_at:    -
+finished_at:   2026-03-23 13:00:01
+k8s_job_name:  -
+log_dir:       /home/jovyan/.cjob/logs/5
+last_error:    K8s API permanent error 403: admission webhook "validate-image.kyverno.io" denied the request
+```
+
 存在しない job_id を指定した場合はエラーメッセージを表示して終了する。
 
 ```
