@@ -42,7 +42,7 @@ impl Config {
         self.kubernetes
             .as_ref()
             .and_then(|k| k.user_namespace_label.as_deref())
-            .unwrap_or("type=user")
+            .unwrap_or("cjob.io/user-namespace=true")
     }
 
     fn config_path() -> Result<PathBuf> {

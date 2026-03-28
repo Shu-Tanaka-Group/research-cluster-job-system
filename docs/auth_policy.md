@@ -32,7 +32,7 @@ security through obscurity であり、採用しない。
 ## 2. 前提
 
 - 各ユーザーは独立した namespace（例: `alice`）を持つ
-- ユーザー namespace にはラベル `USER_NAMESPACE_LABEL`（デフォルト: `type=user`）とアノテーション `cjob.io/username` を付与する
+- ユーザー namespace にはラベル `cjob.io/user-namespace=true` とアノテーション `cjob.io/username` を付与する
 - User Pod は JupyterHub + KubeSpawner で作成される
 - JupyterHub Pod 作成時に Keycloak による認証が完了している
 - CLI を実行できるのは JupyterHub の User Pod からのみである
@@ -116,7 +116,7 @@ roleRef:
 kubectl create namespace ${NS_NAME}
 
 # ラベル・アノテーション付与
-kubectl label namespace ${NS_NAME} type=user
+kubectl label namespace ${NS_NAME} cjob.io/user-namespace=true
 kubectl annotate namespace ${NS_NAME} cjob.io/username=${USERNAME}
 
 # ServiceAccount 作成
@@ -146,7 +146,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              type: user  # USER_NAMESPACE_LABEL で設定可能（デフォルト: type=user）
+              cjob.io/user-namespace: "true"
       ports:
         - protocol: TCP
           port: 8080

@@ -178,7 +178,7 @@ cjobctl weight reset user-alice
 
 ### 特定ユーザーにクラスタを専有させる場合
 
-K8s の namespace ラベル（`USER_NAMESPACE_LABEL`、デフォルト: `type=user`）を元に、専有ユーザー以外の全 namespace を weight = 0（dispatch 禁止）に設定する。
+K8s の namespace ラベル（`cjob.io/user-namespace=true`）を元に、専有ユーザー以外の全 namespace を weight = 0（dispatch 禁止）に設定する。
 
 ```bash
 # user-alice にクラスタを専有させる
@@ -202,13 +202,13 @@ cjobctl usage reset --all
 
 ## 5. ユーザーのアクセス制御
 
-namespace のラベル（デフォルト: `type=user`）の有無でジョブ投入の可否を制御する。このラベルは NetworkPolicy で参照されており、ラベルがない namespace からは Submit API への通信がブロックされる。
+namespace のラベル `cjob.io/user-namespace=true` の有無でジョブ投入の可否を制御する。このラベルは NetworkPolicy で参照されており、ラベルがない namespace からは Submit API への通信がブロックされる。
 
 ### 5.1 ユーザーのアクセスを停止する
 
 ```bash
 # ラベルを削除してジョブ投入を停止
-kubectl label namespace <namespace> type-
+kubectl label namespace <namespace> cjob.io/user-namespace-
 
 # 必要に応じて実行中のジョブをキャンセル
 cjobctl jobs cancel --namespace <namespace> --all
@@ -219,7 +219,7 @@ cjobctl jobs cancel --namespace <namespace> --all
 ### 5.2 ユーザーのアクセスを再開する
 
 ```bash
-kubectl label namespace <namespace> type=user
+kubectl label namespace <namespace> cjob.io/user-namespace=true
 ```
 
 ## 6. DB スキーマの更新

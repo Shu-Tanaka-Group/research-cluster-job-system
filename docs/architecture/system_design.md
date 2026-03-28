@@ -154,7 +154,7 @@ cjob-system        : Submit API / Dispatcher / Watcher / PostgreSQL
 ```
 
 ユーザー namespace は任意の名前を使用できる（例: `user-alice`, `lab-physics`）。
-識別はラベル `USER_NAMESPACE_LABEL`（デフォルト: `type=user`）で行い、ユーザー名は namespace のアノテーション `cjob.io/username` から取得する。
+識別はラベル `cjob.io/user-namespace=true` で行い、ユーザー名は namespace のアノテーション `cjob.io/username` から取得する。
 
 ### 3.3 主要コンポーネント
 

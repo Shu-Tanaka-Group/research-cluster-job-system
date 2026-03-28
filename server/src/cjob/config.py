@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     JOB_NODE_TAINT: str = "role=computing:NoSchedule"
 
     # Namespace
-    USER_NAMESPACE_LABEL: str = "type=user"
+    USER_NAMESPACE_LABEL: str = "cjob.io/user-namespace=true"
 
     # Paths
     WORKSPACE_MOUNT_PATH: str = "/home/jovyan"

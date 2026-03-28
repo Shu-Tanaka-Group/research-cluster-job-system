@@ -48,7 +48,7 @@ cjob-system        : システムコンポーネント全体（Submit API / Disp
 ```
 
 ユーザー namespace は任意の名前を使用できる（例: `alice`, `user-alice`, `lab-physics`）。
-識別はラベル `USER_NAMESPACE_LABEL`（デフォルト: `type=user`）で行い、ユーザー名は namespace のアノテーション `cjob.io/username` から取得する。
+識別はラベル `cjob.io/user-namespace=true` で行い、ユーザー名は namespace のアノテーション `cjob.io/username` から取得する。
 
 ---
 
@@ -167,7 +167,7 @@ data:
   DEFAULT_TIME_LIMIT_SECONDS: "86400"
   MAX_TIME_LIMIT_SECONDS: "604800"
   KUEUE_LOCAL_QUEUE_NAME: default
-  USER_NAMESPACE_LABEL: type=user
+  USER_NAMESPACE_LABEL: cjob.io/user-namespace=true
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
   CLI_BINARY_DIR: /cli-binary
@@ -377,7 +377,7 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              type: user  # USER_NAMESPACE_LABEL で設定可能
+              cjob.io/user-namespace: "true"
       ports:
         - protocol: TCP
           port: 8080
@@ -407,7 +407,7 @@ echo "Creating namespace and resources: ns=${NS_NAME}, user=${USERNAME}"
 kubectl create namespace ${NS_NAME}
 
 # ユーザー namespace 識別ラベルとユーザー名アノテーションを付与
-kubectl label namespace ${NS_NAME} type=user
+kubectl label namespace ${NS_NAME} cjob.io/user-namespace=true
 kubectl annotate namespace ${NS_NAME} cjob.io/username=${USERNAME}
 
 # User Pod 用 ServiceAccount 作成
@@ -980,7 +980,7 @@ helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --v
 ### 14.2 ClusterPolicy の適用
 
 `yusekiya/stg-*` から始まるイメージのみを許可する。
-ユーザー namespace（`type: user` ラベル付き）内の Job だけが対象であり、
+ユーザー namespace（`cjob.io/user-namespace: "true"` ラベル付き）内の Job だけが対象であり、
 `cjob-system` namespace のシステムコンポーネントには影響しない。
 
 ```yaml
@@ -997,7 +997,7 @@ spec:
           kinds: ["Job"]
           namespaceSelector:
             matchLabels:
-              type: user
+              cjob.io/user-namespace: "true"
       validate:
         message: "許可されていないイメージです。yusekiya/stg-* のイメージのみ使用できます。"
         pattern:
