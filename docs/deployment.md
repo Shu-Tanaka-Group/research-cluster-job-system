@@ -170,7 +170,6 @@ data:
   USER_NAMESPACE_LABEL: cjob.io/user-namespace=true
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
-  CLI_BINARY_DIR: /cli-binary
   JOB_NODE_TAINT: "role=computing:NoSchedule"
 ```
 
@@ -716,11 +715,6 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: MAX_TIME_LIMIT_SECONDS
-            - name: CLI_BINARY_DIR
-              valueFrom:
-                configMapKeyRef:
-                  name: cjob-config
-                  key: CLI_BINARY_DIR
           resources:
             requests:
               cpu: "100m"
