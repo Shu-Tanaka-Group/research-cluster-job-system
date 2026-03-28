@@ -234,7 +234,7 @@ cjobctl db migrate
 
 ### 7.1 ノードラベル・taint の付与
 
-新しいノードには以下のラベルと taint を付与する。
+新しいノードには以下のラベルと taint を付与する。taint の値は ConfigMap `cjob-config` の `JOB_NODE_TAINT` に合わせること（デフォルト: `role=computing:NoSchedule`）。
 
 ```bash
 kubectl label node <node-name> cluster-job=true
@@ -244,7 +244,7 @@ kubectl taint node <node-name> role=computing:NoSchedule
 ラベル `cluster-job=true` は ConfigMap `cjob-config` の `NODE_LABEL_SELECTOR` で指定された値と一致している必要がある。値を変更している場合は、ConfigMap の設定に合わせること。
 
 ```bash
-# 現在の NODE_LABEL_SELECTOR を確認
+# 現在の設定を確認（NODE_LABEL_SELECTOR と JOB_NODE_TAINT）
 cjobctl config show
 ```
 
@@ -255,7 +255,7 @@ cjobctl config show
 | Kueue ResourceFlavor（`nodeLabels`） | Job Pod をラベル付きノードにのみスケジュールする |
 | Watcher（`NODE_LABEL_SELECTOR`） | ラベル付きノードの allocatable リソースを DB に同期する |
 
-taint `role=computing:NoSchedule` は、ジョブ以外の Pod が計算ノードにスケジュールされることを防ぐ。
+taint はジョブ以外の Pod が計算ノードにスケジュールされることを防ぐ。ConfigMap `JOB_NODE_TAINT`・Kueue ResourceFlavor の `nodeTaints`・ノードの Taint の 3 箇所は同じ値に統一する必要がある。`JOB_NODE_TAINT` が空文字列の場合は taint を付与しない。
 
 ### 7.2 リソース情報の反映確認
 
