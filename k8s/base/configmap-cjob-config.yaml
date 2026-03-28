@@ -1,3 +1,10 @@
+# このファイルは ConfigMap の構造とデフォルト値を示すテンプレートである。
+# kustomization.yaml の resources には含めない。
+# 管理者が初回セットアップ時に環境に合わせて値を調整し、手動で適用すること:
+#
+#   kubectl apply -f configmap-cjob-config.yaml
+#
+# バージョンアップで新しいキーが追加された場合は migration.md の手順に従い個別に追記する。
 apiVersion: v1
 kind: ConfigMap
 metadata:

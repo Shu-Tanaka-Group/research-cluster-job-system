@@ -16,7 +16,12 @@ kubectl apply -k k8s/base/
 kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/base?ref=v1.2.0'
 ```
 
-Secret（`postgres-secret`）は Kustomize の管理対象外とし、管理者が手動で作成する。テンプレートは `k8s/base/secret-postgres.yaml` を参照。
+以下のリソースは環境依存のためKustomize の管理対象外とし、管理者が手動で作成・管理する。テンプレートは `k8s/base/` 内のファイルを参照。
+
+| リソース | テンプレート | 管理対象外の理由 |
+|---|---|---|
+| Secret `postgres-secret` | `k8s/base/secret-postgres.yaml` | 機密情報を含むため |
+| ConfigMap `cjob-config` | `k8s/base/configmap-cjob-config.yaml` | クラスタごとにチューニングした値を保持するため |
 
 以下の環境依存値は `k8s/base/kustomization.yaml` で一元管理する。
 
@@ -1049,12 +1054,16 @@ kubectl describe node <node-name> | grep -A5 Taints
 新規クラスタへの初回セットアップ手順。§16 の計算ノード準備が完了していることが前提。
 
 ```bash
-# 1. Secret の作成（Kustomize 管理外のため手動で作成する）
+# 1. Secret と ConfigMap の作成（Kustomize 管理外のため手動で作成する）
 kubectl create namespace cjob-system
 kubectl create secret generic postgres-secret -n cjob-system \
   --from-literal=POSTGRES_USER=cjob \
   --from-literal=POSTGRES_PASSWORD='<password>' \
   --from-literal=POSTGRES_DB=cjob
+
+# ConfigMap はテンプレートの値を環境に合わせて調整してから適用する
+# テンプレート: k8s/base/configmap-cjob-config.yaml
+kubectl apply -f k8s/base/configmap-cjob-config.yaml
 
 # 2. システムコンポーネント image のビルドと push
 read -r VERSION < VERSION
@@ -1067,7 +1076,7 @@ docker push yusekiya/cjob-watcher:${VERSION}
 # Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
 
 # 3. Kustomize で全リソースをデプロイ
-# （namespace / ConfigMap / RBAC / PVC / PostgreSQL / Submit API / Dispatcher / Watcher / NetworkPolicy）
+# （namespace / postgres-schema ConfigMap / RBAC / PVC / PostgreSQL / Submit API / Dispatcher / Watcher / NetworkPolicy）
 kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/base?ref=v<VERSION>'
 
 # DB スキーマの初期化:

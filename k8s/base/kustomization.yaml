@@ -3,7 +3,6 @@ kind: Kustomization
 
 resources:
   - namespace.yaml
-  - configmap-cjob-config.yaml
   - configmap-postgres-schema.yaml
   - pvc-cli-binary.yaml
   - rbac-submit-api.yaml
