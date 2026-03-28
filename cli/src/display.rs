@@ -7,12 +7,23 @@ pub fn print_job_table(jobs: &[JobSummary]) {
     }
 
     println!(
-        "{:<8} {:<12} {:<40} {:<20} {}",
-        "JOB_ID", "STATUS", "COMMAND", "CREATED", "FINISHED"
+        "{:<8} {:<6} {:<12} {:<12} {:<36} {:<20} {}",
+        "JOB_ID", "TYPE", "STATUS", "PROGRESS", "COMMAND", "CREATED", "FINISHED"
     );
     for job in jobs {
-        let command_display = if job.command.len() > 40 {
-            format!("{}...", &job.command[..37])
+        let job_type = if job.completions.is_some() { "sweep" } else { "job" };
+        let progress = match (job.completions, job.succeeded_count, job.failed_count) {
+            (Some(total), Some(succ), Some(fail)) => {
+                if fail > 0 {
+                    format!("{}/{}/{}", succ, fail, total)
+                } else {
+                    format!("{}/{}", succ, total)
+                }
+            }
+            _ => "-".to_string(),
+        };
+        let command_display = if job.command.len() > 36 {
+            format!("{}...", &job.command[..33])
         } else {
             job.command.clone()
         };
@@ -28,8 +39,8 @@ pub fn print_job_table(jobs: &[JobSummary]) {
             None => "-",
         };
         println!(
-            "{:<8} {:<12} {:<40} {:<20} {}",
-            job.job_id, job.status, command_display, created, finished
+            "{:<8} {:<6} {:<12} {:<12} {:<36} {:<20} {}",
+            job.job_id, job_type, job.status, progress, command_display, created, finished
         );
     }
 }
@@ -66,10 +77,27 @@ fn format_time_limit(job: &JobDetailResponse) -> String {
 }
 
 pub fn print_job_detail(job: &JobDetailResponse) {
+    let is_sweep = job.completions.is_some();
+
     println!("job_id:        {}", job.job_id);
+    if is_sweep {
+        println!("type:          sweep");
+    }
     println!("status:        {}", job.status);
     println!("command:       {}", job.command);
     println!("cwd:           {}", job.cwd);
+    if let (Some(completions), Some(parallelism)) = (job.completions, job.parallelism) {
+        println!("completions:   {}", completions);
+        println!("parallelism:   {}", parallelism);
+        if let (Some(succ), Some(fail)) = (job.succeeded_count, job.failed_count) {
+            println!("progress:      {}/{}/{} (succeeded/failed/total)", succ, fail, completions);
+        }
+        if let Some(ref fi) = job.failed_indexes {
+            if !fi.is_empty() {
+                println!("failed_indexes: {}", fi);
+            }
+        }
+    }
     println!("time_limit:    {}", format_time_limit(job));
     println!(
         "created_at:    {}",
@@ -141,6 +169,12 @@ mod tests {
             started_at: started_at.map(|s| s.to_string()),
             finished_at: None,
             last_error: None,
+            completions: None,
+            parallelism: None,
+            succeeded_count: None,
+            failed_count: None,
+            completed_indexes: None,
+            failed_indexes: None,
         }
     }
 
@@ -187,5 +221,37 @@ mod tests {
         let job = make_job("RUNNING", 3600, Some("not-a-date"));
         // Invalid date should fall back to just the limit string
         assert_eq!(format_time_limit(&job), "1h 0m");
+    }
+
+    fn make_sweep_job() -> JobDetailResponse {
+        JobDetailResponse {
+            job_id: 3,
+            status: "RUNNING".to_string(),
+            namespace: "user-test".to_string(),
+            command: "python main.py --trial $CJOB_INDEX".to_string(),
+            cwd: "/home/jovyan/project-a".to_string(),
+            time_limit_seconds: 21600,
+            k8s_job_name: Some("cjob-test-3".to_string()),
+            log_dir: Some("/home/jovyan/.cjob/logs/3".to_string()),
+            created_at: "2026-03-23T12:35:00Z".to_string(),
+            dispatched_at: Some("2026-03-23T12:35:05Z".to_string()),
+            started_at: Some("2020-01-01T00:00:00Z".to_string()),
+            finished_at: None,
+            last_error: None,
+            completions: Some(100),
+            parallelism: Some(10),
+            succeeded_count: Some(48),
+            failed_count: Some(2),
+            completed_indexes: Some("0-47".to_string()),
+            failed_indexes: Some("12,37".to_string()),
+        }
+    }
+
+    #[test]
+    fn test_format_sweep_time_limit() {
+        let job = make_sweep_job();
+        let result = format_time_limit(&job);
+        assert!(result.contains("6h 0m"));
+        assert!(result.contains("残り"));
     }
 }
