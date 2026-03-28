@@ -10,7 +10,7 @@
 #   4. デプロイする
 #      kubectl apply -k /path/to/my-overlay
 #
-# ��ージョンアップ時:
+# バージョンアップ時:
 #   1. リポジトリを git pull して新しいバージョンに checkout する
 #   2. overlay の newTag を新バージョンに更新する
 #   3. kubectl apply -k /path/to/my-overlay を再実行する
@@ -22,7 +22,7 @@ kind: Kustomization
 
 # リポジトリ内の base へのパスを指定する
 # 例: リポジトリが /opt/cjob/stg-cluster-job-system にある場合
-#     overlay が /opt/cjob/my-overlay にあ���場合
+#     overlay が /opt/cjob/my-overlay にある場合
 #     → ../stg-cluster-job-system/k8s/base
 resources:
   - ../stg-cluster-job-system/k8s/base
