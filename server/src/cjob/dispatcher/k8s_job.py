@@ -11,6 +11,45 @@ logger = logging.getLogger(__name__)
 
 TEMPORARY_STATUS_CODES = {429, 500, 503}
 
+VALID_TAINT_EFFECTS = {"NoSchedule", "PreferNoSchedule", "NoExecute"}
+
+
+def _parse_taint(taint_str: str) -> k8s_client.V1Toleration | None:
+    """Parse a taint string (key=value:effect) into a V1Toleration.
+
+    Returns None if taint_str is empty.
+    Raises ValueError if the format is invalid.
+    """
+    if not taint_str:
+        return None
+
+    if ":" not in taint_str:
+        raise ValueError(
+            f"Invalid taint format '{taint_str}': expected 'key=value:effect'"
+        )
+
+    kv_part, effect = taint_str.rsplit(":", 1)
+    if effect not in VALID_TAINT_EFFECTS:
+        raise ValueError(
+            f"Invalid taint effect '{effect}': must be one of {VALID_TAINT_EFFECTS}"
+        )
+
+    if "=" not in kv_part:
+        raise ValueError(
+            f"Invalid taint format '{taint_str}': expected 'key=value:effect'"
+        )
+
+    key, value = kv_part.split("=", 1)
+    if not key:
+        raise ValueError(f"Invalid taint format '{taint_str}': key must not be empty")
+
+    return k8s_client.V1Toleration(
+        key=key,
+        operator="Equal",
+        value=value,
+        effect=effect,
+    )
+
 
 class TemporaryK8sError(Exception):
     pass
@@ -67,16 +106,12 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
         ),
     )
 
+    toleration = _parse_taint(settings.JOB_NODE_TAINT)
+    tolerations = [toleration] if toleration else None
+
     pod_spec = k8s_client.V1PodSpec(
         restart_policy="Never",
-        tolerations=[
-            k8s_client.V1Toleration(
-                key="role",
-                operator="Equal",
-                value="computing",
-                effect="NoSchedule",
-            )
-        ],
+        tolerations=tolerations,
         containers=[container],
         volumes=[
             k8s_client.V1Volume(

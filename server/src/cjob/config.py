@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Kueue
     KUEUE_LOCAL_QUEUE_NAME: str = "default"
 
+    # Node Taint
+    JOB_NODE_TAINT: str = "role=computing:NoSchedule"
+
     # Namespace
     JOB_NAMESPACE_PREFIX: str = "user-"
 
