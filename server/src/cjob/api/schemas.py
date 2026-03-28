@@ -34,6 +34,7 @@ class JobSummary(BaseModel):
 class JobListResponse(BaseModel):
     jobs: list[JobSummary]
     total_count: int
+    log_base_dir: str
 
 
 class JobDetailResponse(BaseModel):
@@ -74,6 +75,7 @@ class DeleteResponse(BaseModel):
     deleted: list[int]
     skipped: list[SkippedItem]
     not_found: list[int]
+    log_dirs: list[str]
 
 
 class DailyUsage(BaseModel):

@@ -284,9 +284,8 @@ async fn cmd_delete(
 
     if !resp.deleted.is_empty() {
         // Delete log directories for deleted jobs
-        for jid in &resp.deleted {
-            let log_dir = format!("/home/jovyan/.cjob/logs/{}", jid);
-            let _ = std::fs::remove_dir_all(&log_dir);
+        for log_dir in &resp.log_dirs {
+            let _ = std::fs::remove_dir_all(log_dir);
         }
         println!("削除しました: {:?}", resp.deleted);
     }
@@ -350,7 +349,7 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
     }
 
     // Delete log directory before API call
-    let _ = std::fs::remove_dir_all("/home/jovyan/.cjob/logs");
+    let _ = std::fs::remove_dir_all(&list_resp.log_base_dir);
 
     // Call reset API
     client.reset().await?;

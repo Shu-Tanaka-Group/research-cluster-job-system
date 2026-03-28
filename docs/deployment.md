@@ -197,7 +197,7 @@ env:
 | Dispatcher | `cjob-config` | `postgres-secret` |
 | Watcher | `cjob-config` | `postgres-secret` |
 | PostgreSQL | - | `postgres-secret` |
-| CLI（`cjob update` で配布） | - | - |
+| CLI（`cjob update` で配布） | -（ログパスは API から取得） | - |
 
 ---
 
@@ -262,8 +262,12 @@ curl -L http://submit-api.cjob-system.svc.cluster.local:8080/v1/cli/download \
 chmod +x /home/jovyan/.local/bin/cjob
 ```
 
+#### CLI の環境変数
+
 Submit API のエンドポイントは環境変数 `CJOB_API_URL` で設定する。
 未設定時はデフォルト値（`http://submit-api.cjob-system.svc.cluster.local:8080`）を使用する。
+
+ログディレクトリのパスは CLI 側で設定不要である。CLI は API からログパスを取得するため、サーバー側の ConfigMap（`LOG_BASE_DIR`）を変更するだけで CLI にも反映される。
 
 ---
 

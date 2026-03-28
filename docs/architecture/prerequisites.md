@@ -25,7 +25,7 @@
 - CLI は image には含めない
 - ベース OS：Ubuntu 24.04
 - PVC 名はユーザー名と一致している
-- mount path は `/home/jovyan` に固定する
+- mount path はデフォルト `/home/jovyan` とし、ConfigMap の `WORKSPACE_MOUNT_PATH` で変更可能とする
 - 実行 shell は `/bin/bash -lc` を基本とする
 - 作業ディレクトリは `/home/jovyan` 配下に限定する
 - export 済み環境変数のみ再現対象とする（仮想環境の `PATH` / `VIRTUAL_ENV` を含む）

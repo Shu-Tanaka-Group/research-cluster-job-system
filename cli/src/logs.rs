@@ -5,26 +5,26 @@ use std::time::{Duration, Instant};
 
 use crate::client::CjobClient;
 
-const LOG_BASE_DIR: &str = "/home/jovyan/.cjob/logs";
 const WAIT_TIMEOUT: Duration = Duration::from_secs(300); // 5 minutes
 const POLL_INTERVAL: Duration = Duration::from_secs(3);
 const TAIL_INTERVAL: Duration = Duration::from_millis(200);
 
-fn log_dir(job_id: u32) -> PathBuf {
-    PathBuf::from(format!("{}/{}", LOG_BASE_DIR, job_id))
+fn stdout_path(log_dir: &str) -> PathBuf {
+    PathBuf::from(log_dir).join("stdout.log")
 }
 
-fn stdout_path(job_id: u32) -> PathBuf {
-    log_dir(job_id).join("stdout.log")
-}
-
-fn stderr_path(job_id: u32) -> PathBuf {
-    log_dir(job_id).join("stderr.log")
+fn stderr_path(log_dir: &str) -> PathBuf {
+    PathBuf::from(log_dir).join("stderr.log")
 }
 
 pub async fn show_logs(job_id: u32, follow: bool, client: &CjobClient) -> Result<()> {
     // Get current job status
     let job = client.get_job(job_id).await?;
+
+    let log_dir = match &job.log_dir {
+        Some(d) => d.as_str(),
+        None => bail!("ジョブ {} の log_dir が設定されていません", job_id),
+    };
 
     match job.status.as_str() {
         "QUEUED" | "DISPATCHING" | "DISPATCHED" => {
@@ -37,20 +37,20 @@ pub async fn show_logs(job_id: u32, follow: bool, client: &CjobClient) -> Result
         }
         "RUNNING" => {}
         "SUCCEEDED" | "FAILED" => {
-            print_full_logs(job_id)?;
+            print_full_logs(log_dir)?;
             return Ok(());
         }
         "CANCELLED" => {
-            if stdout_path(job_id).exists() {
-                print_full_logs(job_id)?;
+            if stdout_path(log_dir).exists() {
+                print_full_logs(log_dir)?;
             } else {
                 println!("No logs available");
             }
             return Ok(());
         }
         "DELETING" => {
-            if stdout_path(job_id).exists() {
-                print_full_logs(job_id)?;
+            if stdout_path(log_dir).exists() {
+                print_full_logs(log_dir)?;
             } else {
                 println!("No logs available（reset 処理中）");
             }
@@ -63,9 +63,9 @@ pub async fn show_logs(job_id: u32, follow: bool, client: &CjobClient) -> Result
     }
 
     if follow {
-        tail_logs(job_id).await
+        tail_logs(log_dir).await
     } else {
-        print_full_logs(job_id)
+        print_full_logs(log_dir)
     }
 }
 
@@ -115,8 +115,8 @@ async fn wait_for_start(job_id: u32, client: &CjobClient) -> Result<()> {
     }
 }
 
-fn print_full_logs(job_id: u32) -> Result<()> {
-    let path = stdout_path(job_id);
+fn print_full_logs(log_dir: &str) -> Result<()> {
+    let path = stdout_path(log_dir);
     if !path.exists() {
         println!("No logs available");
         return Ok(());
@@ -126,7 +126,7 @@ fn print_full_logs(job_id: u32) -> Result<()> {
     print!("{}", content);
 
     // Also print stderr if it has content
-    let err_path = stderr_path(job_id);
+    let err_path = stderr_path(log_dir);
     if err_path.exists() {
         let err_content = std::fs::read_to_string(&err_path)?;
         if !err_content.is_empty() {
@@ -137,8 +137,8 @@ fn print_full_logs(job_id: u32) -> Result<()> {
     Ok(())
 }
 
-async fn tail_logs(job_id: u32) -> Result<()> {
-    let path = stdout_path(job_id);
+async fn tail_logs(log_dir: &str) -> Result<()> {
+    let path = stdout_path(log_dir);
 
     // Wait for log file to appear
     let start = Instant::now();

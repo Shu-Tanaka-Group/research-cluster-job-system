@@ -30,6 +30,7 @@ pub struct JobSubmitResponse {
 pub struct JobListResponse {
     pub jobs: Vec<JobSummary>,
     pub total_count: u32,
+    pub log_base_dir: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -87,6 +88,7 @@ pub struct DeleteResponse {
     pub deleted: Vec<u32>,
     pub skipped: Vec<SkippedItem>,
     pub not_found: Vec<u32>,
+    pub log_dirs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
