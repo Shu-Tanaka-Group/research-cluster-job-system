@@ -208,6 +208,12 @@ class Dispatcher:
             # cancel API が先に CANCELLED に更新していた → スキップ
             return
 
+        # CAS をコミットしてから K8s Job を作成する。
+        # これにより、create_job() が例外を投げた際の rollback で
+        # DISPATCHING が巻き戻らず、後続の mark_failed / increment_retry の
+        # WHERE status='DISPATCHING' 条件が正しくマッチする。
+        db.commit()
+
         # DISPATCHING への更新が確定したので続行
         try:
             k8s.create_job(job)  # job.time_limit_seconds を activeDeadlineSeconds に設定
@@ -223,6 +229,12 @@ class Dispatcher:
         except PermanentK8sError:
             # AND status='DISPATCHING' 条件により CANCELLED を上書きしない
             # updated_rows == 0 は cancel API が CANCELLED に更新済みのためスキップ
+            db.update_status(
+                job.namespace, job.job_id, "FAILED", condition_status="DISPATCHING"
+            )
+        except Exception:
+            # build_k8s_job() の ValueError やネットワーク例外等の未捕捉例外でも
+            # ジョブを FAILED に遷移させ、DISPATCHING のまま滞留することを防ぐ
             db.update_status(
                 job.namespace, job.job_id, "FAILED", condition_status="DISPATCHING"
             )
