@@ -22,6 +22,7 @@ from .schemas import (
     JobSubmitResponse,
     ResetErrorResponse,
     ResetResponse,
+    SweepSubmitRequest,
     UsageResponse,
 )
 from .services import (
@@ -33,6 +34,7 @@ from .services import (
     list_jobs,
     reset,
     submit_job,
+    submit_sweep,
 )
 
 router = APIRouter(prefix="/v1")
@@ -85,6 +87,15 @@ def download_cli_binary(version: str | None = Query(default=None)):
         media_type="application/octet-stream",
         filename="cjob",
     )
+
+
+@router.post("/sweep", response_model=JobSubmitResponse, status_code=201)
+def post_sweep(
+    req: SweepSubmitRequest,
+    user_info: UserInfo = Depends(get_user_info),
+    session: Session = Depends(get_session),
+):
+    return submit_sweep(session, user_info.namespace, user_info.username, req)
 
 
 @router.post("/jobs", response_model=JobSubmitResponse, status_code=201)

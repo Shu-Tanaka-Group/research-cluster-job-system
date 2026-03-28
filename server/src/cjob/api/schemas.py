@@ -18,6 +18,17 @@ class JobSubmitRequest(BaseModel):
     time_limit_seconds: int | None = None
 
 
+class SweepSubmitRequest(BaseModel):
+    command: str = Field(..., min_length=1)
+    image: str
+    cwd: str
+    env: dict[str, str] = Field(default_factory=dict)
+    resources: ResourceSpec = Field(default_factory=ResourceSpec)
+    completions: int
+    parallelism: int = 1
+    time_limit_seconds: int | None = None
+
+
 class JobSubmitResponse(BaseModel):
     job_id: int
     status: str
@@ -29,6 +40,10 @@ class JobSummary(BaseModel):
     command: str
     created_at: datetime
     finished_at: datetime | None = None
+    completions: int | None = None
+    parallelism: int | None = None
+    succeeded_count: int | None = None
+    failed_count: int | None = None
 
 
 class JobListResponse(BaseModel):
@@ -51,6 +66,12 @@ class JobDetailResponse(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     last_error: str | None = None
+    completions: int | None = None
+    parallelism: int | None = None
+    succeeded_count: int | None = None
+    failed_count: int | None = None
+    completed_indexes: str | None = None
+    failed_indexes: str | None = None
 
 
 class CancelRequest(BaseModel):

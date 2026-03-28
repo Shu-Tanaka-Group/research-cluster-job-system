@@ -16,7 +16,9 @@ from .schemas import (
     JobSubmitRequest,
     JobSubmitResponse,
     JobSummary,
+    ResourceSpec,
     SkippedItem,
+    SweepSubmitRequest,
     UsageResponse,
 )
 
@@ -44,9 +46,13 @@ def allocate_job_id(session: Session, namespace: str) -> int:
     return result.scalar_one()
 
 
-def submit_job(
-    session: Session, namespace: str, username: str, req: JobSubmitRequest
-) -> JobSubmitResponse:
+def _validate_common(
+    session: Session, namespace: str, resources: ResourceSpec,
+    time_limit_seconds: int | None,
+) -> int:
+    """Shared validation for submit_job and submit_sweep. Returns resolved time_limit."""
+    from fastapi import HTTPException
+
     settings = get_settings()
 
     # Check for DELETING jobs (reset in progress)
@@ -57,8 +63,6 @@ def submit_job(
         .scalar()
     )
     if deleting_count > 0:
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=409,
             detail="リセット処理中のためジョブを投入できません。しばらく待ってから再試行してください",
@@ -72,17 +76,13 @@ def submit_job(
         .scalar()
     )
     if job_count >= settings.MAX_QUEUED_JOBS_PER_NAMESPACE:
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=429,
             detail=f"投入可能なジョブ数の上限（{settings.MAX_QUEUED_JOBS_PER_NAMESPACE}件）に達しています",
         )
 
     # Reject GPU jobs
-    if req.resources.gpu > 0:
-        from fastapi import HTTPException
-
+    if resources.gpu > 0:
         raise HTTPException(
             status_code=400,
             detail="GPU ジョブは現在サポートされていません",
@@ -99,44 +99,43 @@ def submit_job(
     ).mappings().first()
 
     if max_resources and max_resources["max_cpu"] is not None:
-        req_cpu = parse_cpu_millicores(req.resources.cpu)
-        req_mem = parse_memory_mib(req.resources.memory)
+        req_cpu = parse_cpu_millicores(resources.cpu)
+        req_mem = parse_memory_mib(resources.memory)
 
         if req_cpu > max_resources["max_cpu"]:
-            from fastapi import HTTPException
-
             raise HTTPException(
                 status_code=400,
-                detail=f"要求 CPU ({req.resources.cpu}) がクラスタ内の最大ノード "
+                detail=f"要求 CPU ({resources.cpu}) がクラスタ内の最大ノード "
                        f"({max_resources['max_cpu']}m) を超えています",
             )
         if req_mem > max_resources["max_memory"]:
-            from fastapi import HTTPException
-
             raise HTTPException(
                 status_code=400,
-                detail=f"要求メモリ ({req.resources.memory}) がクラスタ内の最大ノード "
+                detail=f"要求メモリ ({resources.memory}) がクラスタ内の最大ノード "
                        f"({max_resources['max_memory']}Mi) を超えています",
             )
 
     # Resolve time_limit_seconds
-    time_limit = req.time_limit_seconds if req.time_limit_seconds is not None else settings.DEFAULT_TIME_LIMIT_SECONDS
+    time_limit = time_limit_seconds if time_limit_seconds is not None else settings.DEFAULT_TIME_LIMIT_SECONDS
     if time_limit > settings.MAX_TIME_LIMIT_SECONDS:
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=400,
             detail=f"time_limit_seconds は {settings.MAX_TIME_LIMIT_SECONDS} 秒（7日）以下で指定してください",
         )
     if time_limit <= 0:
-        from fastapi import HTTPException
-
         raise HTTPException(
             status_code=400,
             detail="time_limit_seconds は 1 以上で指定してください",
         )
 
-    user = username
+    return time_limit
+
+
+def submit_job(
+    session: Session, namespace: str, username: str, req: JobSubmitRequest
+) -> JobSubmitResponse:
+    settings = get_settings()
+    time_limit = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
 
     # Allocate job_id
     job_id = allocate_job_id(session, namespace)
@@ -148,7 +147,7 @@ def submit_job(
     job = Job(
         namespace=namespace,
         job_id=job_id,
-        user=user,
+        user=username,
         image=req.image,
         command=req.command,
         cwd=req.cwd,
@@ -159,6 +158,96 @@ def submit_job(
         time_limit_seconds=time_limit,
         status="QUEUED",
         log_dir=log_dir,
+    )
+    session.add(job)
+
+    # Record event
+    event = JobEvent(
+        namespace=namespace,
+        job_id=job_id,
+        event_type="SUBMITTED",
+    )
+    session.add(event)
+
+    session.flush()
+
+    return JobSubmitResponse(job_id=job_id, status="QUEUED")
+
+
+def submit_sweep(
+    session: Session, namespace: str, username: str, req: SweepSubmitRequest
+) -> JobSubmitResponse:
+    from fastapi import HTTPException
+
+    settings = get_settings()
+    time_limit = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
+
+    # Sweep-specific validation
+    if req.completions < 1 or req.completions > settings.MAX_SWEEP_COMPLETIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"completions は 1 以上 {settings.MAX_SWEEP_COMPLETIONS} 以下で指定してください",
+        )
+
+    if req.parallelism < 1 or req.parallelism > req.completions:
+        raise HTTPException(
+            status_code=400,
+            detail="parallelism は 1 以上 completions 以下で指定してください",
+        )
+
+    # Check parallelism * per_pod_resource <= cluster total
+    cluster_totals = session.execute(
+        text(
+            "SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu, "
+            "       COALESCE(SUM(memory_mib), 0) AS total_memory "
+            "FROM node_resources"
+        )
+    ).mappings().first()
+
+    if cluster_totals and cluster_totals["total_cpu"] > 0:
+        req_cpu = parse_cpu_millicores(req.resources.cpu)
+        req_mem = parse_memory_mib(req.resources.memory)
+        total_cpu = req_cpu * req.parallelism
+        total_mem = req_mem * req.parallelism
+
+        if total_cpu > cluster_totals["total_cpu"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"parallelism × 要求 CPU ({total_cpu}m) がクラスタ全体の CPU "
+                       f"({cluster_totals['total_cpu']}m) を超えています",
+            )
+        if total_mem > cluster_totals["total_memory"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"parallelism × 要求メモリ ({total_mem}Mi) がクラスタ全体のメモリ "
+                       f"({cluster_totals['total_memory']}Mi) を超えています",
+            )
+
+    # Allocate job_id
+    job_id = allocate_job_id(session, namespace)
+
+    # Compute log_dir
+    log_dir = f"{settings.LOG_BASE_DIR}/{job_id}"
+
+    # Insert job
+    job = Job(
+        namespace=namespace,
+        job_id=job_id,
+        user=username,
+        image=req.image,
+        command=req.command,
+        cwd=req.cwd,
+        env_json=req.env,
+        cpu=req.resources.cpu,
+        memory=req.resources.memory,
+        gpu=req.resources.gpu,
+        time_limit_seconds=time_limit,
+        status="QUEUED",
+        log_dir=log_dir,
+        completions=req.completions,
+        parallelism=req.parallelism,
+        succeeded_count=0,
+        failed_count=0,
     )
     session.add(job)
 
@@ -207,6 +296,10 @@ def list_jobs(
             command=j.command,
             created_at=j.created_at,
             finished_at=j.finished_at,
+            completions=j.completions,
+            parallelism=j.parallelism,
+            succeeded_count=j.succeeded_count,
+            failed_count=j.failed_count,
         )
         for j in rows
     ]
@@ -234,6 +327,12 @@ def get_job(
         started_at=job.started_at,
         finished_at=job.finished_at,
         last_error=job.last_error,
+        completions=job.completions,
+        parallelism=job.parallelism,
+        succeeded_count=job.succeeded_count,
+        failed_count=job.failed_count,
+        completed_indexes=job.completed_indexes,
+        failed_indexes=job.failed_indexes,
     )
 
 
