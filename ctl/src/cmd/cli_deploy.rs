@@ -1,116 +1,29 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::path::Path;
-use tokio::process::Command;
 
-const PVC_MOUNT_PATH: &str = "/cli-binary";
-const PVC_CLAIM_NAME: &str = "cli-binary";
+use super::cli_common::{self, PVC_MOUNT_PATH};
 
-async fn run_kubectl(args: &[&str]) -> Result<String> {
-    let output = Command::new("kubectl")
-        .args(args)
-        .output()
-        .await
-        .context("Failed to run kubectl")?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("kubectl {} failed: {}", args.first().unwrap_or(&""), stderr.trim());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+fn should_update_latest(version: &str, latest_flag: bool) -> bool {
+    latest_flag || !version.contains('-')
 }
 
-async fn cleanup_pod(namespace: &str, pod_name: &str) {
-    let _ = run_kubectl(&[
-        "delete", "pod", pod_name,
-        "--namespace", namespace,
-        "--grace-period=0",
-        "--force",
-        "--ignore-not-found",
-    ])
-    .await;
-}
-
-pub async fn run(namespace: &str, binary_path: &str, version: &str) -> Result<()> {
-    // Validate binary file exists
+pub async fn run(namespace: &str, binary_path: &str, version: &str, latest_flag: bool) -> Result<()> {
     if !Path::new(binary_path).is_file() {
         bail!("Binary file not found: {}", binary_path);
     }
 
-    // Generate unique pod name
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let pod_name = format!("cjobctl-cli-deploy-{}", timestamp);
+    let update_latest = should_update_latest(version, latest_flag);
 
     println!("Deploying CLI v{} to PVC...", version);
 
-    // Build overrides JSON for PVC mount
-    let overrides = serde_json::json!({
-        "spec": {
-            "containers": [{
-                "name": "deploy",
-                "image": "busybox",
-                "command": ["sleep", "3600"],
-                "volumeMounts": [{
-                    "name": PVC_CLAIM_NAME,
-                    "mountPath": PVC_MOUNT_PATH
-                }]
-            }],
-            "volumes": [{
-                "name": PVC_CLAIM_NAME,
-                "persistentVolumeClaim": {
-                    "claimName": PVC_CLAIM_NAME
-                }
-            }]
-        }
-    });
-    let overrides_str = overrides.to_string();
+    let pod_name = cli_common::create_temp_pod(namespace, "deploy").await?;
 
-    // Start temporary pod
-    println!("  Starting temporary pod...");
-    let result = run_kubectl(&[
-        "run", &pod_name,
-        "--namespace", namespace,
-        "--image=busybox",
-        "--restart=Never",
-        "--overrides", &overrides_str,
-        "--command", "--", "sleep", "3600",
-    ])
-    .await;
+    let deploy_result = deploy_binary(namespace, &pod_name, binary_path, version, update_latest).await;
 
-    if let Err(e) = result {
-        cleanup_pod(namespace, &pod_name).await;
-        return Err(e);
-    }
-
-    // Wait for pod to be ready
-    println!("  Waiting for pod to be ready...");
-    let wait_result = run_kubectl(&[
-        "wait", "--for=condition=Ready",
-        &format!("pod/{}", pod_name),
-        "--namespace", namespace,
-        "--timeout=60s",
-    ])
-    .await;
-
-    if let Err(e) = wait_result {
-        cleanup_pod(namespace, &pod_name).await;
-        return Err(e);
-    }
-
-    // Execute deployment steps (with cleanup on any failure)
-    let deploy_result = deploy_binary(namespace, &pod_name, binary_path, version).await;
-
-    // Always cleanup
     println!("  Cleaning up temporary pod...");
-    cleanup_pod(namespace, &pod_name).await;
+    cli_common::cleanup_pod(namespace, &pod_name).await;
 
-    deploy_result?;
-
-    println!("CLI v{} deployed successfully.", version);
-    Ok(())
+    deploy_result
 }
 
 async fn deploy_binary(
@@ -118,10 +31,11 @@ async fn deploy_binary(
     pod_name: &str,
     binary_path: &str,
     version: &str,
+    update_latest: bool,
 ) -> Result<()> {
     // Create version directory
     println!("  Creating directory...");
-    run_kubectl(&[
+    cli_common::run_kubectl(&[
         "exec", pod_name,
         "--namespace", namespace,
         "--", "mkdir", "-p", &format!("{}/{}", PVC_MOUNT_PATH, version),
@@ -131,25 +45,75 @@ async fn deploy_binary(
     // Copy binary
     println!("  Copying binary...");
     let dest = format!("{}/{}:{}/{}/cjob", namespace, pod_name, PVC_MOUNT_PATH, version);
-    run_kubectl(&["cp", binary_path, &dest]).await?;
+    cli_common::run_kubectl(&["cp", binary_path, &dest]).await?;
 
     // Set executable permission
     println!("  Setting permissions...");
-    run_kubectl(&[
+    cli_common::run_kubectl(&[
         "exec", pod_name,
         "--namespace", namespace,
         "--", "chmod", "+x", &format!("{}/{}/cjob", PVC_MOUNT_PATH, version),
     ])
     .await?;
 
-    // Update latest file
-    println!("  Updating latest version...");
-    run_kubectl(&[
-        "exec", pod_name,
-        "--namespace", namespace,
-        "--", "sh", "-c", &format!("echo '{}' > {}/latest", version, PVC_MOUNT_PATH),
-    ])
-    .await?;
+    if update_latest {
+        // Update latest file
+        println!("  Updating latest version...");
+        cli_common::run_kubectl(&[
+            "exec", pod_name,
+            "--namespace", namespace,
+            "--", "sh", "-c", &format!("echo '{}' > {}/latest", version, PVC_MOUNT_PATH),
+        ])
+        .await?;
+
+        println!("Deployed v{} (latest updated)", version);
+    } else {
+        // Read current latest for informational message
+        let current_latest = cli_common::run_kubectl(&[
+            "exec", pod_name,
+            "--namespace", namespace,
+            "--", "cat", &format!("{}/latest", PVC_MOUNT_PATH),
+        ])
+        .await
+        .unwrap_or_else(|_| "unknown".to_string());
+
+        println!("Deployed v{} (latest unchanged: {})", version, current_latest.trim());
+    }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stable_without_flag() {
+        assert!(should_update_latest("1.3.0", false));
+    }
+
+    #[test]
+    fn stable_with_flag() {
+        assert!(should_update_latest("1.3.0", true));
+    }
+
+    #[test]
+    fn prerelease_without_flag() {
+        assert!(!should_update_latest("1.3.1-beta.1", false));
+    }
+
+    #[test]
+    fn prerelease_with_flag() {
+        assert!(should_update_latest("1.3.1-beta.1", true));
+    }
+
+    #[test]
+    fn prerelease_alpha() {
+        assert!(!should_update_latest("2.0.0-alpha", false));
+    }
+
+    #[test]
+    fn prerelease_rc() {
+        assert!(!should_update_latest("1.0.0-rc.1", false));
+    }
 }

@@ -185,13 +185,23 @@ enum DbCommands {
 
 #[derive(Subcommand)]
 enum CliCommands {
+    /// List deployed CLI versions on PVC
+    List,
     /// Deploy CLI binary to PVC
     Deploy {
         /// Path to the CLI binary
         #[arg(long)]
         binary: String,
-        /// Version string (e.g. 1.2.0)
+        /// Version string (e.g. 1.2.0, 1.3.0-beta.1)
         #[arg(long)]
+        version: String,
+        /// Force update latest even for pre-release versions
+        #[arg(long)]
+        latest: bool,
+    },
+    /// Remove a deployed CLI version from PVC
+    Remove {
+        /// Version to remove (e.g. 1.1.0)
         version: String,
     },
 }
@@ -325,8 +335,14 @@ async fn main() -> Result<()> {
         Commands::Cli { command } => {
             let config = config::Config::load()?;
             match command {
-                CliCommands::Deploy { binary, version } => {
-                    cmd::cli_deploy::run(config.system_namespace(), &binary, &version).await
+                CliCommands::List => {
+                    cmd::cli_list::run(config.system_namespace()).await
+                }
+                CliCommands::Deploy { binary, version, latest } => {
+                    cmd::cli_deploy::run(config.system_namespace(), &binary, &version, latest).await
+                }
+                CliCommands::Remove { version } => {
+                    cmd::cli_remove::run(config.system_namespace(), &version).await
                 }
             }
         }
