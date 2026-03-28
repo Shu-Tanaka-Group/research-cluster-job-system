@@ -57,6 +57,7 @@ pub struct JobDetailResponse {
     pub dispatched_at: Option<String>,
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
+    pub last_error: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

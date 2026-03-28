@@ -95,6 +95,9 @@ pub fn print_job_detail(job: &JobDetailResponse) {
         "log_dir:       {}",
         job.log_dir.as_deref().unwrap_or("-")
     );
+    if let Some(ref err) = job.last_error {
+        println!("last_error:    {}", err);
+    }
 }
 
 #[cfg(test)]
@@ -137,6 +140,7 @@ mod tests {
             dispatched_at: None,
             started_at: started_at.map(|s| s.to_string()),
             finished_at: None,
+            last_error: None,
         }
     }
 
