@@ -20,7 +20,7 @@
 - 1 サイクル最大 `DISPATCH_BATCH_SIZE`（50）件の上限
 - サイクル間隔 `DISPATCH_BUDGET_CHECK_INTERVAL_SEC`（10 秒）
 
-ただし、研究室規模（5〜20 ユーザー）では 50 件/10 秒のスループットで十分であり、実用上の問題にはなりにくい。
+ただし、想定規模（同時アクティブユーザー数 20〜30 程度）では 50 件/10 秒のスループットで十分であり、実用上の問題にはなりにくい。
 
 **改善オプション（必要になった場合）:**
 
@@ -102,12 +102,109 @@ Prometheus は各 Pod の `/metrics` エンドポイントを直接 HTTP scrape 
 
 Watcher が必要とする情報（Job の `status.conditions`、`status.active`）は K8s API にしか存在しないため、Prometheus のように Pod に直接問い合わせる方式は適用できない。Prometheus から学べる教訓は「Watch API / Informer パターンを使うことで K8s API への負荷を最小化できる」という点である。
 
-## 4. 現時点での推奨
+## 4. K8s スケーラビリティの制約
 
-研究室規模（5〜20 ユーザー、ジョブ実行時間が数十分以上）では、現在のポーリング方式で十分なパフォーマンスが得られる。以下の状況が発生した場合に改善を検討する。
+### 4.1 ボトルネックの本質
+
+CJob のスケーラビリティを律速するのは Dispatcher や Watcher ではなく、**K8s 上に同時に存在する Job オブジェクトの数**である。K8s Job は 1 件につき Job オブジェクト + Pod オブジェクトが etcd に格納されるため、同時存在数が増えると以下が問題になる。
+
+| 要因 | 影響 | スケールアウトの可否 |
+|---|---|---|
+| etcd の write 負荷 | Job/Pod の作成・状態更新は全て etcd への write | Raft 合意が必要なためノード追加では改善しない |
+| kube-controller-manager (Job controller) | 全 Job の状態遷移を処理 | シングルリーダーのためスケールアウト不可 |
+| Kueue controller | 全 Workload の admission 判断 | シングルリーダーのためスケールアウト不可 |
+| kube-apiserver | list/watch リクエストの処理 | レプリカ追加で水平スケール可能 |
+
+kube-apiserver はレプリカ数の増加で対応できるが、etcd の write と シングルリーダーの controller はスケールアウトが効かないため、**同時存在 Job 数の上限は K8s の構造的な制約**である。
+
+### 4.2 同時存在 Job 数の見積もり
+
+同時に K8s 上に存在する Job オブジェクト数は、active Job と TTL 待ちの完了済み Job の合計である。
+
+```
+同時存在 Job 数 = (同時アクティブユーザー数 × DISPATCH_BUDGET_PER_NAMESPACE)
+               + (TTL ウィンドウ内の完了済み Job 数)
+```
+
+`ttlSecondsAfterFinished` を短縮すると完了済み Job の滞留は減るが、active Job 数は変わらない。
+
+| 同時アクティブユーザー数 | dispatch_budget | active Job 数 | 安全性 |
+|---|---|---|---|
+| 20 | 256 | 5,120 | 運用可能（上限付近） |
+| 30 | 256 | 7,680 | 厳しい |
+| 50 | 256 | 12,800 | 非現実的 |
+| 50 | 50 | 2,500 | 余裕 |
+
+K8s の標準構成では、同時存在 Job 数 5,000〜10,000 程度が実用的な上限の目安である。
+
+### 4.3 Watch API 移行による改善効果
+
+Watch API に移行すると、Watcher の `list_job_for_all_namespaces()` による全件取得がなくなり、API Server と etcd の read 負荷が大幅に軽減される。ただし、ボトルネックの本質である etcd の write 負荷やシングルリーダー controller の処理能力は改善しない。
+
+Watch API 移行により同時アクティブユーザー数の上限は 1.5 倍程度（20-30 → 30-45）に伸びる見込みだが、2 倍以上の改善は期待できない。
+
+### 4.4 スパコンのジョブスケジューラとの比較
+
+Slurm 等のスパコン向けスケジューラが大量ジョブを扱えるのは、アーキテクチャが根本的に異なるためである。
+
+| | スパコン (Slurm 等) | CJob (K8s) |
+|---|---|---|
+| 1 ジョブのオーバーヘッド | メモリ上のレコード 1 件 | etcd 上に Job + Pod オブジェクト |
+| 実行開始 | プロセスを直接 fork/exec | Pod 作成 → コンテナランタイム起動 |
+| スケジューリング | スケジューラが直接ノードを割り当て | Dispatcher → K8s Job → Kueue → kube-scheduler → kubelet |
+| 大量タスクの手段 | job array（1 件 = 数万タスク） | なし（1 件 = 1 タスク） |
+
+スパコンではジョブ 1 件のオーバーヘッドが桁違いに小さいため、1 core × 10,000 ジョブの parameter sweep も日常的に実行される。K8s は汎用コンテナオーケストレーションとして設計されており、大量の短命ジョブを高速に回すユースケースは本質的に不得意である。
+
+### 4.5 1 Job N Pod 構成による etcd 負荷の軽減
+
+K8s の `batch/v1 Job` は `completions` と `parallelism` フィールドにより、1 つの Job オブジェクトから複数の Pod を段階的に実行できる。例えば `completions: 100, parallelism: 10` なら、同時に最大 10 Pod が実行され、1 つ完了するたびに次の Pod が起動し、合計 100 個完了するまで繰り返す。
+
+これにより etcd 上の Job オブジェクト数を大幅に削減できる（100 タスクを 100 Job ではなく 1 Job で表現）。ただし以下の課題がある。
+
+| 課題 | 内容 |
+|---|---|
+| コマンドの分岐 | 全 Pod が同一のコンテナ spec を持つため、Indexed Job（`completionMode: Indexed`）を使い Pod 内でインデックスに応じてコマンドを分岐させる仕組みが必要 |
+| 失敗の分離 | `backoffLimit` に達すると Job 全体が Failed になる。個別タスクの成功・失敗を独立に扱えない |
+| time_limit の粒度 | `activeDeadlineSeconds` は Job 全体に適用される。タスクごとに異なる time_limit を設定できない |
+| ログの分離 | 複数タスクのログを 1 Job 内で分離する仕組みが必要 |
+| キャンセルの粒度 | 個別タスクだけをキャンセルできない |
+| Kueue の admit | Kueue は admit 時に `parallelism` 分のリソースをまとめて確保しようとするため、個々の Pod 単位で段階的に admit されない |
+
+これらの課題から、1 Job N Pod 構成を汎用的に適用するのは困難であり、parameter sweep のような同一スペック・同一 time_limit のタスク群に限定するのが妥当である。
+
+### 4.6 parameter sweep 機能による負荷軽減
+
+スパコンの job array に相当する parameter sweep 機能を導入することで、大量の小タスクを少ない Job オブジェクト数で実行できる。
+
+**期待される効果：**
+
+- etcd 上の Job オブジェクト数の削減（例: 1,000 タスク → 数 Job）
+- `dispatch_budget` の消費が 1 件で済むため、budget 枠を効率的に使える
+- Kueue への Workload 数が減り、admission 処理の負荷が軽減される
+
+**インセンティブ設計：**
+
+parameter sweep 機能の実装後、`MAX_QUEUED_JOBS_PER_NAMESPACE` や `DISPATCH_BUDGET_PER_NAMESPACE` を引き下げることで、個別投入よりも sweep を使うインセンティブが生まれる。sweep では 1 件の投入枠で数百タスクを表現できるため、投入上限が厳しくなってもユーザーの実質的なキャパシティは減らない。
+
+導入順序が重要であり、sweep 機能の実装が先、投入上限の引き下げが後でなければならない。sweep 機能がない状態で上限を下げると、ユーザーが単純に不便になるだけである。
+
+### 4.7 dispatch_budget 削減によるスケーラビリティ改善
+
+同時アクティブユーザー数が多い環境では、`DISPATCH_BUDGET_PER_NAMESPACE` を下げることで同時存在 Job 数を抑制できる。
+
+アクティブユーザーが多い環境では、1 ユーザーがクラスタ全体を占有する必要はなく、公平に分け合うのが通常の運用形態である。そのため dispatch_budget の引き下げはリソース利用効率の低下を意味しない。
+
+ただし、アクティブユーザーが少ない時間帯には、dispatch_budget が低いと 1 ユーザーがクラスタ全体を使い切れず遊休リソースが発生する。この問題はアクティブユーザー数に応じた dispatch_budget の動的調整で対処可能だが、実装の複雑さが増す。
+
+## 5. 現時点での推奨
+
+同時アクティブユーザー数 20〜30 程度、ジョブ実行時間が数十分以上のワークロードでは、現在のポーリング方式で十分なパフォーマンスが得られる。以下の状況が発生した場合に改善を検討する。
 
 | 状況 | 対応 |
 |---|---|
 | QUEUED ジョブの dispatch が追いつかない | `DISPATCH_BATCH_SIZE` の増加、サイクル間隔の短縮 |
-| 短時間ジョブの回転が遅い | Watcher のポーリング間隔短縮、Watch API への移行検討 |
-| K8s API への負荷が問題になる | Informer パターンの採用を検討 |
+| 短時間ジョブの回転が遅い | Watcher のポーリング間隔短縮、Watch API への移行検討（§4.3） |
+| 同時アクティブユーザー数の増加 | `DISPATCH_BUDGET_PER_NAMESPACE` の引き下げ（§4.7）、Watch API 移行（§4.3） |
+| 大量の小タスク（parameter sweep）| parameter sweep 機能の導入（§4.6）、1 Job N Pod 構成（§4.5） |
+| K8s API への負荷が問題になる | Informer パターンの採用を検討（§3.3） |
