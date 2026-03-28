@@ -348,7 +348,11 @@ kubectl exec -it -n cjob-system deploy/submit-api -- curl -s http://localhost:80
 ### 8.6 古いバージョンの削除
 
 ```bash
+# 単一バージョンの削除
 cjobctl cli remove 1.1.0
+
+# 複数バージョンの同時削除
+cjobctl cli remove 1.0.0 1.1.0
 ```
 
 `latest` に指定されているバージョンは削除できない。削除前に確認プロンプトが表示される。

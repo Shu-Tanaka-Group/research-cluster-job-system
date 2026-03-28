@@ -140,7 +140,7 @@ GPU:    4
 |---|---|---|
 | `cjobctl cli list` | PVC 上の登録済みバージョン一覧を表示する | K8s Pod + PVC |
 | `cjobctl cli deploy --binary <path> --version <version> [--release]` | CLI バイナリを PVC に配置する | K8s Pod + PVC |
-| `cjobctl cli remove <version>` | PVC 上の指定バージョンのバイナリを削除する | K8s Pod + PVC |
+| `cjobctl cli remove <version>...` | PVC 上の指定バージョンのバイナリを削除する（複数指定可） | K8s Pod + PVC |
 | `cjobctl cli set-latest <version>` | latest バージョンポインタを変更する | K8s Pod + PVC |
 
 すべてのサブコマンドは一時 Pod（busybox）+ `kubectl exec` のパターンで PVC を操作する。一時 Pod には最小イメージ（`busybox`）を使用し、PVC の `cli-binary` を `/cli-binary` にマウントする。
@@ -224,21 +224,25 @@ Error: Cannot set pre-release version 1.3.0-beta.1 as latest.
 PVC 上の指定バージョンのバイナリディレクトリを削除する。
 
 ```bash
+# 単一バージョンの削除
 $ cjobctl cli remove 1.1.0
-バージョン 1.1.0 を削除しました。
+Removed CLI v1.1.0.
+
+# 複数バージョンの同時削除
+$ cjobctl cli remove 1.0.0 1.1.0
+Removed 2 versions.
 
 $ cjobctl cli remove 1.3.0
-エラー: バージョン 1.3.0 は latest に指定されているため削除できません。
+Error: Cannot remove version 1.3.0: it is the current latest.
 ```
 
 内部処理:
 1. 一時 Pod を起動する
 2. `cat /cli-binary/latest` で latest バージョンを取得する
-3. 指定バージョンが latest の場合はエラーで中断する
-4. 指定バージョンのディレクトリが存在しない場合はエラーで中断する
-5. 確認プロンプトを表示する
-6. `rm -rf /cli-binary/<version>` で削除する
-7. 一時 Pod を削除する
+3. 指定バージョンのバリデーション（latest の場合はエラー、存在しない場合はエラー）
+4. 確認プロンプトを表示する
+5. 各バージョンの `rm -rf /cli-binary/<version>` で削除する
+6. 一時 Pod を削除する
 
 ### 5.7 DB スキーマ管理
 

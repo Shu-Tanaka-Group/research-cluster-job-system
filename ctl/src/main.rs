@@ -199,10 +199,11 @@ enum CliCommands {
         #[arg(long)]
         release: bool,
     },
-    /// Remove a deployed CLI version from PVC
+    /// Remove deployed CLI version(s) from PVC
     Remove {
-        /// Version to remove (e.g. 1.1.0)
-        version: String,
+        /// Version(s) to remove (e.g. 1.1.0 1.2.0)
+        #[arg(required = true)]
+        versions: Vec<String>,
     },
     /// Change the latest version pointer
     SetLatest {
@@ -346,8 +347,8 @@ async fn main() -> Result<()> {
                 CliCommands::Deploy { binary, version, release } => {
                     cmd::cli_deploy::run(config.system_namespace(), &binary, &version, release).await
                 }
-                CliCommands::Remove { version } => {
-                    cmd::cli_remove::run(config.system_namespace(), &version).await
+                CliCommands::Remove { versions } => {
+                    cmd::cli_remove::run(config.system_namespace(), &versions).await
                 }
                 CliCommands::SetLatest { version } => {
                     cmd::cli_set_latest::run(config.system_namespace(), &version).await

@@ -2,10 +2,10 @@ use anyhow::{bail, Result};
 
 use super::cli_common::{self, PVC_MOUNT_PATH};
 
-pub async fn run(namespace: &str, version: &str) -> Result<()> {
+pub async fn run(namespace: &str, versions: &[String]) -> Result<()> {
     let pod_name = cli_common::create_temp_pod(namespace, "remove").await?;
 
-    let result = remove_version(namespace, &pod_name, version).await;
+    let result = remove_versions(namespace, &pod_name, versions).await;
 
     println!("  Cleaning up temporary pod...");
     cli_common::cleanup_pod(namespace, &pod_name).await;
@@ -13,7 +13,7 @@ pub async fn run(namespace: &str, version: &str) -> Result<()> {
     result
 }
 
-async fn remove_version(namespace: &str, pod_name: &str, version: &str) -> Result<()> {
+async fn remove_versions(namespace: &str, pod_name: &str, versions: &[String]) -> Result<()> {
     // Read current latest
     let latest = cli_common::run_kubectl(&[
         "exec", pod_name,
@@ -21,31 +21,43 @@ async fn remove_version(namespace: &str, pod_name: &str, version: &str) -> Resul
         "--", "cat", &format!("{}/latest", PVC_MOUNT_PATH),
     ])
     .await?;
-    let latest = latest.trim();
+    let latest = latest.trim().to_string();
 
-    // Refuse to delete the latest version
-    if version == latest {
-        bail!(
-            "Cannot remove version {}: it is the current latest. Deploy a different version first.",
-            version
-        );
-    }
+    // Validate all versions before prompting
+    let mut targets = Vec::new();
+    for version in versions {
+        if version == &latest {
+            bail!(
+                "Cannot remove version {}: it is the current latest. Deploy a different version first.",
+                version
+            );
+        }
 
-    // Check if version directory exists
-    let check = cli_common::run_kubectl(&[
-        "exec", pod_name,
-        "--namespace", namespace,
-        "--", "sh", "-c",
-        &format!("test -d {}/{} && echo exists || echo missing", PVC_MOUNT_PATH, version),
-    ])
-    .await?;
+        let check = cli_common::run_kubectl(&[
+            "exec", pod_name,
+            "--namespace", namespace,
+            "--", "sh", "-c",
+            &format!("test -d {}/{} && echo exists || echo missing", PVC_MOUNT_PATH, version),
+        ])
+        .await?;
 
-    if check.trim() != "exists" {
-        bail!("Version {} not found on PVC.", version);
+        if check.trim() != "exists" {
+            bail!("Version {} not found on PVC.", version);
+        }
+
+        targets.push(version.as_str());
     }
 
     // Confirmation prompt
-    eprint!("Remove CLI v{} from PVC? [y/N] ", version);
+    if targets.len() == 1 {
+        eprint!("Remove CLI v{} from PVC? [y/N] ", targets[0]);
+    } else {
+        eprintln!("The following versions will be removed:");
+        for v in &targets {
+            eprintln!("  - {}", v);
+        }
+        eprint!("Remove {} versions from PVC? [y/N] ", targets.len());
+    }
     std::io::Write::flush(&mut std::io::stderr())?;
     let mut input = String::new();
     std::io::stdin().read_line(&mut input)?;
@@ -54,15 +66,21 @@ async fn remove_version(namespace: &str, pod_name: &str, version: &str) -> Resul
         return Ok(());
     }
 
-    // Delete version directory
-    println!("  Removing version {}...", version);
-    cli_common::run_kubectl(&[
-        "exec", pod_name,
-        "--namespace", namespace,
-        "--", "rm", "-rf", &format!("{}/{}", PVC_MOUNT_PATH, version),
-    ])
-    .await?;
+    // Delete version directories
+    for version in &targets {
+        println!("  Removing version {}...", version);
+        cli_common::run_kubectl(&[
+            "exec", pod_name,
+            "--namespace", namespace,
+            "--", "rm", "-rf", &format!("{}/{}", PVC_MOUNT_PATH, version),
+        ])
+        .await?;
+    }
 
-    println!("Removed CLI v{}.", version);
+    if targets.len() == 1 {
+        println!("Removed CLI v{}.", targets[0]);
+    } else {
+        println!("Removed {} versions.", targets.len());
+    }
     Ok(())
 }
