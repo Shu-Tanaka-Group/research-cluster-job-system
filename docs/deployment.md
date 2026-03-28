@@ -1094,17 +1094,22 @@ kubectl apply -k /path/to/my-overlay
 # PostgreSQL 初回起動時に自動実行される。
 # IF NOT EXISTS を使用しているため再デプロイ時も安全に再実行できる。
 
-# 5. Kyverno のインストールとイメージ制限ポリシーの適用
+# 5. Kueue リソースの作成（kueue.md 参照）
+kubectl apply -f kueue/resource-flavor.yaml
+kubectl apply -f kueue/cluster-queue.yaml
+
+# 6. Kyverno のインストールとイメージ制限ポリシーの適用
 helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
 helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --version 3.7.1
 kubectl apply -f policies/restrict-job-image.yaml
 
-# 6. 各ユーザーの namespace 作成
+# 7. 各ユーザーの namespace 作成
 ./scripts/create-user-namespace.sh alice
 ./scripts/create-user-namespace.sh bob
 
-# 7. CLI バイナリの配置（§4.1 参照）
+# 8. CLI バイナリの配置（§4.1 参照）
+# cjobctl のビルドは build.md「管理 CLI（cjobctl）のビルド」を参照
 cargo build --release --target x86_64-unknown-linux-musl --manifest-path cli/Cargo.toml
 cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version ${VERSION}
 ```
