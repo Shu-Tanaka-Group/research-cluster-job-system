@@ -1,10 +1,5 @@
-# このファイルは ConfigMap の構造とデフォルト値を示すテンプレートである。
-# kustomization.yaml の resources には含めない。
-# 管理者が初回セットアップ時に環境に合わせて値を調整し、手動で適用すること:
-#
-#   kubectl apply -f configmap-cjob-config.yaml
-#
-# バージョンアップで新しいキーが追加された場合は migration.md の手順に従い個別に追記する。
+# ConfigMap cjob-config のデフォルト値。
+# 環境固有の値は overlay の patches で上書きする（k8s/overlay-example/ を参照）。
 apiVersion: v1
 kind: ConfigMap
 metadata:

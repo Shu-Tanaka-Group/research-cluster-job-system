@@ -9,36 +9,34 @@
 K8s マニフェストは Kustomize の base / overlay 構成で管理する。
 
 ```
-k8s/
-  base/          # 環境非依存のマニフェスト（リポジトリで管理）
-  overlays/
-    stg/         # stg 環境の overlay（image 名・タグ、StorageClass を指定）
+リポジトリ内:
+  k8s/
+    base/              # 環境非依存のマニフェスト（デフォルト値を含む）
+    overlay-example/   # overlay のサンプル（コピーして使用する）
+
+リポジトリ外（管理者が作成）:
+  my-overlay/
+    kustomization.yaml              # base への参照、image、StorageClass、ConfigMap パッチ
+    configmap-cjob-config.yaml      # チューニングした ConfigMap 値
 ```
 
-デプロイは overlay を指定して行う。
+base にはデフォルト値を含む全マニフェストが入っており、環境固有の値は**リポジトリ外に配置した overlay** で上書きする。overlay のサンプルは `k8s/overlay-example/` を参照。
+
+デプロイはリポジトリを clone し、overlay を指定して行う。
 
 ```bash
-# ローカルから
-kubectl apply -k k8s/overlays/stg/
-
-# GitHub リポジトリから（タグ指定）
-kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/overlays/stg?ref=1.2.0'
+kubectl apply -k /path/to/my-overlay
 ```
 
-以下のリソースは環境依存のため Kustomize の管理対象外とし、管理者が手動で作成・管理する。テンプレートは `k8s/base/` 内のファイルを参照。
+Secret（`postgres-secret`）は Kustomize の管理対象外とし、管理者が手動で作成する。テンプレートは `k8s/base/secret-postgres.yaml` を参照。
 
-| リソース | テンプレート | 管理対象外の理由 |
-|---|---|---|
-| Secret `postgres-secret` | `k8s/base/secret-postgres.yaml` | 機密情報を含むため |
-| ConfigMap `cjob-config` | `k8s/base/configmap-cjob-config.yaml` | クラスタごとにチューニングした値を保持するため |
+以下の環境依存値は overlay で管理する。
 
-以下の環境依存値は overlay（`k8s/overlays/stg/kustomization.yaml`）で管理する。
-
-| 設定項目 | kustomization.yaml の設定箇所 | stg 環境の値 |
-|---|---|---|
-| image 名 | `images[].newName` | `yusekiya/cjob-submit-api` 等 |
-| image タグ | `images[].newTag` | VERSION ファイルと同期（`scripts/sync-version.sh`） |
-| StorageClass | `patches[]` の `value` | `managed-nfs-storage` |
+| 設定項目 | overlay での設定方法 |
+|---|---|
+| image 名・タグ | `images[].newName` / `images[].newTag` |
+| StorageClass | `patches[]`（JSON Patch） |
+| ConfigMap `cjob-config` の値 | `patches[]`（`configmap-cjob-config.yaml` で上書き） |
 
 ---
 
@@ -1063,18 +1061,22 @@ kubectl describe node <node-name> | grep -A5 Taints
 新規クラスタへの初回セットアップ手順。§16 の計算ノード準備が完了していることが前提。
 
 ```bash
-# 1. Secret と ConfigMap の作成（Kustomize 管理外のため手動で作成する）
+# 1. Secret の作成（Kustomize 管理対象外のため手動で作成する）
 kubectl create namespace cjob-system
 kubectl create secret generic postgres-secret -n cjob-system \
   --from-literal=POSTGRES_USER=cjob \
   --from-literal=POSTGRES_PASSWORD='<password>' \
   --from-literal=POSTGRES_DB=cjob
 
-# ConfigMap はテンプレートの値を環境に合わせて調整してから適用する
-# テンプレート: k8s/base/configmap-cjob-config.yaml
-kubectl apply -f k8s/base/configmap-cjob-config.yaml
+# 2. overlay の準備
+# k8s/overlay-example/ をリポジトリ外にコピーし、環境に合わせて編集する
+# - kustomization.yaml: resources の base パス、image 名・タグ、StorageClass
+# - configmap-cjob-config.yaml: チューニングしたい ConfigMap の値
+cp -r k8s/overlay-example /path/to/my-overlay
+# kustomization.yaml の resources パスを編集する
+# 例: resources: [../stg-cluster-job-system/k8s/base]
 
-# 2. システムコンポーネント image のビルドと push
+# 3. システムコンポーネント image のビルドと push
 read -r VERSION < VERSION
 docker build -t yusekiya/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
 docker build -t yusekiya/cjob-dispatcher:${VERSION} -f server/Dockerfile.dispatcher server/
@@ -1084,26 +1086,25 @@ docker push yusekiya/cjob-dispatcher:${VERSION}
 docker push yusekiya/cjob-watcher:${VERSION}
 # Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
 
-# 3. Kustomize で全リソースをデプロイ
-# （namespace / postgres-schema ConfigMap / RBAC / PVC / PostgreSQL / Submit API / Dispatcher / Watcher / NetworkPolicy）
-kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/overlays/stg?ref=<VERSION>'
+# 4. Kustomize で全リソースをデプロイ
+kubectl apply -k /path/to/my-overlay
 
 # DB スキーマの初期化:
 # postgres-schema ConfigMap の schema.sql が /docker-entrypoint-initdb.d/ にマウントされ、
 # PostgreSQL 初回起動時に自動実行される。
 # IF NOT EXISTS を使用しているため再デプロイ時も安全に再実行できる。
 
-# 4. Kyverno のインストールとイメージ制限ポリシーの適用
+# 5. Kyverno のインストールとイメージ制限ポリシーの適用
 helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
 helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --version 3.7.1
 kubectl apply -f policies/restrict-job-image.yaml
 
-# 5. 各ユーザーの namespace 作成
+# 6. 各ユーザーの namespace 作成
 ./scripts/create-user-namespace.sh alice
 ./scripts/create-user-namespace.sh bob
 
-# 6. CLI バイナリの配置（§4.1 参照）
+# 7. CLI バイナリの配置（§4.1 参照）
 cargo build --release --target x86_64-unknown-linux-musl --manifest-path cli/Cargo.toml
 cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version ${VERSION}
 ```

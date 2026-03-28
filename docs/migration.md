@@ -4,43 +4,40 @@
 
 ## 前提条件
 
+- リポジトリが clone 済みであること
+- overlay が作成済みであること（[deployment.md](deployment.md) §17 参照）
 - `kubectl` でクラスタにアクセスできること
 - Docker でイメージのビルド・push ができること
 - `cjobctl` がビルド済みであること（Step 5 で更新する場合は旧バージョンでよい）
 
 ## Step 1: K8s リソースの更新
 
-### 1.1 Kustomize 管理リソースの更新
-
-Kustomize で管理されているリソース（RBAC / Deployment / postgres-schema ConfigMap 等）を一括で更新する。変更の有無は `git diff <old-tag>...<new-tag> -- k8s/` で確認できる。
+### 1.1 リポジトリの更新と overlay の調整
 
 ```bash
-kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/overlays/stg?ref=<VERSION>'
+cd /path/to/stg-cluster-job-system
+git fetch && git checkout <VERSION>
 ```
 
-これにより、RBAC の権限変更、Deployment の image タグ更新（Step 3・4 に相当）が一括で適用される。Deployment に変更がある場合は自動的にローリングアップデートが行われる。
+base の ConfigMap にキーが追加されていないか確認する。追加がある場合は overlay の `configmap-cjob-config.yaml` にチューニング値を反映するか、デフォルト値のままでよいか判断する。
+
+```bash
+git diff <old-tag>...<new-tag> -- k8s/base/configmap-cjob-config.yaml
+```
+
+overlay の `kustomization.yaml` の `newTag` を新バージョンに更新する。
+
+### 1.2 Kustomize で適用
+
+```bash
+kubectl apply -k /path/to/my-overlay
+```
+
+これにより、ConfigMap・RBAC・Deployment 等が一括で更新される。Deployment の image タグが変わっている場合は自動的にローリングアップデートが行われる（Step 3・4 に相当）。
 
 > `postgres-schema` ConfigMap は PostgreSQL 初回起動時にのみ実行される。既存の DB には Step 2 の `cjobctl db migrate` で反映する。
 
 Kyverno ポリシーに変更がある場合は Kustomize 管理外のため個別に適用する。
-
-### 1.2 ConfigMap `cjob-config` の更新
-
-`cjob-config` は Kustomize 管理外のため、新しいキーの追加や既存キーの変更がある場合は手動で更新する。変更の有無は `git diff <old-tag>...<new-tag> -- k8s/base/configmap-cjob-config.yaml` で確認できる。
-
-```bash
-# 新しいキーを追加する例
-kubectl patch configmap cjob-config -n cjob-system --type merge \
-  -p '{"data":{"NEW_KEY":"value"}}'
-```
-
-> ConfigMap を更新しても、既存の Pod は再起動するまで古い環境変数を使い続ける。Step 4 でロールアウトが行われれば新しい値が反映される。変更がない場合は手動で再起動する。
-
-```bash
-kubectl rollout restart deployment/submit-api -n cjob-system
-kubectl rollout restart deployment/dispatcher -n cjob-system
-kubectl rollout restart deployment/watcher -n cjob-system
-```
 
 ## Step 2: DB スキーマの更新
 
