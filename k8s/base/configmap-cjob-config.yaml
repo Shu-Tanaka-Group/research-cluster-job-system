@@ -24,7 +24,7 @@ data:
   DEFAULT_TIME_LIMIT_SECONDS: "86400"
   MAX_TIME_LIMIT_SECONDS: "604800"
   KUEUE_LOCAL_QUEUE_NAME: default
-  JOB_NAMESPACE_PREFIX: user-
+  USER_NAMESPACE_LABEL: type=user
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
   CLI_BINARY_DIR: /cli-binary
