@@ -40,6 +40,11 @@ def dispatch_one(session, job, settings):
         logger.debug("CAS failed for %s/%d (likely cancelled)", ns, jid)
         session.commit()
         return
+    # Commit CAS so that DISPATCHING survives rollback in error handlers.
+    # Without this, rollback reverts CAS and mark_failed/increment_retry
+    # (which require status='DISPATCHING') silently update 0 rows,
+    # leaving the job stuck in QUEUED on every dispatch cycle.
+    session.commit()
 
     try:
         k8s_job_name = create_k8s_job(build_k8s_job(job, settings))
@@ -63,6 +68,11 @@ def dispatch_one(session, job, settings):
         mark_failed(session, ns, jid, str(e))
         session.commit()
         logger.error("Permanent K8s error for %s/%d: %s", ns, jid, e)
+    except Exception as e:
+        session.rollback()
+        mark_failed(session, ns, jid, f"unexpected dispatch error: {e}")
+        session.commit()
+        logger.exception("Unexpected error dispatching %s/%d", ns, jid)
 
 
 def run():

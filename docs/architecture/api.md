@@ -164,7 +164,8 @@ GET /v1/jobs?limit=50&order=desc
   "created_at": "2026-03-23T12:34:56Z",
   "dispatched_at": "2026-03-23T12:35:02Z",
   "started_at": "2026-03-23T12:35:10Z",
-  "finished_at": "2026-03-23T12:37:10Z"
+  "finished_at": "2026-03-23T12:37:10Z",
+  "last_error": null
 }
 ```
 

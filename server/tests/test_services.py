@@ -280,6 +280,16 @@ class TestGetJob:
         assert resp.job_id == 1
         assert resp.time_limit_seconds == 3600
         assert resp.started_at is None
+        assert resp.last_error is None
+
+    def test_found_with_last_error(self, db_session):
+        _insert_job(
+            db_session, 1, status="FAILED",
+            last_error="K8s API permanent error 403: Forbidden",
+        )
+        resp = get_job(db_session, NS, 1)
+        assert resp is not None
+        assert resp.last_error == "K8s API permanent error 403: Forbidden"
 
     def test_not_found(self, db_session):
         resp = get_job(db_session, NS, 999)
