@@ -79,7 +79,7 @@ metadata:
   namespace: cjob-system
 ```
 
-TokenReview API を呼ぶために ClusterRole と ClusterRoleBinding を付与する。
+TokenReview API を呼ぶために、および namespace のアノテーション（`cjob.io/username`）を読み取るために ClusterRole と ClusterRoleBinding を付与する。
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -90,6 +90,9 @@ rules:
   - apiGroups: ["authentication.k8s.io"]
     resources: ["tokenreviews"]
     verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
