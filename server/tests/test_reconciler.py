@@ -349,3 +349,136 @@ class TestReconcileResourceUsage:
 
         usage = self._get_usage(db_session)
         assert usage is None  # No usage recorded
+
+    def test_sweep_resource_usage_multiplied_by_parallelism(self, mock_delete, db_session):
+        """Sweep resource usage should be multiplied by parallelism."""
+        _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
+                     gpu=0, time_limit_seconds=3600,
+                     completions=100, parallelism=10,
+                     succeeded_count=0, failed_count=0)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=10)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        usage = self._get_usage(db_session)
+        assert usage is not None
+        # 3600 * 2000m * 10 = 72_000_000
+        assert usage.cpu_millicores_seconds == 3600 * 2000 * 10
+        # 3600 * 4096Mi * 10 = 147_456_000
+        assert usage.memory_mib_seconds == 3600 * 4096 * 10
+
+
+# ── Sweep status tracking ──
+
+
+def _make_sweep_k8s_job(namespace, job_id, name, conditions=None, active=None,
+                         succeeded=None, failed=None,
+                         completed_indexes=None, failed_indexes=None):
+    """Build a K8s V1Job with sweep-specific status fields."""
+    return V1Job(
+        metadata=V1ObjectMeta(
+            name=name,
+            namespace=namespace,
+            labels={
+                "cjob.io/namespace": namespace,
+                "cjob.io/job-id": str(job_id),
+            },
+        ),
+        status=V1JobStatus(
+            conditions=conditions,
+            active=active,
+            succeeded=succeeded,
+            failed=failed,
+            completed_indexes=completed_indexes,
+            failed_indexes=failed_indexes,
+        ),
+    )
+
+
+@patch("cjob.watcher.reconciler._delete_k8s_job")
+class TestReconcileSweep:
+    """Test sweep-specific reconciliation behavior."""
+
+    def test_sweep_complete_all_succeeded(self, mock_delete, db_session):
+        """Sweep with all tasks succeeded → SUCCEEDED."""
+        _insert_job(db_session, 1, status="RUNNING",
+                     completions=10, parallelism=5,
+                     succeeded_count=0, failed_count=0)
+        k8s_jobs = [_make_sweep_k8s_job(
+            NS, 1, "cjob-alice-1",
+            conditions=[V1JobCondition(type="Complete", status="True")],
+            succeeded=10, failed=0,
+            completed_indexes="0-9",
+        )]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "SUCCEEDED"
+        assert job.succeeded_count == 10
+        assert job.failed_count == 0
+        assert job.completed_indexes == "0-9"
+
+    def test_sweep_complete_with_failures(self, mock_delete, db_session):
+        """Sweep with K8s Complete but failed_count > 0 → FAILED."""
+        _insert_job(db_session, 1, status="RUNNING",
+                     completions=10, parallelism=5,
+                     succeeded_count=0, failed_count=0)
+        k8s_jobs = [_make_sweep_k8s_job(
+            NS, 1, "cjob-alice-1",
+            conditions=[V1JobCondition(type="Complete", status="True")],
+            succeeded=8, failed=2,
+            completed_indexes="0-7",
+            failed_indexes="8,9",
+        )]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.succeeded_count == 8
+        assert job.failed_count == 2
+        assert job.completed_indexes == "0-7"
+        assert job.failed_indexes == "8,9"
+
+    def test_sweep_failed_condition(self, mock_delete, db_session):
+        """Sweep with K8s Failed condition (e.g. DeadlineExceeded) → FAILED."""
+        _insert_job(db_session, 1, status="RUNNING",
+                     completions=100, parallelism=10,
+                     succeeded_count=0, failed_count=0)
+        k8s_jobs = [_make_sweep_k8s_job(
+            NS, 1, "cjob-alice-1",
+            conditions=[V1JobCondition(
+                type="Failed", status="True", reason="DeadlineExceeded"
+            )],
+            succeeded=50, failed=5,
+            completed_indexes="0-49",
+            failed_indexes="50-54",
+        )]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.last_error == "time limit exceeded"
+
+    def test_sweep_index_tracking_updates(self, mock_delete, db_session):
+        """Index tracking should update on each reconcile cycle."""
+        _insert_job(db_session, 1, status="RUNNING",
+                     completions=100, parallelism=10,
+                     succeeded_count=0, failed_count=0)
+        k8s_jobs = [_make_sweep_k8s_job(
+            NS, 1, "cjob-alice-1",
+            active=10, succeeded=40, failed=1,
+            completed_indexes="0-39",
+            failed_indexes="40",
+        )]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
+        assert job.succeeded_count == 40
+        assert job.failed_count == 1
+        assert job.completed_indexes == "0-39"
+        assert job.failed_indexes == "40"
