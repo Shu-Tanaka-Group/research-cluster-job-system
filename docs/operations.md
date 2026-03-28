@@ -279,3 +279,35 @@ Watcher の同期が完了する前に quota を設定したい場合は `--forc
 ```bash
 cjobctl cluster set-quota --cpu <new-total> --memory <new-total> --force
 ```
+
+## 8. CLI バイナリの配置
+
+新しいバージョンの `cjob` CLI バイナリをビルドし、PVC に配置する手順。配置後、ユーザーは `cjob update` でセルフアップデートできる。
+
+### 8.1 一連の手順
+
+```bash
+# 1. CLI バイナリのビルド（ビルド環境の準備は build.md §3 を参照）
+cargo build --release --target x86_64-unknown-linux-musl --manifest-path cli/Cargo.toml
+
+# 2. PVC にバイナリを配置
+#    内部的に一時 Pod を起動し、kubectl cp でコピー後、latest ファイルを更新して一時 Pod を削除する
+cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version <version>
+```
+
+### 8.2 配置後の確認
+
+```bash
+# Submit API の /v1/cli/version エンドポイントで最新バージョンが返ることを確認
+kubectl exec -it -n cjob-system deploy/submit-api -- curl -s http://localhost:8080/v1/cli/version
+```
+
+### 8.3 内部処理の詳細
+
+`cjobctl cli deploy` は以下を自動的に実行する（[cjobctl.md](architecture/cjobctl.md) §5.6 参照）。
+
+1. `kubectl run` で `cli-binary` PVC をマウントした一時 Pod（busybox）を起動
+2. `kubectl cp` でバイナリを `/cli-binary/<version>/cjob` にコピー
+3. 一時 Pod 内で `chmod +x` を実行
+4. `echo "<version>" > /cli-binary/latest` で最新バージョンを更新
+5. 一時 Pod を削除

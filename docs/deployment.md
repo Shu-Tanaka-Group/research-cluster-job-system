@@ -70,8 +70,11 @@ spec:
 バイナリの配置は `cjobctl cli deploy` で行う（[cjobctl.md](architecture/cjobctl.md) §5.6 参照）。
 
 ```bash
-cjobctl cli deploy --binary ./target/x86_64-unknown-linux-musl/release/cjob --version <version>
+# CLI をビルド後、PVC に配置する（ビルド手順は build.md §3 を参照）
+cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version <version>
 ```
+
+運用時の一連の手順は [operations.md](operations.md) §8 を参照。
 
 ---
 
@@ -1085,5 +1088,8 @@ kubectl apply -f policies/restrict-job-image.yaml
 ./scripts/create-user-namespace.sh bob
 
 # 15. CLI バイナリの配置（§4.1 参照）
-# PVC にアクセスできる Pod から実行する
+# CLI をビルド（build.md §3 参照）
+cargo build --release --target x86_64-unknown-linux-musl --manifest-path cli/Cargo.toml
+# PVC に配置
+cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version <version>
 ```

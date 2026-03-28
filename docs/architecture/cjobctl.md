@@ -149,9 +149,7 @@ GPU:    4
 
 一時 Pod には最小イメージ（`busybox`）を使用し、PVC の `cli-binary` を `/cli-binary` にマウントする。
 
-```bash
-cjobctl cli deploy --binary ./target/x86_64-unknown-linux-musl/release/cjob --version 1.2.0
-```
+使用例は [deployment.md](../deployment.md) §4.1 および [operations.md](../operations.md) §8 を参照。
 
 ### 5.7 DB スキーマ管理
 
