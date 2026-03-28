@@ -183,6 +183,7 @@ def list_jobs(
     limit: int | None = None,
     order: str = "asc",
 ) -> JobListResponse:
+    settings = get_settings()
     base_query = session.query(Job).filter(Job.namespace == namespace)
     if status:
         base_query = base_query.filter(Job.status == status)
@@ -210,7 +211,7 @@ def list_jobs(
         )
         for j in rows
     ]
-    return JobListResponse(jobs=jobs, total_count=total_count)
+    return JobListResponse(jobs=jobs, total_count=total_count, log_base_dir=settings.LOG_BASE_DIR)
 
 
 def get_job(
@@ -279,6 +280,7 @@ def delete_jobs(
     deleted = []
     skipped = []
     not_found = []
+    log_dirs = []
 
     if job_ids is None:
         # Delete all completed jobs in namespace
@@ -287,7 +289,7 @@ def delete_jobs(
             .filter(Job.namespace == namespace)
             .all()
         )
-        targets = [(j.job_id, j.status) for j in jobs]
+        targets = [(j.job_id, j.status, j.log_dir) for j in jobs]
     else:
         targets = []
         for jid in job_ids:
@@ -295,20 +297,22 @@ def delete_jobs(
             if job is None:
                 not_found.append(jid)
             else:
-                targets.append((job.job_id, job.status))
+                targets.append((job.job_id, job.status, job.log_dir))
 
-    for jid, status in targets:
+    for jid, status, log_dir in targets:
         if status in DELETABLE_STATUSES:
             session.query(Job).filter(
                 Job.namespace == namespace, Job.job_id == jid
             ).delete()
             deleted.append(jid)
+            if log_dir:
+                log_dirs.append(log_dir)
         elif status == "DELETING":
             skipped.append(SkippedItem(job_id=jid, reason="deleting"))
         elif status in ACTIVE_STATUSES:
             skipped.append(SkippedItem(job_id=jid, reason="running"))
 
-    return DeleteResponse(deleted=deleted, skipped=skipped, not_found=not_found)
+    return DeleteResponse(deleted=deleted, skipped=skipped, not_found=not_found, log_dirs=log_dirs)
 
 
 def reset(session: Session, namespace: str) -> tuple[int, dict]:

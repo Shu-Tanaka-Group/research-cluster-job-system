@@ -231,6 +231,7 @@ class TestListJobs:
         resp = list_jobs(db_session, NS)
         assert resp.jobs == []
         assert resp.total_count == 0
+        assert resp.log_base_dir == "/home/jovyan/.cjob/logs"
 
     def test_returns_jobs(self, db_session):
         _insert_job(db_session, 1, status="QUEUED")
@@ -330,22 +331,26 @@ class TestDeleteJobs:
         _insert_job(db_session, 1, status="SUCCEEDED")
         resp = delete_jobs(db_session, NS, [1])
         assert resp.deleted == [1]
+        assert resp.log_dirs == ["/home/jovyan/.cjob/logs/1"]
 
     def test_delete_running_skipped(self, db_session):
         _insert_job(db_session, 1, status="RUNNING")
         resp = delete_jobs(db_session, NS, [1])
         assert len(resp.skipped) == 1
         assert resp.skipped[0].reason == "running"
+        assert resp.log_dirs == []
 
     def test_delete_deleting_skipped(self, db_session):
         _insert_job(db_session, 1, status="DELETING")
         resp = delete_jobs(db_session, NS, [1])
         assert len(resp.skipped) == 1
         assert resp.skipped[0].reason == "deleting"
+        assert resp.log_dirs == []
 
     def test_delete_not_found(self, db_session):
         resp = delete_jobs(db_session, NS, [999])
         assert resp.not_found == [999]
+        assert resp.log_dirs == []
 
     def test_delete_all(self, db_session):
         _insert_job(db_session, 1, status="SUCCEEDED")
@@ -354,6 +359,7 @@ class TestDeleteJobs:
         resp = delete_jobs(db_session, NS, None)
         assert sorted(resp.deleted) == [1, 2]
         assert len(resp.skipped) == 1
+        assert sorted(resp.log_dirs) == ["/home/jovyan/.cjob/logs/1", "/home/jovyan/.cjob/logs/2"]
 
 
 # ── reset ──
