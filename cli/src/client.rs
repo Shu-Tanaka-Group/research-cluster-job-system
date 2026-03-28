@@ -14,6 +14,19 @@ pub struct JobSubmitRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub struct SweepSubmitRequest {
+    pub command: String,
+    pub image: String,
+    pub cwd: String,
+    pub env: std::collections::HashMap<String, String>,
+    pub resources: ResourceSpec,
+    pub completions: u32,
+    pub parallelism: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_limit_seconds: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ResourceSpec {
     pub cpu: String,
     pub memory: String,
@@ -34,12 +47,17 @@ pub struct JobListResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct JobSummary {
     pub job_id: u32,
     pub status: String,
     pub command: String,
     pub created_at: String,
     pub finished_at: Option<String>,
+    pub completions: Option<u32>,
+    pub parallelism: Option<u32>,
+    pub succeeded_count: Option<u32>,
+    pub failed_count: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +76,12 @@ pub struct JobDetailResponse {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub last_error: Option<String>,
+    pub completions: Option<u32>,
+    pub parallelism: Option<u32>,
+    pub succeeded_count: Option<u32>,
+    pub failed_count: Option<u32>,
+    pub completed_indexes: Option<String>,
+    pub failed_indexes: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -175,6 +199,19 @@ impl CjobClient {
         let resp = self
             .http
             .post(format!("{}/v1/jobs", self.base_url))
+            .header("Authorization", self.auth_header())
+            .json(req)
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn submit_sweep(&self, req: &SweepSubmitRequest) -> Result<JobSubmitResponse> {
+        let resp = self
+            .http
+            .post(format!("{}/v1/sweep", self.base_url))
             .header("Authorization", self.auth_header())
             .json(req)
             .send()

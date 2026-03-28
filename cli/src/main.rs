@@ -35,6 +35,32 @@ enum Commands {
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
     },
+    /// パラメータスイープを投入する
+    Sweep {
+        /// タスク数
+        #[arg(short = 'n', long = "count")]
+        count: u32,
+
+        /// 並列数
+        #[arg(long = "parallel", default_value = "1")]
+        parallel: u32,
+
+        /// 実行時間の上限（例: 3600, 1h, 6h, 1d, 3d）
+        #[arg(long = "time-limit")]
+        time_limit: Option<String>,
+
+        /// CPU リソース（例: "2"）
+        #[arg(long, default_value = "1")]
+        cpu: String,
+
+        /// メモリリソース（例: "4Gi"）
+        #[arg(long, default_value = "1Gi")]
+        memory: String,
+
+        /// コマンド（-- の後に指定）
+        #[arg(trailing_var_arg = true, required = true)]
+        command: Vec<String>,
+    },
     /// ジョブ一覧を表示する
     List {
         /// ステータスでフィルタ
@@ -84,6 +110,10 @@ enum Commands {
         /// リアルタイムでログを追跡する
         #[arg(long)]
         follow: bool,
+
+        /// スイープのインデックス指定
+        #[arg(long)]
+        index: Option<u32>,
     },
     /// CLI を最新バージョンに更新する
     Update {
@@ -124,13 +154,21 @@ async fn main() -> Result<()> {
             memory,
             time_limit,
         } => cmd_add(&api_client, command, cpu, memory, time_limit).await,
+        Commands::Sweep {
+            count,
+            parallel,
+            time_limit,
+            cpu,
+            memory,
+            command,
+        } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, time_limit).await,
         Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status.map(|s| s.to_uppercase()), limit, reverse, all).await,
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
         Commands::Delete { job_ids, all } => cmd_delete(&api_client, job_ids, all).await,
         Commands::Usage => cmd_usage(&api_client).await,
         Commands::Reset => cmd_reset(&api_client).await,
-        Commands::Logs { job_id, follow } => logs::show_logs(job_id, follow, &api_client).await,
+        Commands::Logs { job_id, follow, index } => logs::show_logs(job_id, follow, index, &api_client).await,
         Commands::Update { .. } => unreachable!(),
     }
 }
@@ -213,6 +251,70 @@ async fn cmd_add(
 
     let resp = client.submit_job(&req).await?;
     println!("ジョブ {} を投入しました。({})", resp.job_id, resp.status);
+    Ok(())
+}
+
+async fn cmd_sweep(
+    client: &client::CjobClient,
+    command: Vec<String>,
+    count: u32,
+    parallel: u32,
+    cpu: String,
+    memory: String,
+    time_limit: Option<String>,
+) -> Result<()> {
+    let cwd = std::env::current_dir()?
+        .to_string_lossy()
+        .to_string();
+
+    let image = std::env::var("CJOB_IMAGE")
+        .or_else(|_| std::env::var("JUPYTER_IMAGE"))
+        .unwrap_or_default();
+
+    if image.is_empty() {
+        anyhow::bail!("CJOB_IMAGE または JUPYTER_IMAGE 環境変数が設定されていません");
+    }
+
+    // Collect exported environment variables
+    let env: HashMap<String, String> = std::env::vars().collect();
+
+    let cmd_str = command
+        .iter()
+        .map(|arg| {
+            if arg.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}".contains(c)) {
+                format!("'{}'", arg.replace('\'', "'\\''"))
+            } else {
+                arg.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    let time_limit_seconds = match time_limit {
+        Some(ref s) => Some(parse_duration(s)?),
+        None => None,
+    };
+
+    let req = client::SweepSubmitRequest {
+        command: cmd_str,
+        image,
+        cwd,
+        env,
+        resources: client::ResourceSpec {
+            cpu,
+            memory,
+            gpu: 0,
+        },
+        completions: count,
+        parallelism: parallel,
+        time_limit_seconds,
+    };
+
+    let resp = client.submit_sweep(&req).await?;
+    println!(
+        "スイープ {} を投入しました。({}, {} タスク, 並列 {})",
+        resp.job_id, resp.status, count, parallel
+    );
     Ok(())
 }
 
