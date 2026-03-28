@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: submit-api
+  namespace: cjob-system
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: submit-api
+  template:
+    metadata:
+      labels:
+        app: submit-api
+    spec:
+      serviceAccountName: submit-api-sa
+      containers:
+        - name: submit-api
+          image: cjob-submit-api
+          ports:
+            - containerPort: 8080
+          env:
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: MAX_QUEUED_JOBS_PER_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: MAX_QUEUED_JOBS_PER_NAMESPACE
+            - name: LOG_BASE_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: LOG_BASE_DIR
+            - name: DEFAULT_TIME_LIMIT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DEFAULT_TIME_LIMIT_SECONDS
+            - name: MAX_TIME_LIMIT_SECONDS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: MAX_TIME_LIMIT_SECONDS
+            - name: JOB_NAMESPACE_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: JOB_NAMESPACE_PREFIX
+            - name: CLI_BINARY_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: CLI_BINARY_DIR
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: cli-binary
+              mountPath: /cli-binary
+              readOnly: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: cli-binary
+          persistentVolumeClaim:
+            claimName: cli-binary
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: submit-api
+  namespace: cjob-system
+spec:
+  selector:
+    app: submit-api
+  ports:
+    - port: 8080
+      targetPort: 8080

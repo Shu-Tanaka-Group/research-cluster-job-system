@@ -1,0 +1,59 @@
+# overlay サンプル
+#
+# このディレクトリをリポジトリ外にコピーして環境固有の値を設定する。
+#
+# 使用方法:
+#   1. このディレクトリを任意の場所にコピーする
+#      cp -r k8s/overlay-example /path/to/my-overlay
+#   2. kustomization.yaml の resources パスをリポジトリ内の base に合わせて修正する
+#   3. 環境に合わせて images / patches / configmap-cjob-config.yaml を編集する
+#   4. デプロイする
+#      kubectl apply -k /path/to/my-overlay
+#
+# バージョンアップ時:
+#   1. リポジトリを git pull して新しいバージョンに checkout する
+#   2. overlay の newTag を新バージョンに更新する
+#   3. kubectl apply -k /path/to/my-overlay を再実行する
+#   4. base の configmap-cjob-config.yaml に新しいキーが追加されていないか確認する
+#      git diff <old-tag>...<new-tag> -- k8s/base/configmap-cjob-config.yaml
+
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# リポジトリ内の base へのパスを指定する
+# 例: リポジトリが /opt/cjob/stg-cluster-job-system にある場合
+#     overlay が /opt/cjob/my-overlay にある場合
+#     → ../stg-cluster-job-system/k8s/base
+resources:
+  - ../stg-cluster-job-system/k8s/base
+
+images:
+  - name: cjob-submit-api
+    newName: yusekiya/cjob-submit-api
+    newTag: "1.2.0"
+  - name: cjob-dispatcher
+    newName: yusekiya/cjob-dispatcher
+    newTag: "1.2.0"
+  - name: cjob-watcher
+    newName: yusekiya/cjob-watcher
+    newTag: "1.2.0"
+
+patches:
+  # StorageClass の指定
+  - patch: |
+      - op: replace
+        path: /spec/storageClassName
+        value: managed-nfs-storage
+    target:
+      kind: PersistentVolumeClaim
+      name: cli-binary
+  - patch: |
+      - op: replace
+        path: /spec/volumeClaimTemplates/0/spec/storageClassName
+        value: managed-nfs-storage
+    target:
+      kind: StatefulSet
+      name: postgres
+  # ConfigMap cjob-config のチューニング値を上書き
+  # チューニングしたキーのみ記載すれば、残りは base のデフォルト値が使われる
+  - path: configmap-cjob-config.yaml

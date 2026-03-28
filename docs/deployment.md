@@ -4,6 +4,40 @@
 
 本設計書は、CJob システムの Kubernetes 上への配置・構成管理に関する設計をまとめたものである。
 
+### マニフェスト管理
+
+K8s マニフェストは Kustomize の base / overlay 構成で管理する。
+
+```
+リポジトリ内:
+  k8s/
+    base/              # 環境非依存のマニフェスト（デフォルト値を含む）
+    overlay-example/   # overlay のサンプル（コピーして使用する）
+
+リポジトリ外（管理者が作成）:
+  my-overlay/
+    kustomization.yaml              # base への参照、image、StorageClass、ConfigMap パッチ
+    configmap-cjob-config.yaml      # チューニングした ConfigMap 値
+```
+
+base にはデフォルト値を含む全マニフェストが入っており、環境固有の値は**リポジトリ外に配置した overlay** で上書きする。overlay のサンプルは `k8s/overlay-example/` を参照。
+
+デプロイはリポジトリを clone し、overlay を指定して行う。
+
+```bash
+kubectl apply -k /path/to/my-overlay
+```
+
+Secret（`postgres-secret`）は Kustomize の管理対象外とし、管理者が手動で作成する。テンプレートは `k8s/base/secret-postgres.yaml` を参照。
+
+以下の環境依存値は overlay で管理する。
+
+| 設定項目 | overlay での設定方法 |
+|---|---|
+| image 名・タグ | `images[].newName` / `images[].newTag` |
+| StorageClass | `patches[]`（JSON Patch） |
+| ConfigMap `cjob-config` の値 | `patches[]`（`configmap-cjob-config.yaml` で上書き） |
+
 ---
 
 ## 2. namespace 構成
@@ -1027,69 +1061,50 @@ kubectl describe node <node-name> | grep -A5 Taints
 新規クラスタへの初回セットアップ手順。§16 の計算ノード準備が完了していることが前提。
 
 ```bash
-# 1. cjob-system namespace の作成
+# 1. Secret の作成（Kustomize 管理対象外のため手動で作成する）
 kubectl create namespace cjob-system
+kubectl create secret generic postgres-secret -n cjob-system \
+  --from-literal=POSTGRES_USER=cjob \
+  --from-literal=POSTGRES_PASSWORD='<password>' \
+  --from-literal=POSTGRES_DB=cjob
 
-# 2. Secret の作成
-kubectl apply -f secrets/postgres-secret.yaml
+# 2. overlay の準備
+# k8s/overlay-example/ をリポジトリ外にコピーし、環境に合わせて編集する
+# - kustomization.yaml: resources の base パス、image 名・タグ、StorageClass
+# - configmap-cjob-config.yaml: チューニングしたい ConfigMap の値
+cp -r k8s/overlay-example /path/to/my-overlay
+# kustomization.yaml の resources パスを編集する
+# 例: resources: [../stg-cluster-job-system/k8s/base]
 
-# 3. ConfigMap の作成
-kubectl apply -f configmaps/cjob-config.yaml
-kubectl apply -f configmaps/postgres-schema.yaml
+# 3. システムコンポーネント image のビルドと push
+read -r VERSION < VERSION
+docker build -t yusekiya/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
+docker build -t yusekiya/cjob-dispatcher:${VERSION} -f server/Dockerfile.dispatcher server/
+docker build -t yusekiya/cjob-watcher:${VERSION} -f server/Dockerfile.watcher server/
+docker push yusekiya/cjob-submit-api:${VERSION}
+docker push yusekiya/cjob-dispatcher:${VERSION}
+docker push yusekiya/cjob-watcher:${VERSION}
+# Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
 
-# 4. RBAC の作成
-kubectl apply -f rbac/submit-api-sa.yaml
-kubectl apply -f rbac/dispatcher-sa.yaml
+# 4. Kustomize で全リソースをデプロイ
+kubectl apply -k /path/to/my-overlay
 
-
-# 5. PVC の作成
-kubectl apply -f pvcs/cli-binary.yaml
-
-# 6. PostgreSQL のデプロイ
-kubectl apply -f statefulsets/postgres.yaml
-
-# 7. DB スキーマの初期化
+# DB スキーマの初期化:
 # postgres-schema ConfigMap の schema.sql が /docker-entrypoint-initdb.d/ にマウントされ、
 # PostgreSQL 初回起動時に自動実行される。
 # IF NOT EXISTS を使用しているため再デプロイ時も安全に再実行できる。
 
-# 8. システムコンポーネント image のビルドと push
-docker build -t yusekiya/cjob-submit-api:latest -f Dockerfile.submit-api .
-docker push yusekiya/cjob-submit-api:latest
-
-docker build -t yusekiya/cjob-dispatcher:latest -f Dockerfile.dispatcher .
-docker push yusekiya/cjob-dispatcher:latest
-
-docker build -t yusekiya/cjob-watcher:latest -f Dockerfile.watcher .
-docker push yusekiya/cjob-watcher:latest
-
-# Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
-
-# 9. Submit API のデプロイ
-kubectl apply -f deployments/submit-api.yaml
-
-# 10. Dispatcher のデプロイ
-kubectl apply -f deployments/dispatcher.yaml
-
-# 11. Watcher のデプロイ
-kubectl apply -f deployments/watcher.yaml
-
-# 12. NetworkPolicy の適用
-kubectl apply -f networkpolicies/allow-submit-api.yaml
-
-# 13. Kyverno のインストールとイメージ制限ポリシーの適用
+# 5. Kyverno のインストールとイメージ制限ポリシーの適用
 helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
 helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --version 3.7.1
 kubectl apply -f policies/restrict-job-image.yaml
 
-# 14. 各ユーザーの namespace 作成
+# 6. 各ユーザーの namespace 作成
 ./scripts/create-user-namespace.sh alice
 ./scripts/create-user-namespace.sh bob
 
-# 15. CLI バイナリの配置（§4.1 参照）
-# CLI をビルド（build.md §3 参照）
+# 7. CLI バイナリの配置（§4.1 参照）
 cargo build --release --target x86_64-unknown-linux-musl --manifest-path cli/Cargo.toml
-# PVC に配置
-cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version <version>
+cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version ${VERSION}
 ```

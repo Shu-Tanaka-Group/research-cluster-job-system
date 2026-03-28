@@ -1,0 +1,122 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dispatcher
+  namespace: cjob-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dispatcher
+  template:
+    metadata:
+      labels:
+        app: dispatcher
+    spec:
+      serviceAccountName: dispatcher-sa
+      containers:
+        - name: dispatcher
+          image: cjob-dispatcher
+          env:
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: DISPATCH_BUDGET_PER_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_BUDGET_PER_NAMESPACE
+            - name: DISPATCH_BATCH_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_BATCH_SIZE
+            - name: DISPATCH_ROUND_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_ROUND_SIZE
+            - name: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
+            - name: DISPATCH_RETRY_INTERVAL_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_RETRY_INTERVAL_SEC
+            - name: DISPATCH_MAX_RETRIES
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_MAX_RETRIES
+            - name: GAP_FILLING_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: GAP_FILLING_ENABLED
+            - name: GAP_FILLING_STALL_THRESHOLD_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: GAP_FILLING_STALL_THRESHOLD_SEC
+            - name: FAIR_SHARE_WINDOW_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: FAIR_SHARE_WINDOW_DAYS
+            - name: KUEUE_LOCAL_QUEUE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: KUEUE_LOCAL_QUEUE_NAME
+            - name: JOB_NAMESPACE_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: JOB_NAMESPACE_PREFIX
+            - name: WORKSPACE_MOUNT_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: WORKSPACE_MOUNT_PATH
+            - name: LOG_BASE_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: LOG_BASE_DIR
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "test $(( $(date +%s) - $(stat -c %Y /tmp/liveness) )) -lt 120"]
+            initialDelaySeconds: 30
+            periodSeconds: 30

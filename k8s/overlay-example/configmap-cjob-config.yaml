@@ -1,0 +1,10 @@
+# ConfigMap cjob-config のチューニング値
+# base のデフォルト値を上書きしたいキーのみ記載する。
+# ここに記載しないキーは base のデフォルト値がそのまま使われる。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cjob-config
+  namespace: cjob-system
+data:
+  DISPATCH_BUDGET_PER_NAMESPACE: "256"

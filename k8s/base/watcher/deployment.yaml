@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: watcher
+  namespace: cjob-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: watcher
+  template:
+    metadata:
+      labels:
+        app: watcher
+    spec:
+      serviceAccountName: dispatcher-sa
+      containers:
+        - name: watcher
+          image: cjob-watcher
+          env:
+            - name: POSTGRES_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_HOST
+            - name: POSTGRES_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_PORT
+            - name: POSTGRES_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: POSTGRES_DB
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: POSTGRES_PASSWORD
+            - name: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
+            - name: NODE_LABEL_SELECTOR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: NODE_LABEL_SELECTOR
+            - name: NODE_RESOURCE_SYNC_INTERVAL_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: NODE_RESOURCE_SYNC_INTERVAL_SEC
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "300m"
+              memory: "256Mi"
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "test $(( $(date +%s) - $(stat -c %Y /tmp/liveness) )) -lt 120"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
