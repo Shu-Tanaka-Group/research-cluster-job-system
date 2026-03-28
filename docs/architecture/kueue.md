@@ -23,6 +23,21 @@ spec:
       effect: "NoSchedule"
 ```
 
+**注意:** `nodeTaints` と `tolerations` の値は、ConfigMap `cjob-config` の `JOB_NODE_TAINT`（デフォルト: `role=computing:NoSchedule`）およびノードに付与する Taint と一致している必要がある。3 箇所が不一致の場合、Job Pod がスケジュールされない。
+
+**Taint を使わない場合:** `JOB_NODE_TAINT` を空文字列に設定した場合は、ResourceFlavor の `nodeTaints` と `tolerations` を省略する。
+
+```yaml
+# Taint を使わない場合の ResourceFlavor
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: cluster-job-flavor
+spec:
+  nodeLabels:
+    cluster-job: "true"
+```
+
 ## 2. ClusterQueue
 
 ```yaml
@@ -88,7 +103,7 @@ spec:
   template:
     spec:
       restartPolicy: Never
-      tolerations:
+      tolerations:                            # JOB_NODE_TAINT の値から Dispatcher が動的に生成（空の場合は省略）
         - key: "role"
           operator: "Equal"
           value: "computing"

@@ -168,6 +168,7 @@ data:
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
   CLI_BINARY_DIR: /cli-binary
+  JOB_NODE_TAINT: "role=computing:NoSchedule"
 ```
 
 ### 6.2 各コンポーネントへの注入パターン
@@ -1047,13 +1048,15 @@ kubectl apply -f kueue/cluster-queue.yaml
 
 ## 16. 計算ノードの準備
 
-ジョブを実行するノードに `cluster-job=true` ラベルと `role=computing:NoSchedule` Taint を付与する。これらは以下の3つの仕組みで参照される。
+ジョブを実行するノードに `cluster-job=true` ラベルと Taint を付与する。Taint の値は ConfigMap `cjob-config` の `JOB_NODE_TAINT` で設定する（デフォルト: `role=computing:NoSchedule`）。
 
 | 設定 | 参照先 | 用途 |
 |---|---|---|
 | `cluster-job=true` ラベル | Kueue ResourceFlavor の `nodeLabels` | Kueue が Job Pod をスケジュールするノードの選定 |
 | `cluster-job=true` ラベル | ConfigMap `NODE_LABEL_SELECTOR` | Watcher がノードの allocatable リソースを取得する対象の選定 |
-| `role=computing:NoSchedule` Taint | Kueue ResourceFlavor の `nodeTaints` / Job Pod の `tolerations` | 一般の Pod が計算ノードにスケジュールされることを防止 |
+| `JOB_NODE_TAINT` の値 | Kueue ResourceFlavor の `nodeTaints` / Job Pod の `tolerations` | 一般の Pod が計算ノードにスケジュールされることを防止 |
+
+**重要:** ConfigMap `JOB_NODE_TAINT`・Kueue ResourceFlavor の `nodeTaints`・ノードの Taint の 3 箇所は同じ値に統一する必要がある。不一致の場合、Job Pod がスケジュールされない。
 
 ```bash
 # 計算ノードにラベルと Taint を付与する
@@ -1065,6 +1068,8 @@ kubectl taint node <node-name> role=computing:NoSchedule
 kubectl get nodes -l cluster-job=true
 kubectl describe node <node-name> | grep -A5 Taints
 ```
+
+**Taint を使わない運用（共用ノード）:** 専用ノードを持たない環境では `JOB_NODE_TAINT` を空文字列に設定し、Kueue ResourceFlavor の `nodeTaints` を省略し、ノードへの Taint 付与を行わない。
 
 計算ノードを追加・撤去した場合、Watcher が `node_resources` テーブルを自動的に同期するため、Dispatcher や Submit API の設定変更は不要である。
 

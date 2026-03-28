@@ -1,5 +1,7 @@
+import pytest
+
 from cjob.config import Settings
-from cjob.dispatcher.k8s_job import build_k8s_job
+from cjob.dispatcher.k8s_job import _parse_taint, build_k8s_job
 from cjob.models import Job
 
 
@@ -142,7 +144,7 @@ class TestBuildK8sJob:
         assert "LOG_DIR=" in container.args[0]
         assert "tee" in container.args[0]
 
-    def test_tolerations(self):
+    def test_tolerations_default(self):
         job = _make_job()
         settings = _make_settings()
         manifest = build_k8s_job(job, settings)
@@ -151,3 +153,63 @@ class TestBuildK8sJob:
         assert len(tolerations) == 1
         assert tolerations[0].key == "role"
         assert tolerations[0].value == "computing"
+        assert tolerations[0].effect == "NoSchedule"
+
+    def test_tolerations_custom(self):
+        job = _make_job()
+        settings = _make_settings(JOB_NODE_TAINT="gpu=true:NoExecute")
+        manifest = build_k8s_job(job, settings)
+
+        tolerations = manifest.spec.template.spec.tolerations
+        assert len(tolerations) == 1
+        assert tolerations[0].key == "gpu"
+        assert tolerations[0].value == "true"
+        assert tolerations[0].effect == "NoExecute"
+
+    def test_tolerations_empty(self):
+        job = _make_job()
+        settings = _make_settings(JOB_NODE_TAINT="")
+        manifest = build_k8s_job(job, settings)
+
+        assert manifest.spec.template.spec.tolerations is None
+
+
+class TestParseTaint:
+    def test_valid_taint(self):
+        result = _parse_taint("role=computing:NoSchedule")
+        assert result.key == "role"
+        assert result.value == "computing"
+        assert result.operator == "Equal"
+        assert result.effect == "NoSchedule"
+
+    def test_empty_string(self):
+        assert _parse_taint("") is None
+
+    def test_no_execute_effect(self):
+        result = _parse_taint("gpu=true:NoExecute")
+        assert result.effect == "NoExecute"
+
+    def test_prefer_no_schedule_effect(self):
+        result = _parse_taint("key=val:PreferNoSchedule")
+        assert result.effect == "PreferNoSchedule"
+
+    def test_empty_value(self):
+        result = _parse_taint("key=:NoSchedule")
+        assert result.key == "key"
+        assert result.value == ""
+
+    def test_invalid_no_colon(self):
+        with pytest.raises(ValueError, match="expected 'key=value:effect'"):
+            _parse_taint("role=computing")
+
+    def test_invalid_no_equals(self):
+        with pytest.raises(ValueError, match="expected 'key=value:effect'"):
+            _parse_taint("role:NoSchedule")
+
+    def test_invalid_effect(self):
+        with pytest.raises(ValueError, match="Invalid taint effect"):
+            _parse_taint("role=computing:BadEffect")
+
+    def test_invalid_empty_key(self):
+        with pytest.raises(ValueError, match="key must not be empty"):
+            _parse_taint("=computing:NoSchedule")
