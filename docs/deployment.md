@@ -4,6 +4,22 @@
 
 本設計書は、CJob システムの Kubernetes 上への配置・構成管理に関する設計をまとめたものである。
 
+### マニフェスト管理
+
+K8s マニフェストは `k8s/base/` に配置し、Kustomize で管理する。`kubectl apply -k` でローカルディレクトリまたは GitHub リポジトリの URL を指定してデプロイできる。
+
+```bash
+# ローカルから
+kubectl apply -k k8s/base/
+
+# GitHub リポジトリから（タグ指定）
+kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/base?ref=v1.2.0'
+```
+
+Secret（`postgres-secret`）は Kustomize の管理対象外とし、管理者が手動で作成する。テンプレートは `k8s/base/secret-postgres.yaml` を参照。
+
+image タグは `k8s/base/kustomization.yaml` の `images` トランスフォーマーで管理する。`scripts/sync-version.sh` で VERSION ファイルと自動同期される。
+
 ---
 
 ## 2. namespace 構成
@@ -1027,69 +1043,43 @@ kubectl describe node <node-name> | grep -A5 Taints
 新規クラスタへの初回セットアップ手順。§16 の計算ノード準備が完了していることが前提。
 
 ```bash
-# 1. cjob-system namespace の作成
+# 1. Secret の作成（Kustomize 管理外のため手動で作成する）
 kubectl create namespace cjob-system
+kubectl create secret generic postgres-secret -n cjob-system \
+  --from-literal=POSTGRES_USER=cjob \
+  --from-literal=POSTGRES_PASSWORD='<password>' \
+  --from-literal=POSTGRES_DB=cjob
 
-# 2. Secret の作成
-kubectl apply -f secrets/postgres-secret.yaml
+# 2. システムコンポーネント image のビルドと push
+read -r VERSION < VERSION
+docker build -t yusekiya/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
+docker build -t yusekiya/cjob-dispatcher:${VERSION} -f server/Dockerfile.dispatcher server/
+docker build -t yusekiya/cjob-watcher:${VERSION} -f server/Dockerfile.watcher server/
+docker push yusekiya/cjob-submit-api:${VERSION}
+docker push yusekiya/cjob-dispatcher:${VERSION}
+docker push yusekiya/cjob-watcher:${VERSION}
+# Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
 
-# 3. ConfigMap の作成
-kubectl apply -f configmaps/cjob-config.yaml
-kubectl apply -f configmaps/postgres-schema.yaml
+# 3. Kustomize で全リソースをデプロイ
+# （namespace / ConfigMap / RBAC / PVC / PostgreSQL / Submit API / Dispatcher / Watcher / NetworkPolicy）
+kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/base?ref=v<VERSION>'
 
-# 4. RBAC の作成
-kubectl apply -f rbac/submit-api-sa.yaml
-kubectl apply -f rbac/dispatcher-sa.yaml
-
-
-# 5. PVC の作成
-kubectl apply -f pvcs/cli-binary.yaml
-
-# 6. PostgreSQL のデプロイ
-kubectl apply -f statefulsets/postgres.yaml
-
-# 7. DB スキーマの初期化
+# DB スキーマの初期化:
 # postgres-schema ConfigMap の schema.sql が /docker-entrypoint-initdb.d/ にマウントされ、
 # PostgreSQL 初回起動時に自動実行される。
 # IF NOT EXISTS を使用しているため再デプロイ時も安全に再実行できる。
 
-# 8. システムコンポーネント image のビルドと push
-docker build -t yusekiya/cjob-submit-api:latest -f Dockerfile.submit-api .
-docker push yusekiya/cjob-submit-api:latest
-
-docker build -t yusekiya/cjob-dispatcher:latest -f Dockerfile.dispatcher .
-docker push yusekiya/cjob-dispatcher:latest
-
-docker build -t yusekiya/cjob-watcher:latest -f Dockerfile.watcher .
-docker push yusekiya/cjob-watcher:latest
-
-# Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
-
-# 9. Submit API のデプロイ
-kubectl apply -f deployments/submit-api.yaml
-
-# 10. Dispatcher のデプロイ
-kubectl apply -f deployments/dispatcher.yaml
-
-# 11. Watcher のデプロイ
-kubectl apply -f deployments/watcher.yaml
-
-# 12. NetworkPolicy の適用
-kubectl apply -f networkpolicies/allow-submit-api.yaml
-
-# 13. Kyverno のインストールとイメージ制限ポリシーの適用
+# 4. Kyverno のインストールとイメージ制限ポリシーの適用
 helm repo add kyverno https://kyverno.github.io/kyverno/
 helm repo update
 helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --version 3.7.1
 kubectl apply -f policies/restrict-job-image.yaml
 
-# 14. 各ユーザーの namespace 作成
+# 5. 各ユーザーの namespace 作成
 ./scripts/create-user-namespace.sh alice
 ./scripts/create-user-namespace.sh bob
 
-# 15. CLI バイナリの配置（§4.1 参照）
-# CLI をビルド（build.md §3 参照）
+# 6. CLI バイナリの配置（§4.1 参照）
 cargo build --release --target x86_64-unknown-linux-musl --manifest-path cli/Cargo.toml
-# PVC に配置
-cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version <version>
+cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version ${VERSION}
 ```

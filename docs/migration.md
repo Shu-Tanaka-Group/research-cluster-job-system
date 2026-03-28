@@ -4,47 +4,25 @@
 
 ## 前提条件
 
-- リポジトリが移行先バージョンのコミットにチェックアウトされていること
 - `kubectl` でクラスタにアクセスできること
 - Docker でイメージのビルド・push ができること
 - `cjobctl` がビルド済みであること（Step 5 で更新する場合は旧バージョンでよい）
 
-## Step 1: K8s リソースファイルの更新
+## Step 1: K8s リソースの更新
 
-変更がある場合のみ実行する。変更の有無は `git diff <old-tag>...<new-tag> -- docs/deployment.md` で確認できる。
-
-### 1.1 ConfigMap
-
-設定値の追加・変更・削除がある場合:
+Kustomize で管理されている全リソース（ConfigMap / RBAC / Deployment 等）を一括で更新する。変更の有無は `git diff <old-tag>...<new-tag> -- k8s/` で確認できる。
 
 ```bash
-kubectl apply -f configmaps/cjob-config.yaml
+kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s/base?ref=v<VERSION>'
 ```
 
-> ConfigMap を更新しても、既存の Pod は再起動するまで古い環境変数を使い続ける。Step 4 の再デプロイで新しい値が反映される。
+これにより、ConfigMap の設定値変更、RBAC の権限変更、Deployment の image タグ更新（Step 3・4 に相当）が一括で適用される。
 
-### 1.2 RBAC
+> ConfigMap を更新しても、既存の Pod は再起動するまで古い環境変数を使い続ける。Deployment に変更がある場合は `kubectl apply -k` により自動的にローリングアップデートが行われる。
 
-権限の追加・変更がある場合:
+> `postgres-schema` ConfigMap は PostgreSQL 初回起動時にのみ実行される。既存の DB には Step 2 の `cjobctl db migrate` で反映する。
 
-```bash
-kubectl apply -f rbac/submit-api-sa.yaml
-kubectl apply -f rbac/dispatcher-sa.yaml
-```
-
-### 1.3 postgres-schema ConfigMap
-
-新しいテーブルやインデックスの追加がある場合:
-
-```bash
-kubectl apply -f configmaps/postgres-schema.yaml
-```
-
-> `postgres-schema` は PostgreSQL 初回起動時にのみ実行される。既存の DB には Step 2 の `cjobctl db migrate` で反映する。
-
-### 1.4 その他
-
-NetworkPolicy、Kyverno ポリシー等に変更がある場合は個別に適用する。
+Kyverno ポリシーに変更がある場合は Kustomize 管理外のため個別に適用する。
 
 ## Step 2: DB スキーマの更新
 
@@ -78,29 +56,19 @@ docker push yusekiya/cjob-watcher:${VERSION}
 read -r VERSION < VERSION
 
 # Submit APIの例．他のコンポーネントも同様
-docker tag yusekiya/cjob-submit-api:#{OLD_VERSION} yusekiya/cjob-submit-api:#{VERSION}
-docker push yusekiya/cjob-submit-api:#{VERSION}
+docker tag yusekiya/cjob-submit-api:${OLD_VERSION} yusekiya/cjob-submit-api:${VERSION}
+docker push yusekiya/cjob-submit-api:${VERSION}
 ```
 
 ## Step 4: コンポーネントの再デプロイ
 
-イメージまたは Deployment YAML に変更があるコンポーネントのみ再デプロイする。
+Step 1 の `kubectl apply -k` で image タグの更新と Deployment の再デプロイが一括で行われる。Step 3 でイメージを push した後、以下でロールアウトの完了を確認する。
 
 **デプロイ順序に注意**: コンポーネント間にデータ依存がある場合は、データを生産する側を先にデプロイする。例えば Watcher が DB にデータを書き込み、Dispatcher や Submit API がそのデータを参照する場合は Watcher を最初にデプロイする。依存がない場合は順序を問わない。
 
 ```bash
-read -r VERSION < VERSION
-
-# Watcher
-kubectl set image deployment/watcher -n cjob-system watcher=yusekiya/cjob-watcher:${VERSION}
 kubectl rollout status deployment/watcher -n cjob-system
-
-# Dispatcher
-kubectl set image deployment/dispatcher -n cjob-system dispatcher=yusekiya/cjob-dispatcher:${VERSION}
 kubectl rollout status deployment/dispatcher -n cjob-system
-
-# Submit API
-kubectl set image deployment/submit-api -n cjob-system submit-api=yusekiya/cjob-submit-api:${VERSION}
 kubectl rollout status deployment/submit-api -n cjob-system
 ```
 

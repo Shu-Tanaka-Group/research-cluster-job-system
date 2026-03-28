@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: submit-api-sa
+  namespace: cjob-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: token-reviewer
+rules:
+  - apiGroups: ["authentication.k8s.io"]
+    resources: ["tokenreviews"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: submit-api-token-reviewer
+subjects:
+  - kind: ServiceAccount
+    name: submit-api-sa
+    namespace: cjob-system
+roleRef:
+  kind: ClusterRole
+  name: token-reviewer
+  apiGroup: rbac.authorization.k8s.io
