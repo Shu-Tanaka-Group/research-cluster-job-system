@@ -168,7 +168,6 @@ data:
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
   CLI_BINARY_DIR: /cli-binary
-  JOB_IMAGE_ENV_VAR: JUPYTER_IMAGE
 ```
 
 ### 6.2 各コンポーネントへの注入パターン
@@ -468,9 +467,15 @@ JupyterHub 環境では `JUPYTER_IMAGE` が User Pod 起動時に自動的に注
 
 JupyterHub 以外の環境で使用する場合は、以下のように User Pod に環境変数を設定する。
 
-1. ConfigMap `cjob-config` の `JOB_IMAGE_ENV_VAR` を使用する環境変数名に変更する
-2. User Pod に `CJOB_IMAGE_ENV_VAR` 環境変数を設定し、ConfigMap の値と同じ名前を指定する
-3. User Pod に該当の環境変数（例: `MY_CONTAINER_IMAGE`）を設定し、使用するイメージ名を値として指定する
+1. User Pod に `CJOB_IMAGE_ENV_VAR` 環境変数を設定し、イメージ名を格納する環境変数名を指定する
+2. User Pod に該当の環境変数（例: `MY_CONTAINER_IMAGE`）を設定し、使用するイメージ名を値として指定する
+
+例: User Pod の環境変数に以下を設定した場合、`MY_CONTAINER_IMAGE` からイメージ名が取得される。
+
+```
+CJOB_IMAGE_ENV_VAR=MY_CONTAINER_IMAGE
+MY_CONTAINER_IMAGE=my-registry/my-image:1.0
+```
 
 ---
 
