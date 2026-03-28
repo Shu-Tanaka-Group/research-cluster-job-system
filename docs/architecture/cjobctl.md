@@ -138,18 +138,82 @@ GPU:    4
 
 | コマンド | 概要 | 対象 |
 |---|---|---|
-| `cjobctl cli deploy --binary <path> --version <version>` | CLI バイナリを PVC に配置する | K8s Pod + PVC |
+| `cjobctl cli list` | PVC 上の登録済みバージョン一覧を表示する | K8s Pod + PVC |
+| `cjobctl cli deploy --binary <path> --version <version> [--latest]` | CLI バイナリを PVC に配置する | K8s Pod + PVC |
+| `cjobctl cli remove <version>` | PVC 上の指定バージョンのバイナリを削除する | K8s Pod + PVC |
+
+すべてのサブコマンドは一時 Pod（busybox）+ `kubectl exec` のパターンで PVC を操作する。一時 Pod には最小イメージ（`busybox`）を使用し、PVC の `cli-binary` を `/cli-binary` にマウントする。
+
+使用例は [deployment.md](../deployment.md) §4.1 および [operations.md](../operations.md) §8 を参照。
+
+#### `cjobctl cli list`
+
+PVC 上のディレクトリ構造から登録済みバージョンの一覧を表示する。
+
+```
+$ cjobctl cli list
+VERSION            LATEST
+1.3.0-beta.1
+1.3.0              ← latest
+1.2.0
+1.1.0
+```
+
+内部処理:
+1. 一時 Pod を起動する
+2. `ls /cli-binary/` でバージョンディレクトリの一覧を取得する
+3. `cat /cli-binary/latest` で latest バージョンを取得する
+4. semver 降順でソートし、latest マーカー付きで表示する
+5. 一時 Pod を削除する
+
+#### `cjobctl cli deploy`
 
 内部処理:
 1. `kubectl run` で `cli-binary` PVC（ReadWriteMany）をマウントした一時 Pod を起動する
 2. `kubectl cp` でバイナリを一時 Pod 内の `/cli-binary/<version>/cjob` にコピーする
 3. 一時 Pod 内で `chmod +x` を実行する
-4. 一時 Pod 内で `echo "<version>" > /cli-binary/latest` を実行する
+4. latest ファイルの更新:
+   - **安定版**（バージョン文字列に `-` を含まない）: `latest` ファイルを更新する
+   - **プレリリース版**（バージョン文字列に `-` を含む）: `latest` ファイルを更新しない
+   - `--latest` オプション指定時: プレリリース版でも `latest` ファイルを強制更新する
 5. 一時 Pod を削除する
 
-一時 Pod には最小イメージ（`busybox`）を使用し、PVC の `cli-binary` を `/cli-binary` にマウントする。
+```bash
+# 安定版: latest が自動更新される
+$ cjobctl cli deploy --binary ./cjob --version 1.3.0
+Deployed 1.3.0 (latest updated)
 
-使用例は [deployment.md](../deployment.md) §4.1 および [operations.md](../operations.md) §8 を参照。
+# ベータ版: latest は更新されない
+$ cjobctl cli deploy --binary ./cjob --version 1.3.1-beta.1
+Deployed 1.3.1-beta.1 (latest unchanged: 1.3.0)
+
+# ベータ版でも latest を強制更新
+$ cjobctl cli deploy --binary ./cjob --version 1.3.1-beta.1 --latest
+Deployed 1.3.1-beta.1 (latest updated)
+```
+
+プレリリース判定はバージョン文字列に `-` を含むかどうかで行う。
+
+#### `cjobctl cli remove`
+
+PVC 上の指定バージョンのバイナリディレクトリを削除する。
+
+```bash
+$ cjobctl cli remove 1.1.0
+バージョン 1.1.0 を削除しました。
+
+$ cjobctl cli remove 1.3.0
+エラー: バージョン 1.3.0 は latest に指定されているため削除できません。
+```
+
+内部処理:
+1. 一時 Pod を起動する
+2. `cat /cli-binary/latest` で latest バージョンを取得する
+3. 指定バージョンが latest の場合はエラーで中断する
+4. 指定バージョンのディレクトリが存在しない場合はエラーで中断する
+5. 確認プロンプトを表示する
+6. `rm -rf /cli-binary/<version>` で削除する
+7. 一時 Pod を削除する
 
 ### 5.7 DB スキーマ管理
 
@@ -166,6 +230,7 @@ GPU:    4
 - `cjobctl jobs cancel`
 - `cjobctl usage reset`
 - `cjobctl weight exclusive --release`
+- `cjobctl cli remove`
 
 ## 7. ソースコード構成
 
@@ -184,7 +249,9 @@ ctl/
         ├── counters.rs    # counters list
         ├── weight.rs      # weight list/set/reset/exclusive
         ├── cluster.rs     # cluster resources
-        ├── cli_deploy.rs  # cli deploy
+        ├── cli_deploy.rs  # cli deploy (ベータ版サポート含む)
+        ├── cli_list.rs    # cli list
+        ├── cli_remove.rs  # cli remove
         ├── db_migrate.rs  # db migrate
         ├── status.rs      # K8s Pod 状態
         ├── logs.rs        # K8s コンポーネントログ
