@@ -169,13 +169,12 @@ async fn cmd_add(
         .to_string_lossy()
         .to_string();
 
-    let image_env_var = std::env::var("CJOB_IMAGE_ENV_VAR")
-        .unwrap_or_else(|_| "JUPYTER_IMAGE".to_string());
-    let image = std::env::var(&image_env_var)
+    let image = std::env::var("CJOB_IMAGE")
+        .or_else(|_| std::env::var("JUPYTER_IMAGE"))
         .unwrap_or_default();
 
     if image.is_empty() {
-        anyhow::bail!("{} 環境変数が設定されていません", image_env_var);
+        anyhow::bail!("CJOB_IMAGE または JUPYTER_IMAGE 環境変数が設定されていません");
     }
 
     // Collect exported environment variables

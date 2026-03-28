@@ -139,7 +139,7 @@ Watcher / Reconciler (namespace: cjob-system)
   └─ PostgreSQL
 
 Kubernetes Job Pod (namespace: user-alice)
-  ├─ image = User Pod と同一（CJOB_IMAGE_ENV_VAR で指定された環境変数から取得、デフォルト JUPYTER_IMAGE）
+  ├─ image = User Pod と同一（CJOB_IMAGE → JUPYTER_IMAGE の順で取得）
   ├─ PVC mounted at ${WORKSPACE_MOUNT_PATH}（デフォルト /home/jovyan）
   ├─ workingDir = cwd
   ├─ env = submit-time env

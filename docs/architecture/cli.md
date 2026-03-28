@@ -90,7 +90,7 @@ cjob delete --all
 
 1. `pwd` を取得する
 2. export 済み環境変数を収集する（`PATH` / `VIRTUAL_ENV` を含む）
-3. 環境変数 `CJOB_IMAGE_ENV_VAR` で指定された名前の環境変数からコンテナイメージ名を取得する（未設定時は `JUPYTER_IMAGE`）
+3. 環境変数 `CJOB_IMAGE` からコンテナイメージ名を取得する（未設定時は `JUPYTER_IMAGE` にフォールバック）
 4. `--` 以降の argv を shell-safe に連結して command を生成する
 5. `--time-limit` が指定されていれば秒数に変換する（省略時は API のデフォルト値を使用）
 6. ServiceAccount JWT と namespace を固定パスから読み取る
