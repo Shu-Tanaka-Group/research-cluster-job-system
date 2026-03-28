@@ -205,7 +205,7 @@ env:
 
 ### 7.1 image の役割
 
-同一の image（`JUPYTER_IMAGE` 環境変数で指定されたもの）が2つの用途で使われる。`cjob` CLI は image には含めず、ユーザーが各自でインストールする。
+同一の image（User Pod の環境変数 `CJOB_IMAGE` または `JUPYTER_IMAGE` から取得したもの）が2つの用途で使われる。`cjob` CLI は image には含めず、ユーザーが各自でインストールする。
 
 | 用途 | Pod | 備考 |
 |---|---|---|
@@ -456,12 +456,22 @@ hub:
       service_account: computing-user
 ```
 
-### `JUPYTER_IMAGE` 環境変数について
+### Job Pod イメージの環境変数について
 
-`cjob` CLI は Job Pod に使用する image 名を User Pod の環境変数 `JUPYTER_IMAGE` から取得する。
-この環境変数は既存の JupyterHub 環境においてすでに設定済みであり、User Pod 起動時に
-現在のコンテナイメージ名（例: `yusekiya/stg-jupyter:2.1.0`）が自動的に注入される。
+`cjob` CLI は Job Pod に使用する image 名を User Pod の環境変数から以下の優先順位で取得する。
+
+1. `CJOB_IMAGE`（優先）
+2. `JUPYTER_IMAGE`（フォールバック）
+
+JupyterHub 環境では `JUPYTER_IMAGE` が User Pod 起動時に自動的に注入されるため、
 追加の設定変更は不要である。
+
+JupyterHub 以外の環境で使用する場合は、User Pod に `CJOB_IMAGE` 環境変数を設定し、
+使用するイメージ名を値として指定する。
+
+```
+CJOB_IMAGE=my-registry/my-image:1.0
+```
 
 ---
 
