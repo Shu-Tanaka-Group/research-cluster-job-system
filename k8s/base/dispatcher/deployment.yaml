@@ -93,11 +93,6 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: KUEUE_LOCAL_QUEUE_NAME
-            - name: JOB_NAMESPACE_PREFIX
-              valueFrom:
-                configMapKeyRef:
-                  name: cjob-config
-                  key: JOB_NAMESPACE_PREFIX
             - name: WORKSPACE_MOUNT_PATH
               valueFrom:
                 configMapKeyRef:

@@ -208,10 +208,10 @@ namespace のラベル `cjob.io/user-namespace=true` の有無でジョブ投入
 
 ```bash
 # ラベルを削除してジョブ投入を停止
-kubectl label namespace user-<username> cjob.io/user-namespace-
+kubectl label namespace <namespace> cjob.io/user-namespace-
 
 # 必要に応じて実行中のジョブをキャンセル
-cjobctl jobs cancel --namespace user-<username> --all
+cjobctl jobs cancel --namespace <namespace> --all
 ```
 
 ラベルを外しても、既に QUEUED / DISPATCHED / RUNNING のジョブはそのまま動き続ける。完全に停止したい場合は `cjobctl jobs cancel --all` で該当 namespace の全アクティブジョブをキャンセルすること。
@@ -219,7 +219,7 @@ cjobctl jobs cancel --namespace user-<username> --all
 ### 5.2 ユーザーのアクセスを再開する
 
 ```bash
-kubectl label namespace user-<username> cjob.io/user-namespace=true
+kubectl label namespace <namespace> cjob.io/user-namespace=true
 ```
 
 ## 6. DB スキーマの更新

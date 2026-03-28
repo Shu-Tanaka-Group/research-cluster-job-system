@@ -31,7 +31,8 @@ security through obscurity であり、採用しない。
 
 ## 2. 前提
 
-- 各ユーザーは独立した namespace（例: `user-alice`）を持つ
+- 各ユーザーは独立した namespace（例: `alice`）を持つ
+- ユーザー namespace にはラベル `cjob.io/user-namespace=true` とアノテーション `cjob.io/username` を付与する
 - User Pod は JupyterHub + KubeSpawner で作成される
 - JupyterHub Pod 作成時に Keycloak による認証が完了している
 - CLI を実行できるのは JupyterHub の User Pod からのみである
@@ -50,7 +51,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: computing-user
-  namespace: user-alice  # 各ユーザーの namespace
+  namespace: alice  # 各ユーザーの namespace（任意の名前を使用可能）
 ```
 
 JupyterHub KubeSpawner の設定で User Pod にこの ServiceAccount を付与する。
@@ -78,7 +79,7 @@ metadata:
   namespace: cjob-system
 ```
 
-TokenReview API を呼ぶために ClusterRole と ClusterRoleBinding を付与する。
+TokenReview API を呼ぶために、および namespace のアノテーション（`cjob.io/username`）を読み取るために ClusterRole と ClusterRoleBinding を付与する。
 
 ```yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -89,6 +90,9 @@ rules:
   - apiGroups: ["authentication.k8s.io"]
     resources: ["tokenreviews"]
     verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -111,12 +115,19 @@ roleRef:
 既存の namespace 作成スクリプトに ServiceAccount 作成を追加する。
 
 ```bash
-# 既存
-kubectl create namespace user-${USERNAME}
+# namespace 作成
+kubectl create namespace ${NS_NAME}
 
-# 追加
-kubectl create serviceaccount computing-user -n user-${USERNAME}
+# ラベル・アノテーション付与
+kubectl label namespace ${NS_NAME} cjob.io/user-namespace=true
+kubectl annotate namespace ${NS_NAME} cjob.io/username=${USERNAME}
+
+# ServiceAccount 作成
+kubectl create serviceaccount computing-user -n ${NS_NAME}
 ```
+
+- `${NS_NAME}`: namespace 名（任意。例: `alice`, `user-alice`, `lab-physics`）
+- `${USERNAME}`: ユーザー名（PVC claim 名と一致させる必要がある）
 
 ---
 
@@ -138,17 +149,13 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              cjob.io/user-namespace: "true"  # 各 User namespace に付与するラベル
+              cjob.io/user-namespace: "true"
       ports:
         - protocol: TCP
           port: 8080
 ```
 
-User namespace 作成時に以下のラベルを付与する。
-
-```bash
-kubectl label namespace user-${USERNAME} cjob.io/user-namespace=true
-```
+User namespace 作成時にラベルを付与する（§4 参照）。
 
 ---
 
@@ -207,7 +214,7 @@ def verify_token(token: str) -> str:
     if not ns_list:
         raise PermissionError("Namespace not found in token")
 
-    return ns_list[0]  # 例: "user-alice"
+    return ns_list[0]  # 例: "alice"
 ```
 
 ### 7.2 namespace 照合（認可）

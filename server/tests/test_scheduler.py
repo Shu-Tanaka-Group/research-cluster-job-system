@@ -7,14 +7,14 @@ from cjob.dispatcher.scheduler import (
 from cjob.models import Job
 
 
-NS = "user-alice"
+NS = "alice"
 
 
-def _insert_job(session, job_id, status="QUEUED", namespace=NS, **kwargs):
+def _insert_job(session, job_id, status="QUEUED", namespace=NS, user="alice", **kwargs):
     defaults = dict(
         namespace=namespace,
         job_id=job_id,
-        user=namespace.removeprefix("user-"),
+        user=user,
         image="test:1.0",
         command="python main.py",
         cwd="/home/jovyan",

@@ -7,7 +7,7 @@ from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 from cjob.watcher.reconciler import reconcile_cycle
 
 
-NS = "user-alice"
+NS = "alice"
 
 
 def _make_k8s_job(namespace, job_id, name, conditions=None, active=None):
@@ -25,11 +25,11 @@ def _make_k8s_job(namespace, job_id, name, conditions=None, active=None):
     )
 
 
-def _insert_job(session, job_id, status="DISPATCHED", namespace=NS, **kwargs):
+def _insert_job(session, job_id, status="DISPATCHED", namespace=NS, user="alice", **kwargs):
     defaults = dict(
         namespace=namespace,
         job_id=job_id,
-        user=namespace.removeprefix("user-"),
+        user=user,
         image="test:1.0",
         command="python main.py",
         cwd="/home/jovyan",

@@ -96,7 +96,7 @@ dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 | `cjobctl weight exclusive <namespace>` | 指定 namespace にクラスタを専有させる | DB + K8s |
 | `cjobctl weight exclusive --release` | 専有モード解除 | DB: `namespace_weights` |
 
-`weight exclusive` は K8s API で `cjob.io/user-namespace=true` ラベルを持つ namespace を列挙し、指定以外の全 namespace を weight = 0 に設定する。
+`weight exclusive` は K8s API で `cjob.io/user-namespace=true` ラベルを持つ namespace を列挙し、指定以外の全 namespace を weight = 0 に設定する。cjobctl は `config.toml` の `[kubernetes]` セクション内 `user_namespace_label` でラベルセレクタを変更できる。
 
 ### 5.4 クラスタリソース確認
 

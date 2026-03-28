@@ -275,9 +275,10 @@ async fn main() -> Result<()> {
                             .ok_or_else(|| anyhow::anyhow!("Specify a namespace or use --release"))?;
                         // Fetch user namespaces from K8s
                         let k8s_client = k8s::client().await?;
+                        let label = config.user_namespace_label();
                         let user_namespaces =
-                            fetch_user_namespaces(&k8s_client).await?;
-                        cmd::weight::exclusive(&conn.client, ns, &user_namespaces).await
+                            fetch_user_namespaces(&k8s_client, label).await?;
+                        cmd::weight::exclusive(&conn.client, ns, &user_namespaces, label).await
                     }
                 }
             }
@@ -358,13 +359,13 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn fetch_user_namespaces(k8s_client: &kube::Client) -> Result<Vec<String>> {
+async fn fetch_user_namespaces(k8s_client: &kube::Client, label_selector: &str) -> Result<Vec<String>> {
     use k8s_openapi::api::core::v1::Namespace;
     use kube::api::ListParams;
     use kube::Api;
 
     let ns_api: Api<Namespace> = Api::all(k8s_client.clone());
-    let lp = ListParams::default().labels("cjob.io/user-namespace=true");
+    let lp = ListParams::default().labels(label_selector);
     let ns_list = ns_api.list(&lp).await?;
 
     let names: Vec<String> = ns_list

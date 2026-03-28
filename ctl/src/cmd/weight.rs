@@ -58,11 +58,12 @@ pub async fn reset(client: &Client, namespace: &str) -> Result<()> {
     Ok(())
 }
 
-pub async fn exclusive(client: &Client, namespace: &str, user_namespaces: &[String]) -> Result<()> {
+pub async fn exclusive(client: &Client, namespace: &str, user_namespaces: &[String], label_selector: &str) -> Result<()> {
     if !user_namespaces.contains(&namespace.to_string()) {
         bail!(
-            "Namespace '{}' not found in user namespaces (label cjob.io/user-namespace=true)",
-            namespace
+            "Namespace '{}' not found in user namespaces (label {})",
+            namespace,
+            label_selector
         );
     }
 

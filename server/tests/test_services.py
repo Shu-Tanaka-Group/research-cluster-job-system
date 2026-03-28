@@ -17,7 +17,7 @@ from cjob.api.services import (
 from cjob.models import Job, JobEvent, NamespaceDailyUsage
 
 
-NS = "user-alice"
+NS = "alice"
 
 _next_id = 0
 
@@ -59,11 +59,11 @@ def _make_request(**overrides):
     return JobSubmitRequest(**defaults)
 
 
-def _insert_job(session, job_id, status="QUEUED", namespace=NS, **kwargs):
+def _insert_job(session, job_id, status="QUEUED", namespace=NS, user="alice", **kwargs):
     defaults = dict(
         namespace=namespace,
         job_id=job_id,
-        user=namespace.removeprefix("user-"),
+        user=user,
         image="test:1.0",
         command="python main.py",
         cwd="/home/jovyan",
@@ -88,59 +88,59 @@ def _insert_job(session, job_id, status="QUEUED", namespace=NS, **kwargs):
 class TestSubmitJob:
     def test_basic_submit(self, db_session):
         req = _make_request()
-        resp = submit_job(db_session, NS, req)
+        resp = submit_job(db_session, NS, "alice", req)
         assert resp.job_id == 1
         assert resp.status == "QUEUED"
 
     def test_sequential_ids(self, db_session):
         req = _make_request()
-        r1 = submit_job(db_session, NS, req)
-        r2 = submit_job(db_session, NS, req)
+        r1 = submit_job(db_session, NS, "alice", req)
+        r2 = submit_job(db_session, NS, "alice", req)
         assert r1.job_id == 1
         assert r2.job_id == 2
 
     def test_time_limit_default(self, db_session):
         req = _make_request()
-        resp = submit_job(db_session, NS, req)
+        resp = submit_job(db_session, NS, "alice", req)
         job = db_session.get(Job, (NS, resp.job_id))
         assert job.time_limit_seconds == 86400
 
     def test_time_limit_custom(self, db_session):
         req = _make_request(time_limit_seconds=3600)
-        resp = submit_job(db_session, NS, req)
+        resp = submit_job(db_session, NS, "alice", req)
         job = db_session.get(Job, (NS, resp.job_id))
         assert job.time_limit_seconds == 3600
 
     def test_time_limit_exceeds_max(self, db_session):
         req = _make_request(time_limit_seconds=999999)
         with pytest.raises(HTTPException) as exc_info:
-            submit_job(db_session, NS, req)
+            submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
         assert "604800" in exc_info.value.detail
 
     def test_time_limit_zero(self, db_session):
         req = _make_request(time_limit_seconds=0)
         with pytest.raises(HTTPException) as exc_info:
-            submit_job(db_session, NS, req)
+            submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
 
     def test_time_limit_negative(self, db_session):
         req = _make_request(time_limit_seconds=-1)
         with pytest.raises(HTTPException) as exc_info:
-            submit_job(db_session, NS, req)
+            submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
 
     def test_gpu_rejected(self, db_session):
         req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1))
         with pytest.raises(HTTPException) as exc_info:
-            submit_job(db_session, NS, req)
+            submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
 
     def test_deleting_blocks_submit(self, db_session):
         _insert_job(db_session, 1, status="DELETING")
         req = _make_request()
         with pytest.raises(HTTPException) as exc_info:
-            submit_job(db_session, NS, req)
+            submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 409
 
     def test_job_count_limit(self, db_session, settings):
@@ -148,7 +148,7 @@ class TestSubmitJob:
             _insert_job(db_session, i + 1, status="QUEUED")
         req = _make_request()
         with pytest.raises(HTTPException) as exc_info:
-            submit_job(db_session, NS, req)
+            submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 429
 
     def test_cpu_exceeds_max_node(self, db_session):
@@ -164,7 +164,7 @@ class TestSubmitJob:
         db_session.flush()
         req = _make_request(resources=ResourceSpec(cpu="64", memory="1Gi", gpu=0))
         with pytest.raises(HTTPException) as exc_info:
-            submit_job(db_session, NS, req)
+            submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
         assert "CPU" in exc_info.value.detail
 
@@ -181,7 +181,7 @@ class TestSubmitJob:
         db_session.flush()
         req = _make_request(resources=ResourceSpec(cpu="1", memory="256Gi", gpu=0))
         with pytest.raises(HTTPException) as exc_info:
-            submit_job(db_session, NS, req)
+            submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
         assert "メモリ" in exc_info.value.detail
 
@@ -197,7 +197,7 @@ class TestSubmitJob:
         )
         db_session.flush()
         req = _make_request(resources=ResourceSpec(cpu="32", memory="128Gi", gpu=0))
-        resp = submit_job(db_session, NS, req)
+        resp = submit_job(db_session, NS, "alice", req)
         assert resp.status == "QUEUED"
 
     def test_resource_check_uses_max_across_nodes(self, db_session):
@@ -213,13 +213,13 @@ class TestSubmitJob:
         db_session.flush()
         # 32 cores: exceeds small node but fits large node → should be accepted
         req = _make_request(resources=ResourceSpec(cpu="32", memory="1Gi", gpu=0))
-        resp = submit_job(db_session, NS, req)
+        resp = submit_job(db_session, NS, "alice", req)
         assert resp.status == "QUEUED"
 
     def test_resource_check_skipped_when_empty(self, db_session):
         """When node_resources is empty, resource validation should be skipped."""
         req = _make_request(resources=ResourceSpec(cpu="9999", memory="1Gi", gpu=0))
-        resp = submit_job(db_session, NS, req)
+        resp = submit_job(db_session, NS, "alice", req)
         assert resp.status == "QUEUED"
 
 
@@ -263,9 +263,9 @@ class TestListJobs:
         assert [j.job_id for j in resp.jobs] == [3, 2, 1]
 
     def test_namespace_isolation(self, db_session):
-        _insert_job(db_session, 1, namespace="user-alice")
-        _insert_job(db_session, 1, namespace="user-bob")
-        resp = list_jobs(db_session, "user-alice")
+        _insert_job(db_session, 1, namespace="alice", user="alice")
+        _insert_job(db_session, 1, namespace="bob", user="bob")
+        resp = list_jobs(db_session, "alice")
         assert resp.total_count == 1
 
 
@@ -286,7 +286,7 @@ class TestGetJob:
         assert resp is None
 
     def test_wrong_namespace(self, db_session):
-        _insert_job(db_session, 1, namespace="user-bob")
+        _insert_job(db_session, 1, namespace="bob", user="bob")
         resp = get_job(db_session, NS, 1)
         assert resp is None
 
@@ -432,7 +432,7 @@ class TestGetUsage:
 
     def test_namespace_isolation(self, db_session):
         _insert_usage(db_session, NS, "2099-01-01", cpu=1000, mem=2000, gpu=0)
-        _insert_usage(db_session, "user-bob", "2099-01-01", cpu=9999, mem=9999, gpu=0)
+        _insert_usage(db_session, "bob", "2099-01-01", cpu=9999, mem=9999, gpu=0)
 
         resp = get_usage(db_session, NS)
         assert len(resp.daily) == 1

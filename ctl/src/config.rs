@@ -18,6 +18,7 @@ pub struct DatabaseConfig {
 #[derive(Deserialize)]
 pub struct KubernetesConfig {
     pub namespace: Option<String>,
+    pub user_namespace_label: Option<String>,
 }
 
 impl Config {
@@ -35,6 +36,13 @@ impl Config {
             .as_ref()
             .and_then(|k| k.namespace.as_deref())
             .unwrap_or("cjob-system")
+    }
+
+    pub fn user_namespace_label(&self) -> &str {
+        self.kubernetes
+            .as_ref()
+            .and_then(|k| k.user_namespace_label.as_deref())
+            .unwrap_or("cjob.io/user-namespace=true")
     }
 
     fn config_path() -> Result<PathBuf> {

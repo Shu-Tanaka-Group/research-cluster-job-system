@@ -149,9 +149,12 @@ Kubernetes Job Pod (namespace: user-alice)
 ### 3.2 namespace 構成
 
 ```text
-cjob-system      : Submit API / Dispatcher / Watcher / PostgreSQL
-user-<username>    : User Pod / Job Pod / LocalQueue / ResourceQuota / PVC
+cjob-system        : Submit API / Dispatcher / Watcher / PostgreSQL
+<user-namespace>   : User Pod / Job Pod / LocalQueue / ResourceQuota / PVC
 ```
+
+ユーザー namespace は任意の名前を使用できる（例: `user-alice`, `lab-physics`）。
+識別はラベル `cjob.io/user-namespace=true` で行い、ユーザー名は namespace のアノテーション `cjob.io/username` から取得する。
 
 ### 3.3 主要コンポーネント
 
@@ -161,7 +164,7 @@ user-<username>    : User Pod / Job Pod / LocalQueue / ResourceQuota / PVC
 | Dispatcher | Deployment | 1 | cjob-system |
 | Watcher / Reconciler | Deployment | 1 | cjob-system |
 | PostgreSQL | StatefulSet | 1 | cjob-system |
-| Kubernetes Job | Job | - | user-\<username\> |
+| Kubernetes Job | Job | - | \<user-namespace\> |
 
 Dispatcher と Watcher は Replica 複数にすると二重 dispatch・二重更新が発生するため、1 固定とする。
 Submit API は stateless（状態の正本は PostgreSQL・認証は K8s TokenReview に委譲・job_id 採番は DB でアトミック）であるため、Replica を増やしても安全である。Replica 2 以上を推奨する。
