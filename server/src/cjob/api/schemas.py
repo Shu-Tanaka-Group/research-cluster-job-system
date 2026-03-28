@@ -50,6 +50,7 @@ class JobDetailResponse(BaseModel):
     dispatched_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
+    last_error: str | None = None
 
 
 class CancelRequest(BaseModel):

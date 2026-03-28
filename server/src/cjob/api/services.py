@@ -233,6 +233,7 @@ def get_job(
         dispatched_at=job.dispatched_at,
         started_at=job.started_at,
         finished_at=job.finished_at,
+        last_error=job.last_error,
     )
 
 
