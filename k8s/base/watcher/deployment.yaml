@@ -16,7 +16,7 @@ spec:
       serviceAccountName: dispatcher-sa
       containers:
         - name: watcher
-          image: yusekiya/cjob-watcher:latest
+          image: cjob-watcher
           env:
             - name: POSTGRES_HOST
               valueFrom:

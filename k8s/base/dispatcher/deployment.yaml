@@ -16,7 +16,7 @@ spec:
       serviceAccountName: dispatcher-sa
       containers:
         - name: dispatcher
-          image: yusekiya/cjob-dispatcher:latest
+          image: cjob-dispatcher
           env:
             - name: POSTGRES_HOST
               valueFrom:

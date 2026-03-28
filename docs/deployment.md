@@ -18,7 +18,13 @@ kubectl apply -k 'https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/k8s
 
 Secret（`postgres-secret`）は Kustomize の管理対象外とし、管理者が手動で作成する。テンプレートは `k8s/base/secret-postgres.yaml` を参照。
 
-image タグは `k8s/base/kustomization.yaml` の `images` トランスフォーマーで管理する。`scripts/sync-version.sh` で VERSION ファイルと自動同期される。
+以下の環境依存値は `k8s/base/kustomization.yaml` で一元管理する。
+
+| 設定項目 | kustomization.yaml の設定箇所 | デフォルト値 |
+|---|---|---|
+| image 名 | `images[].newName` | `yusekiya/cjob-submit-api` 等 |
+| image タグ | `images[].newTag` | VERSION ファイルと同期（`scripts/sync-version.sh`） |
+| StorageClass | `patches[]` の `value` | `managed-nfs-storage` |
 
 ---
 

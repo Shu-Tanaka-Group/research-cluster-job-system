@@ -5,7 +5,7 @@ metadata:
   namespace: cjob-system
 spec:
   accessModes: ["ReadWriteMany"]
-  storageClassName: managed-nfs-storage
+  storageClassName: STORAGE_CLASS
   resources:
     requests:
       storage: 1Gi

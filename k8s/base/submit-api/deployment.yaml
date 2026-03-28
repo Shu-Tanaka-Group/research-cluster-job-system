@@ -16,7 +16,7 @@ spec:
       serviceAccountName: submit-api-sa
       containers:
         - name: submit-api
-          image: yusekiya/cjob-submit-api:latest
+          image: cjob-submit-api
           ports:
             - containerPort: 8080
           env:
