@@ -278,10 +278,25 @@ async fn cmd_sweep(
     // Collect exported environment variables
     let env: HashMap<String, String> = std::env::vars().collect();
 
+    // Replace _INDEX_ placeholder with $CJOB_INDEX.
+    // Use double quotes (not single) so $CJOB_INDEX expands in the Job Pod.
+    // Escape characters that are special inside double quotes: $ ` " \ !
+    // but leave $CJOB_INDEX unescaped.
     let cmd_str = command
         .iter()
         .map(|arg| {
-            if arg.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}".contains(c)) {
+            let has_placeholder = arg.contains("_INDEX_");
+            let arg = arg.replace("_INDEX_", "$CJOB_INDEX");
+            if has_placeholder {
+                // Use double quotes to allow $CJOB_INDEX expansion.
+                // Escape existing " and \ and ` and ! but NOT $CJOB_INDEX.
+                let escaped = arg
+                    .replace('\\', "\\\\")
+                    .replace('"', "\\\"")
+                    .replace('`', "\\`")
+                    .replace('!', "\\!");
+                format!("\"{}\"", escaped)
+            } else if arg.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}".contains(c)) {
                 format!("'{}'", arg.replace('\'', "'\\''"))
             } else {
                 arg.clone()
