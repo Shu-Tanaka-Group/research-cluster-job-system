@@ -388,7 +388,38 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 }
 ```
 
-## 9. GET /v1/cli/version
+## 9. GET /v1/usage
+
+自身の namespace の直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース使用状況を取得する。`namespace_daily_usage` テーブルから日別の消費量を集計して返す。
+
+### response
+
+```json
+{
+  "window_days": 7,
+  "daily": [
+    {
+      "date": "2026-03-23",
+      "cpu_millicores_seconds": 86400000,
+      "memory_mib_seconds": 176947200,
+      "gpu_seconds": 0
+    },
+    {
+      "date": "2026-03-24",
+      "cpu_millicores_seconds": 45000000,
+      "memory_mib_seconds": 92160000,
+      "gpu_seconds": 0
+    }
+  ],
+  "total_cpu_millicores_seconds": 131400000,
+  "total_memory_mib_seconds": 269107200,
+  "total_gpu_seconds": 0
+}
+```
+
+`daily` は `usage_date` 昇順でソートされる。ウィンドウ内に使用実績がない場合は `daily` が空配列、各 total が 0 となる。
+
+## 10. GET /v1/cli/version
 
 PVC 上に配置された CLI バイナリの最新バージョンを返す。認証不要。
 
@@ -410,7 +441,7 @@ PVC に `latest` ファイルが存在しない場合（バイナリ未配置）
 { "detail": "CLI binary not found" }
 ```
 
-## 10. GET /v1/cli/versions
+## 11. GET /v1/cli/versions
 
 PVC 上に配置された CLI バイナリの全バージョン一覧を返す。認証不要。
 
@@ -433,7 +464,7 @@ PVC に `latest` ファイルが存在しない場合は 404 を返す。
 { "detail": "CLI binary not found" }
 ```
 
-## 11. GET /v1/cli/download
+## 12. GET /v1/cli/download
 
 PVC 上に配置された CLI バイナリを返す。認証不要。
 

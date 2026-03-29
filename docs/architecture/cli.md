@@ -21,6 +21,7 @@ cjob logs <job-id>
 cjob logs --follow <job-id>
 cjob logs <job-id> --index <n>           # sweep: 特定インデックスのログ表示
 cjob logs --follow <job-id> --index <n>  # sweep: 特定インデックスのログ追跡
+cjob usage
 cjob update
 ```
 
@@ -405,7 +406,34 @@ $ cjob reset   # 全ジョブ完了後
 リセットを開始しました。バックグラウンドでクリーンアップが完了するまでお待ちください。
 ```
 
-## 12. `cjob update` の動作
+## 12. `cjob usage` の動作
+
+`GET /v1/usage` を呼び出し、直近 `FAIR_SHARE_WINDOW_DAYS` 日分の日別リソース使用状況を表示する。
+
+表示単位は人間が読みやすいように変換する。
+
+- CPU: ミリコア秒 → core·h（`/ 1000 / 3600`）
+- メモリ: MiB 秒 → GiB·h（`/ 1024 / 3600`）
+- GPU: 秒 → h（`/ 3600`）
+
+GPU 列はクラスタ全体で GPU 使用実績がない場合（`total_gpu_seconds == 0`）は非表示とする。
+
+```
+$ cjob usage
+
+Resource Usage (past 7 days)
+──────────────────────────────────────────────────
+  Date              CPU (core·h)    Mem (GiB·h)
+  2026-03-23               24.0           48.0
+  2026-03-24               12.5           25.0
+  2026-03-25                8.0           16.0
+  ────────────────────────────────────────────────
+  Total                    44.5           89.0
+```
+
+使用実績がない場合は「使用実績がありません。」を表示する。
+
+## 13. `cjob update` の動作
 
 CLI バイナリのバージョン管理と更新を行う。バイナリは Submit API 経由で配布される。
 

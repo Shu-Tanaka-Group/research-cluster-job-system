@@ -36,10 +36,12 @@ User Pod (JupyterHub) → cjob CLI → Submit API → PostgreSQL
 
 ```bash
 cjob add -- <command>                # ジョブ投入
+cjob sweep -n <count> --parallel <n> -- <command>  # パラメータスイープ
 cjob list                            # 一覧表示
 cjob status <job-id>                 # 状態確認
 cjob cancel <job-id>                 # キャンセル（範囲: 1-10, 複数: 1,3,5, 組み合わせ対応）
-cjob logs <job-id>                   # ログ表示（--follow / --delete / --delete-all）
+cjob logs <job-id>                   # ログ表示（--follow / --index）
+cjob delete <job-id>                 # 完了済みジョブの削除（--all で全件削除）
 cjob usage                           # リソース使用状況の表示
 cjob reset                           # 全ジョブ履歴・ログ削除、job_id を 1 に戻す
 cjob update                          # CLI バイナリの更新

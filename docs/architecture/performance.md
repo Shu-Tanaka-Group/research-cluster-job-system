@@ -175,17 +175,24 @@ K8s の `batch/v1 Job` は `completions` と `parallelism` フィールドによ
 
 ### 4.6 parameter sweep 機能による負荷軽減
 
-スパコンの job array に相当する parameter sweep 機能を導入することで、大量の小タスクを少ない Job オブジェクト数で実行できる。
+スパコンの job array に相当する parameter sweep 機能は `cjob sweep` として実装済みである（[cli.md](cli.md) §3、[api.md](api.md) §2.1、[dispatcher.md](dispatcher.md) §3、[watcher.md](watcher.md) §4 参照）。K8s Indexed Job（`completionMode: Indexed`）を使用し、大量の小タスクを少ない Job オブジェクト数で実行できる。
 
-**期待される効果：**
+**実現された効果：**
 
-- etcd 上の Job オブジェクト数の削減（例: 1,000 タスク → 数 Job）
+- etcd 上の Job オブジェクト数の削減（例: 1,000 タスク → 1 Job）
 - `dispatch_budget` の消費が 1 件で済むため、budget 枠を効率的に使える
 - Kueue への Workload 数が減り、admission 処理の負荷が軽減される
+- `backoffLimitPerIndex: 0` により個別タスクの失敗が Job 全体に波及しない
+
+**パフォーマンス特性：**
+
+- Indexed Job は K8s Job controller が Pod を段階的に作成するため、Dispatcher の K8s API 呼び出しは 1 回で済む
+- Watcher はポーリングサイクルごとに `status.completedIndexes` / `status.failedIndexes` を取得して DB を更新する。タスク数が多い場合でもポーリングの負荷は通常ジョブと同等（Job オブジェクト 1 件の status を読むだけ）
+- `parallelism` の値が大きい場合、Kueue が一度に大量のリソースを確保しようとするため、admit までの待機時間が長くなる可能性がある
 
 **インセンティブ設計：**
 
-parameter sweep 機能の実装後、`MAX_QUEUED_JOBS_PER_NAMESPACE` や `DISPATCH_BUDGET_PER_NAMESPACE` を引き下げることで、個別投入よりも sweep を使うインセンティブが生まれる。sweep では 1 件の投入枠で数百タスクを表現できるため、投入上限が厳しくなってもユーザーの実質的なキャパシティは減らない。
+sweep 機能の導入後、`MAX_QUEUED_JOBS_PER_NAMESPACE` や `DISPATCH_BUDGET_PER_NAMESPACE` を引き下げることで、個別投入よりも sweep を使うインセンティブが生まれる。sweep では 1 件の投入枠で数百タスクを表現できるため、投入上限が厳しくなってもユーザーの実質的なキャパシティは減らない。
 
 導入順序が重要であり、sweep 機能の実装が先、投入上限の引き下げが後でなければならない。sweep 機能がない状態で上限を下げると、ユーザーが単純に不便になるだけである。
 
@@ -206,5 +213,5 @@ parameter sweep 機能の実装後、`MAX_QUEUED_JOBS_PER_NAMESPACE` や `DISPAT
 | QUEUED ジョブの dispatch が追いつかない | `DISPATCH_BATCH_SIZE` の増加、サイクル間隔の短縮 |
 | 短時間ジョブの回転が遅い | Watcher のポーリング間隔短縮、Watch API への移行検討（§4.3） |
 | 同時アクティブユーザー数の増加 | `DISPATCH_BUDGET_PER_NAMESPACE` の引き下げ（§4.7）、Watch API 移行（§4.3） |
-| 大量の小タスク（parameter sweep）| parameter sweep 機能の導入（§4.6）、1 Job N Pod 構成（§4.5） |
+| 大量の小タスク（parameter sweep）| `cjob sweep` を使用（§4.6、実装済み）。completions / parallelism の調整で負荷を制御 |
 | K8s API への負荷が問題になる | Informer パターンの採用を検討（§3.3） |

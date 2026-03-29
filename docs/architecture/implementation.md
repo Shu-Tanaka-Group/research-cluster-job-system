@@ -29,7 +29,7 @@
 
 ジョブ投入時は次の順で行う。
 
-1. CLI が `cwd`、`env`、`command`、および `JUPYTER_IMAGE` 環境変数から `image` を集める
+1. CLI が `cwd`、`env`、`command`、および `CJOB_IMAGE`（未設定時は `JUPYTER_IMAGE`）環境変数から `image` を集める
 2. CLI が ServiceAccount JWT と namespace を固定パスから読み取る
 3. API が `job_id` を発行する
 4. PostgreSQL に `QUEUED` で保存する（`log_dir` も同時に設定）
@@ -43,29 +43,36 @@
 
 メインループ（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒ごとにスキャン）:
 
-1. DB から dispatch 対象ジョブを取得する（[dispatcher.md](dispatcher.md) §1.2 のクエリ）
+1. `namespace_daily_usage` のウィンドウ外の古い行を削除する（[dispatcher.md](dispatcher.md) §1.2 参照）
+2. DB から dispatch 対象ジョブを取得する（[dispatcher.md](dispatcher.md) §1.2 のクエリ）
    - budget に余裕がある namespace のみ対象
    - `retry_after IS NULL OR retry_after <= NOW()` の条件を満たすジョブのみ
-   - 各 namespace 最古の QUEUED ジョブを1件ずつ（`created_at` 昇順）
-2. 取得したジョブを順に dispatch する
-2.1. `WHERE status='QUEUED'` 条件付き UPDATE で `DISPATCHING` に CAS 更新する
-2.5. 更新行数が 0（スキャン後に cancel API が先に `CANCELLED` へ更新済み）ならスキップ
-3. Job を作成（`claimName` には job の user を使用）
-4. 成功なら `DISPATCHED` に更新（`AND status='DISPATCHING'` 条件付き）
-5. 一時障害なら `retry_count` をインクリメントして `retry_after` を設定して `QUEUED` に戻す（`AND status='DISPATCHING'` 条件付き・[dispatcher.md](dispatcher.md) §1.3 参照）
-6. 永続障害・バリデーションエラーなら `FAILED` に更新（`AND status='DISPATCHING'` 条件付き）
-7. `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒スリープして次のスキャンへ
+   - namespace 間をラウンドロビンで公平に取得（`DISPATCH_ROUND_SIZE` 件ずつ交互）
+   - DRF（Dominant Resource Fairness）により累計消費量の少ない namespace を優先
+   - `LIMIT DISPATCH_BATCH_SIZE`（デフォルト 50）で1サイクルの取得数を制限
+3. 隙間充填フィルタを適用する（[dispatcher.md](dispatcher.md) §2.4 参照）
+   - 滞留ジョブ（DISPATCHED のまま閾値超過）が存在する namespace の候補を制限
+   - RUNNING ジョブの最短残り時間に収まるジョブのみ dispatch 対象とする
+4. 取得したジョブを順に dispatch する
+   1. `WHERE status='QUEUED'` 条件付き UPDATE で `DISPATCHING` に CAS 更新する
+   2. 更新行数が 0（cancel API が先に `CANCELLED` へ更新済み）ならスキップ
+5. Job を作成（`claimName` には job の user を使用）
+6. 成功なら `DISPATCHED` に更新（`AND status='DISPATCHING'` 条件付き）
+7. 一時障害なら `retry_count` をインクリメントして `retry_after` を設定して `QUEUED` に戻す（`AND status='DISPATCHING'` 条件付き・[dispatcher.md](dispatcher.md) §1.3 参照）
+8. 永続障害・バリデーションエラーなら `FAILED` に更新（`AND status='DISPATCHING'` 条件付き）
+9. `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` 秒スリープして次のスキャンへ
 
 ### 2.3 Watcher の最小アルゴリズム
 
 1. Kubernetes Job 一覧を監視
 2. Job の `status.conditions` を以下のルールで解釈する
 
-   | K8s Job の `status.conditions` | DB status |
-   |---|---|
-   | `type: Complete, status: True` | `SUCCEEDED` |
-   | `type: Failed, status: True` | `FAILED`（Pod の exit code 非0・起動失敗を含む） |
-   | 条件なし・Pod が Running 中 | `RUNNING` |
+   | K8s Job の `status.conditions` | DB status | 備考 |
+   |---|---|---|
+   | `type: Complete, status: True` | `SUCCEEDED` | |
+   | `type: Failed, status: True, reason: DeadlineExceeded` | `FAILED` | `last_error` に `"time limit exceeded"` を設定 |
+   | `type: Failed, status: True` | `FAILED` | Pod の exit code 非0・起動失敗を含む |
+   | 条件なし・Pod が Running 中 | `RUNNING` | 初回 RUNNING 遷移時に `started_at` を記録し、`namespace_daily_usage` に累計消費量を加算 |
 
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルで対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）
