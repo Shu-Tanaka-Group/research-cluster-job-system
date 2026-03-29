@@ -56,30 +56,21 @@ cjob sweep -n 100 --parallel 10 -- python main.py --trial _INDEX_
 
 ### 2.2 `_INDEX_` の活用方法
 
-`_INDEX_` は実行ごとに異なる番号（0 から始まる連番）に自動で置き換えられます。この番号を使ってパラメータを変えたり、入力ファイルを切り替えたりできます。
+`_INDEX_` は実行ごとに異なる番号（0 から始まる連番）に自動で置き換えられます。この番号を使ってパラメータを変えることができます。
 
 ```bash
-# 番号をそのままパラメータとして使う
 cjob sweep -n 50 --parallel 5 -- python train.py --seed _INDEX_
-
-# 番号で入力ファイルを切り替える（run.sh の中で番号に応じたファイルを読み込む）
-cjob sweep -n 10 --parallel 5 -- bash run.sh _INDEX_
 ```
 
-上の例では `run.sh` に番号が引数として渡されます。スクリプトの中でその番号を使って入力ファイルを切り替えることができます。
+スクリプトファイルの中では `$CJOB_INDEX` という変数名で番号を直接参照できます。
 
 ```bash
-# run.sh の中身の例（$1 に _INDEX_ の値が入る）
-python train.py --config configs/config_${1}.yaml
-```
-
-この場合、番号 0 のジョブは `config_0.yaml`、番号 1 のジョブは `config_1.yaml` を読み込みます。
-
-スクリプトファイルの中では、引数の代わりに `$CJOB_INDEX` という変数名で番号を直接参照することもできます。
-
-```bash
-# run.sh の中身の例（$CJOB_INDEX を使う場合）
+# run.sh の中身の例
 python train.py --config configs/config_${CJOB_INDEX}.yaml
+```
+
+```bash
+cjob sweep -n 10 --parallel 5 -- bash run.sh
 ```
 
 ### 2.3 並列数の選び方
