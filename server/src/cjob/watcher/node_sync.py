@@ -21,9 +21,26 @@ def sync_node_resources(session: Session, settings: Settings):
         logger.error("Failed to list nodes (selector=%s): %s", settings.NODE_LABEL_SELECTOR, e)
         return
 
+    all_items = list(nodes.items)
+    seen_names = {n.metadata.name for n in all_items}
+
+    # Fetch GPU nodes if GPU_NODE_LABEL_SELECTOR is set
+    if settings.GPU_NODE_LABEL_SELECTOR:
+        try:
+            gpu_nodes = core_v1.list_node(label_selector=settings.GPU_NODE_LABEL_SELECTOR)
+            for node in gpu_nodes.items:
+                if node.metadata.name not in seen_names:
+                    all_items.append(node)
+                    seen_names.add(node.metadata.name)
+        except ApiException as e:
+            logger.error(
+                "Failed to list GPU nodes (selector=%s): %s",
+                settings.GPU_NODE_LABEL_SELECTOR, e,
+            )
+
     current_nodes: set[str] = set()
 
-    for node in nodes.items:
+    for node in all_items:
         name = node.metadata.name
         alloc = node.status.allocatable or {}
         cpu = parse_cpu_millicores(alloc.get("cpu", "0"))
@@ -56,8 +73,11 @@ def sync_node_resources(session: Session, settings: Settings):
         session.execute(text("DELETE FROM node_resources"))
 
     session.commit()
+    selectors = settings.NODE_LABEL_SELECTOR
+    if settings.GPU_NODE_LABEL_SELECTOR:
+        selectors += f", {settings.GPU_NODE_LABEL_SELECTOR}"
     logger.info(
-        "Synced node resources: %d node(s) from selector '%s'",
+        "Synced node resources: %d node(s) from selector(s) '%s'",
         len(current_nodes),
-        settings.NODE_LABEL_SELECTOR,
+        selectors,
     )
