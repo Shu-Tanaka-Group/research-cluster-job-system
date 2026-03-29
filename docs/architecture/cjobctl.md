@@ -85,7 +85,9 @@ namespace = "cjob-system"   # 省略時デフォルト
 
 #### `-o wide` オプション
 
-`jobs list` に `-o wide`（`--output wide`）を指定すると、通常の表示に加えて以下のカラムが追加される:
+`jobs list` の表示カラムは NAMESPACE, JOB_ID, TYPE, STATUS, COMMAND, CREATED, FINISHED とする。TYPE は `completions IS NULL` のジョブを `job`、それ以外を `sweep` と表示する。
+
+`-o wide`（`--output wide`）を指定すると、上記に加えて以下のカラムが追加される:
 
 - **CPU**: 指定 CPU リソース量（DB の `cpu` カラム）
 - **MEMORY**: 指定メモリリソース量（DB の `memory` カラム）

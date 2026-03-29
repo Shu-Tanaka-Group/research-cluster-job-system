@@ -46,9 +46,9 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
     };
 
     let select_cols = if wide {
-        "namespace, job_id, status, command, created_at, started_at, finished_at, cpu, memory, gpu, node_name"
+        "namespace, job_id, completions, status, command, created_at, started_at, finished_at, cpu, memory, gpu, node_name"
     } else {
-        "namespace, job_id, status, command, created_at, started_at, finished_at"
+        "namespace, job_id, completions, status, command, created_at, started_at, finished_at"
     };
 
     let query = format!(
@@ -69,24 +69,26 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
 
     if wide {
         println!(
-            "{:<20} {:<8} {:<12} {:<40} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
-            "NAMESPACE", "JOB_ID", "STATUS", "COMMAND", "CREATED", "FINISHED",
+            "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
+            "NAMESPACE", "JOB_ID", "TYPE", "STATUS", "COMMAND", "CREATED", "FINISHED",
             "CPU", "MEMORY", "GPU", "NODE"
         );
     } else {
         println!(
-            "{:<20} {:<8} {:<12} {:<40} {:<20} {}",
-            "NAMESPACE", "JOB_ID", "STATUS", "COMMAND", "CREATED", "FINISHED"
+            "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {}",
+            "NAMESPACE", "JOB_ID", "TYPE", "STATUS", "COMMAND", "CREATED", "FINISHED"
         );
     }
     for row in &rows {
         let ns: &str = row.get(0);
         let job_id: i32 = row.get(1);
-        let status: &str = row.get(2);
-        let command: &str = row.get(3);
-        let created_at: chrono::DateTime<chrono::Utc> = row.get(4);
-        let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(6);
+        let completions: Option<i32> = row.get(2);
+        let status: &str = row.get(3);
+        let command: &str = row.get(4);
+        let created_at: chrono::DateTime<chrono::Utc> = row.get(5);
+        let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(7);
 
+        let job_type = if completions.is_some() { "sweep" } else { "job" };
         let cmd_display = if command.len() > 40 {
             format!("{}...", &command[..37])
         } else {
@@ -98,22 +100,22 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
             .unwrap_or_else(|| "-".to_string());
 
         if wide {
-            let cpu: &str = row.get(7);
-            let memory: &str = row.get(8);
-            let gpu: i32 = row.get(9);
-            let node_name: Option<&str> = row.get(10);
+            let cpu: &str = row.get(8);
+            let memory: &str = row.get(9);
+            let gpu: i32 = row.get(10);
+            let node_name: Option<&str> = row.get(11);
             let gpu_display = if gpu > 0 { gpu.to_string() } else { "-".to_string() };
             let node_display = node_name.unwrap_or("-");
 
             println!(
-                "{:<20} {:<8} {:<12} {:<40} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
-                ns, job_id, status, cmd_display, created, finished,
+                "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
+                ns, job_id, job_type, status, cmd_display, created, finished,
                 cpu, memory, gpu_display, node_display
             );
         } else {
             println!(
-                "{:<20} {:<8} {:<12} {:<40} {:<20} {}",
-                ns, job_id, status, cmd_display, created, finished
+                "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {}",
+                ns, job_id, job_type, status, cmd_display, created, finished
             );
         }
     }
