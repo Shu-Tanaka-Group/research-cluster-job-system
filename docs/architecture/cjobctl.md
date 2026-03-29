@@ -64,12 +64,24 @@ namespace = "cjob-system"   # 省略時デフォルト
 
 | コマンド | 概要 | 対象テーブル |
 |---|---|---|
-| `cjobctl jobs list [--namespace <ns>] [--status <s>]` | ジョブ一覧 | `jobs` |
+| `cjobctl jobs list [--namespace <ns>] [--status <s>] [--sort <field>] [--reverse]` | ジョブ一覧 | `jobs` |
 | `cjobctl jobs summary` | namespace × ステータスのジョブ数（ピボットテーブル） | `jobs` |
-| `cjobctl jobs stalled` | DISPATCHED のまま滞留しているジョブ | `jobs` |
-| `cjobctl jobs remaining` | RUNNING ジョブの残り時間 | `jobs` |
+| `cjobctl jobs stalled [--sort <field>] [--reverse]` | DISPATCHED のまま滞留しているジョブ | `jobs` |
+| `cjobctl jobs remaining [--sort <field>] [--reverse]` | RUNNING ジョブの残り時間 | `jobs` |
 | `cjobctl jobs cancel --namespace <ns> [--job-id <id> \| --status <s> \| --all]` | ジョブのキャンセル | `jobs` |
 | `cjobctl counters list` | namespace ごとの job_id カウンター | `user_job_counters` |
+
+#### ソートオプション
+
+`jobs list`、`jobs stalled`、`jobs remaining` は `--sort` オプションでソートフィールドを変更できる。`--reverse` を併用すると降順になる。
+
+| コマンド | 使用可能なソートフィールド | デフォルト |
+|---|---|---|
+| `jobs list` | `NAMESPACE`, `CREATED`, `FINISHED` | `NAMESPACE`（namespace, job_id の複合順） |
+| `jobs stalled` | `NAMESPACE`, `CREATED` | `CREATED`（dispatched_at 昇順） |
+| `jobs remaining` | `NAMESPACE`, `CREATED` | `REMAINING`（remaining_sec 昇順） |
+
+`--sort FINISHED` を `stalled` / `remaining` で指定した場合はエラーとする（該当カラムが存在しないため）。
 
 ### 5.2 リソース消費量
 
