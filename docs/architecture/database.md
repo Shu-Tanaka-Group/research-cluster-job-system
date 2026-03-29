@@ -34,6 +34,7 @@ CREATE TABLE jobs (
     failed_indexes    TEXT,          -- 失敗インデックス（K8s 圧縮表記、例: "50"）
     succeeded_count   INTEGER,       -- 成功タスク数
     failed_count      INTEGER,       -- 失敗タスク数
+    node_name         TEXT,          -- ジョブ実行ノード名（Watcher が RUNNING 遷移時に記録。RUNNING スキップ時は完了遷移時に取得）
     PRIMARY KEY (namespace, job_id)
 );
 

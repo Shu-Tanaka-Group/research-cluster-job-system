@@ -43,7 +43,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    | `type: Complete, status: True` | `SUCCEEDED` | |
    | `type: Failed, status: True, reason: DeadlineExceeded` | `FAILED` | `last_error` に `"time limit exceeded"` を設定 |
    | `type: Failed, status: True` | `FAILED` | Pod の exit code 非0・起動失敗を含む |
-   | 条件なし・Pod が Running 中 | `RUNNING` | 初回 RUNNING 遷移時に `started_at` を記録し、`namespace_daily_usage` に累計消費量を加算する（[database.md](database.md) §5.2 参照） |
+   | 条件なし・Pod が Running 中 | `RUNNING` | 初回 RUNNING 遷移時に `started_at` を記録し、Pod の `spec.nodeName` から `node_name` を取得して記録し、`namespace_daily_usage` に累計消費量を加算する（[database.md](database.md) §5.2 参照） |
 
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）
@@ -93,7 +93,13 @@ K8s Job の `status.conditions` に従う（通常ジョブと同じロジック
 
 ### 4.3 RUNNING への遷移
 
-最初の Pod が RUNNING になった時点（K8s Job の `status.active >= 1`）で DB を RUNNING に更新する。通常ジョブと同様に `started_at` を記録する。
+最初の Pod が RUNNING になった時点（K8s Job の `status.active >= 1`）で DB を RUNNING に更新する。通常ジョブと同様に `started_at` と `node_name` を記録する。
+
+### 4.3.1 node_name の記録
+
+定期同期（§1.1）ではなく、ジョブごとの状態遷移時に1回だけ実行される処理である。
+
+Watcher は RUNNING 遷移時に `CoreV1Api().list_namespaced_pod()` で Job の Pod を取得し、`spec.nodeName` を DB の `node_name` カラムに記録する。一瞬で完了するジョブ（RUNNING を経由せず直接 SUCCEEDED/FAILED に遷移）の場合は、完了遷移時に `node_name` が未記録であれば Pod からの取得を試みる（Pod は `ttlSecondsAfterFinished` の間は残存している）。Pod が既に削除済みの場合は `node_name` は NULL のままとなる。
 
 ### 4.4 リソース使用量の加算
 

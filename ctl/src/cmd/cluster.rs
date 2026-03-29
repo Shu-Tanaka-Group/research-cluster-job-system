@@ -433,3 +433,114 @@ pub async fn set_quota(
 
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// flavor-usage
+// ---------------------------------------------------------------------------
+
+struct FlavorResource {
+    flavor: String,
+    resource: String,
+    nominal: String,
+    reserved: String,
+}
+
+pub async fn flavor_usage(k8s_client: &kube::Client) -> Result<()> {
+    let api = cluster_queue_api(k8s_client);
+    let cq = api
+        .get(CLUSTER_QUEUE_NAME)
+        .await
+        .context("Failed to get ClusterQueue")?;
+
+    // Extract nominalQuota from spec
+    let mut entries: Vec<FlavorResource> = Vec::new();
+    if let Some(groups) = cq.data["spec"]["resourceGroups"].as_array() {
+        for group in groups {
+            if let Some(flavors) = group["flavors"].as_array() {
+                for flavor in flavors {
+                    let flavor_name = flavor["name"].as_str().unwrap_or("unknown");
+                    if let Some(resources) = flavor["resources"].as_array() {
+                        for res in resources {
+                            let res_name = res["name"].as_str().unwrap_or("").to_string();
+                            let nominal = res["nominalQuota"].as_str().unwrap_or("0").to_string();
+                            entries.push(FlavorResource {
+                                flavor: flavor_name.to_string(),
+                                resource: res_name,
+                                nominal,
+                                reserved: "0".to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Extract reserved from status.flavorsReservation
+    if let Some(reservations) = cq.data["status"]["flavorsReservation"].as_array() {
+        for fr in reservations {
+            let flavor_name = fr["name"].as_str().unwrap_or("");
+            if let Some(resources) = fr["resources"].as_array() {
+                for res in resources {
+                    let res_name = res["name"].as_str().unwrap_or("");
+                    let borrowed = res["borrowed"].as_str().unwrap_or("0");
+                    let total_str = res["total"].as_str().unwrap_or("0");
+                    // total includes borrowed; use total as reserved
+                    let reserved = total_str;
+                    for entry in &mut entries {
+                        if entry.flavor == flavor_name && entry.resource == res_name {
+                            entry.reserved = reserved.to_string();
+                            let _ = borrowed; // available for future use
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!("=== ResourceFlavor Usage ({}) ===", CLUSTER_QUEUE_NAME);
+    println!(
+        "{:<16} {:<18} {:>10} {:>10} {:>8}",
+        "FLAVOR", "RESOURCE", "RESERVED", "NOMINAL", "USAGE"
+    );
+
+    for entry in &entries {
+        let nominal_val = parse_resource_quantity(&entry.nominal);
+        let reserved_val = parse_resource_quantity(&entry.reserved);
+
+        let usage_str = if nominal_val > 0.0 {
+            format!("{:.1}%", reserved_val / nominal_val * 100.0)
+        } else if reserved_val > 0.0 {
+            "∞".to_string()
+        } else {
+            "-".to_string()
+        };
+
+        println!(
+            "{:<16} {:<18} {:>10} {:>10} {:>8}",
+            entry.flavor, entry.resource, entry.reserved, entry.nominal, usage_str
+        );
+    }
+
+    Ok(())
+}
+
+fn parse_resource_quantity(s: &str) -> f64 {
+    // Handle Kubernetes quantity suffixes
+    if let Some(n) = s.strip_suffix("Ti") {
+        return n.parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0 * 1024.0 * 1024.0;
+    }
+    if let Some(n) = s.strip_suffix("Gi") {
+        return n.parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0 * 1024.0;
+    }
+    if let Some(n) = s.strip_suffix("Mi") {
+        return n.parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0;
+    }
+    if let Some(n) = s.strip_suffix("Ki") {
+        return n.parse::<f64>().unwrap_or(0.0) * 1024.0;
+    }
+    if let Some(n) = s.strip_suffix('m') {
+        return n.parse::<f64>().unwrap_or(0.0) / 1000.0;
+    }
+    s.parse::<f64>().unwrap_or(0.0)
+}

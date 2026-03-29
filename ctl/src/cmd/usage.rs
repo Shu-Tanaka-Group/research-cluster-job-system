@@ -1,14 +1,15 @@
 use anyhow::{bail, Result};
 use tokio_postgres::Client;
 
-pub async fn list(client: &Client, cluster_totals: &ClusterTotals) -> Result<()> {
+pub async fn list(client: &Client, cluster_totals: &ClusterTotals, namespace: Option<&str>) -> Result<()> {
     // 1. Daily raw data
     let daily_rows = client
         .query(
             "SELECT namespace, usage_date, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds \
              FROM namespace_daily_usage \
-             ORDER BY namespace, usage_date",
-            &[],
+             WHERE ($1::TEXT IS NULL OR namespace = $1) \
+             ORDER BY usage_date ASC, namespace ASC",
+            &[&namespace],
         )
         .await?;
 
@@ -49,8 +50,9 @@ pub async fn list(client: &Client, cluster_totals: &ClusterTotals) -> Result<()>
                SUM(gpu_seconds)::BIGINT AS gpu \
              FROM namespace_daily_usage \
              WHERE usage_date > CURRENT_DATE - 7 \
+               AND ($1::TEXT IS NULL OR namespace = $1) \
              GROUP BY namespace ORDER BY namespace",
-            &[],
+            &[&namespace],
         )
         .await?;
 
@@ -94,11 +96,12 @@ pub async fn list(client: &Client, cluster_totals: &ClusterTotals) -> Result<()>
          FROM namespace_daily_usage u \
          LEFT JOIN namespace_weights w ON u.namespace = w.namespace \
          WHERE u.usage_date > CURRENT_DATE - 7 \
+           AND ($1::TEXT IS NULL OR u.namespace = $1) \
          GROUP BY u.namespace, w.weight \
          ORDER BY weighted_dominant_share ASC NULLS FIRST",
         cluster_totals.cpu_millicores, cluster_totals.memory_mib, cluster_totals.gpus
     );
-    let drf_rows = client.query(&drf_query, &[]).await?;
+    let drf_rows = client.query(&drf_query, &[&namespace]).await?;
 
     println!(
         "{:<20} {:>14} {:>14} {:>10} {:>8} {:>16}",
