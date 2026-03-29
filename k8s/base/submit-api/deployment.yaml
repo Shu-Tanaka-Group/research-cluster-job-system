@@ -50,6 +50,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: MAX_QUEUED_JOBS_PER_NAMESPACE
+            - name: MAX_SWEEP_COMPLETIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: MAX_SWEEP_COMPLETIONS
             - name: LOG_BASE_DIR
               valueFrom:
                 configMapKeyRef:
