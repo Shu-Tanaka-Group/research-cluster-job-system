@@ -710,4 +710,80 @@ mod tests {
     fn test_parse_duration_overflow() {
         assert!(parse_duration("99999999d").is_err());
     }
+
+    // ── shell_quote / build_command_string ──
+
+    #[test]
+    fn test_shell_quote_simple() {
+        assert_eq!(shell_quote("echo"), "echo");
+        assert_eq!(shell_quote("main.py"), "main.py");
+        assert_eq!(shell_quote("--alpha"), "--alpha");
+    }
+
+    #[test]
+    fn test_shell_quote_with_spaces() {
+        assert_eq!(shell_quote("hello world"), "\"hello world\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_double_quote() {
+        assert_eq!(shell_quote("say \"hi\""), "\"say \\\"hi\\\"\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_single_quote() {
+        assert_eq!(shell_quote("it's"), "\"it's\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_dollar() {
+        // $ is not escaped — allows shell variable expansion in Job Pod
+        assert_eq!(shell_quote("$HOME"), "\"$HOME\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_backslash() {
+        assert_eq!(shell_quote("a\\b"), "\"a\\\\b\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_backtick() {
+        assert_eq!(shell_quote("a`b"), "\"a\\`b\"");
+    }
+
+    #[test]
+    fn test_shell_quote_empty() {
+        assert_eq!(shell_quote(""), "\"\"");
+    }
+
+    #[test]
+    fn test_build_command_string_simple() {
+        let args = vec!["echo".into(), "hello".into()];
+        assert_eq!(build_command_string(&args), "echo hello");
+    }
+
+    #[test]
+    fn test_build_command_string_with_spaces() {
+        let args = vec!["echo".into(), "hello world".into()];
+        assert_eq!(build_command_string(&args), "echo \"hello world\"");
+    }
+
+    #[test]
+    fn test_build_command_string_sweep_placeholder() {
+        // Simulates what cmd_sweep does: replace _INDEX_ then build
+        let args: Vec<String> = vec!["python".into(), "main.py".into(), "--trial".into(), "$CJOB_INDEX".into()];
+        assert_eq!(
+            build_command_string(&args),
+            "python main.py --trial \"$CJOB_INDEX\""
+        );
+    }
+
+    #[test]
+    fn test_build_command_string_sweep_placeholder_in_phrase() {
+        let args: Vec<String> = vec!["echo".into(), "index=$CJOB_INDEX".into()];
+        assert_eq!(
+            build_command_string(&args),
+            "echo \"index=$CJOB_INDEX\""
+        );
+    }
 }
