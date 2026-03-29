@@ -10,7 +10,7 @@ CREATE TABLE jobs (
     job_id        INTEGER NOT NULL,
     "user"        TEXT NOT NULL,
     namespace     TEXT NOT NULL,
-    image         TEXT NOT NULL,           -- CLI が JUPYTER_IMAGE 環境変数から取得したコンテナイメージ名
+    image         TEXT NOT NULL,           -- CLI が CJOB_IMAGE 環境変数から取得（未設定時は JUPYTER_IMAGE にフォールバック）
     command       TEXT NOT NULL,
     cwd           TEXT NOT NULL,
     env_json      JSONB NOT NULL DEFAULT '{}',
@@ -151,6 +151,8 @@ ON CONFLICT (namespace, usage_date) DO UPDATE SET
 Dispatcher が `fetch_dispatchable_jobs()` で DRF の dominant share を計算する際に、直近 `FAIR_SHARE_WINDOW_DAYS` 日分の消費量を集計する。
 
 ```sql
+-- window_days=7 の場合: CURRENT_DATE - 7 より後 = 6日前〜当日の 7 日分が集計対象
+-- （ちょうど 7 日前の行は §5.4 で削除済みかつ本条件でも対象外）
 SELECT namespace,
        SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,
        SUM(memory_mib_seconds) AS memory_mib_seconds,

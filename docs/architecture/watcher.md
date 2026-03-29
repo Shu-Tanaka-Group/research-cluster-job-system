@@ -62,6 +62,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    （`propagation_policy="Background"` の削除は非同期で完結するため、フェーズ 1 と同一サイクルでフェーズ 2 を実行してはならない）
 
 7. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
+8. DB 上で DISPATCHED / RUNNING だが、対応する K8s Job が K8s 上に存在しないジョブを FAILED に遷移させる（`last_error` に `"K8s Job not found (TTL expired or manually deleted)"` を設定し、`finished_at` を現在時刻に設定する）。これにより `ttlSecondsAfterFinished` による K8s Job の自動削除や、手動削除によって DB と K8s の状態が乖離した場合に自動修復される
 
 ## 4. sweep ジョブの監視
 

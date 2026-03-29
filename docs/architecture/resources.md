@@ -102,4 +102,4 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 |---|---|---|---|---|---|
 | `DEFAULT_TIME_LIMIT_SECONDS` | ConfigMap | 86400 (24h) | Submit API | ジョブごと | `time_limit_seconds` 省略時に適用されるデフォルト実行時間上限 |
 | `MAX_TIME_LIMIT_SECONDS` | ConfigMap | 604800 (7d) | Submit API | ジョブごと | ユーザーが指定できる `time_limit_seconds` の最大値 |
-| `activeDeadlineSeconds` | K8s Job spec | DB の `time_limit_seconds` | Kubernetes | ジョブごと | Pod が Running になってからの実行時間上限。超過時に K8s が Job を終了し、Watcher が FAILED（`time limit exceeded`）に遷移させる |
+| `activeDeadlineSeconds` | K8s Job spec | DB の `time_limit_seconds` | Kubernetes | ジョブごと | Job オブジェクト作成時点からの実行時間上限（Kueue による suspend 期間も含む）。超過時に K8s が Job を終了し、Watcher が FAILED（`time limit exceeded`）に遷移させる。通常は DISPATCHED → RUNNING の遅延が数秒〜数十秒のため、実質的にはジョブ実行時間の上限として機能する |

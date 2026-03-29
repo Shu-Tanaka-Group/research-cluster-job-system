@@ -61,8 +61,8 @@ ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 nam
          GREATEST(                         -- DRF: dominant share / weight が小さい namespace を優先
            COALESCE(u.cpu_millicores_seconds, 0)::float / :cluster_cpu_millicores,
            COALESCE(u.memory_mib_seconds, 0)::float / :cluster_memory_mib,
-           COALESCE(u.gpu_seconds, 0)::float / NULLIF(:cluster_gpus, 0)
-         ) / COALESCE(w.weight, 1) ASC NULLS FIRST,
+           COALESCE(u.gpu_seconds, 0)::float / NULLIF(:cluster_gpus, 0)  -- GPU=0 のクラスタでは NULL → GREATEST が無視し CPU/mem のみで判定
+         ) / COALESCE(w.weight, 1) ASC NULLS FIRST,  -- 消費量レコードなし(NULL)の namespace が最優先
          q.namespace ASC                   -- 同率の場合は namespace 名で決定的に順序付け
 LIMIT :batch_size;                         -- 1サイクルの総取得数を固定
 ```

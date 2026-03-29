@@ -166,8 +166,9 @@ data:
   MAX_QUEUED_JOBS_PER_NAMESPACE: "2000"
   DEFAULT_TIME_LIMIT_SECONDS: "86400"
   MAX_TIME_LIMIT_SECONDS: "604800"
+  MAX_SWEEP_COMPLETIONS: "1000"
   KUEUE_LOCAL_QUEUE_NAME: default
-  USER_NAMESPACE_LABEL: cjob.io/user-namespace=true
+  USER_NAMESPACE_LABEL: cjob.io/user-namespace=true   # NetworkPolicy・cjobctl が参照。サーバーコンポーネントの env には注入不要
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
   JOB_NODE_TAINT: "role=computing:NoSchedule"
@@ -201,6 +202,10 @@ env:
 | Watcher | `cjob-config` | `postgres-secret` |
 | PostgreSQL | - | `postgres-secret` |
 | CLI（`cjob update` で配布） | -（ログパスは API から取得） | - |
+| cjobctl | `cjob-config`（`config show` で参照） | - |
+| NetworkPolicy | -（`USER_NAMESPACE_LABEL` の値を YAML にハードコード） | - |
+
+`USER_NAMESPACE_LABEL` はサーバーコンポーネント（Submit API / Dispatcher / Watcher）の env には注入しない。NetworkPolicy の `namespaceSelector` と cjobctl の `weight exclusive` コマンドが参照する。
 
 ---
 
@@ -521,6 +526,12 @@ data:
         started_at    TIMESTAMPTZ,
         finished_at   TIMESTAMPTZ,
         last_error    TEXT,
+        completions       INTEGER,
+        parallelism       INTEGER,
+        completed_indexes TEXT,
+        failed_indexes    TEXT,
+        succeeded_count   INTEGER,
+        failed_count      INTEGER,
         PRIMARY KEY (namespace, job_id)
     );
     CREATE TABLE IF NOT EXISTS user_job_counters (
@@ -715,6 +726,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: MAX_TIME_LIMIT_SECONDS
+            - name: MAX_SWEEP_COMPLETIONS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: MAX_SWEEP_COMPLETIONS
           resources:
             requests:
               cpu: "100m"
@@ -864,6 +880,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: LOG_BASE_DIR
+            - name: JOB_NODE_TAINT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: JOB_NODE_TAINT
           resources:
             requests:
               cpu: "100m"
@@ -1115,9 +1136,9 @@ helm repo update
 helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --version 3.7.1
 kubectl apply -f policies/restrict-job-image.yaml
 
-# 7. 各ユーザーの namespace 作成
-./scripts/create-user-namespace.sh alice
-./scripts/create-user-namespace.sh bob
+# 7. 各ユーザーの namespace 作成（引数: <namespace名> <ユーザー名>）
+./scripts/create-user-namespace.sh user-alice alice
+./scripts/create-user-namespace.sh user-bob bob
 
 # 8. CLI バイナリの配置（§4.1 参照）
 # cjobctl のビルドは build.md「管理 CLI（cjobctl）のビルド」を参照

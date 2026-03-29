@@ -219,22 +219,23 @@ def verify_token(token: str) -> str:
 
 ### 7.2 namespace 照合（認可）
 
-JWT から確定した namespace とリクエスト対象ジョブの namespace を照合する。
-他ユーザーのジョブへのアクセスは、ジョブの存在自体を隠すことで情報漏洩を防ぐため 404 を返す。
+JWT から確定した namespace で DB を検索することで、認可を実現する。
+`jobs` テーブルの主キーは `(namespace, job_id)` であるため、JWT の namespace と job_id の組で一意にジョブを特定できる。
+該当レコードがなければ、存在しないジョブへのアクセスと他ユーザーのジョブへのアクセスを区別せず 404 を返す（ジョブの存在自体を隠すことで情報漏洩を防ぐ）。
 
 ```python
 @app.post("/v1/jobs/{job_id}/cancel")
 def cancel_job(job_id: int, token: str = Depends(extract_bearer)):
     namespace = verify_token(token)   # K8s が保証した namespace
-    job = db.get_job(job_id)
+    job = db.get_job(namespace, job_id)  # PK (namespace, job_id) で検索
 
-    if job.namespace != namespace:    # 他ユーザーのジョブは存在を隠して 404 で返す
+    if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
     # キャンセル処理...
 ```
 
-全エンドポイントで同様の照合を行う。
+全エンドポイントで同様に、JWT の namespace を検索条件に含める。
 
 ---
 
