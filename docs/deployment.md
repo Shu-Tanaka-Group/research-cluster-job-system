@@ -152,7 +152,7 @@ data:
   POSTGRES_HOST: postgres.cjob-system.svc.cluster.local
   POSTGRES_PORT: "5432"
   POSTGRES_DB: cjob
-  DISPATCH_BUDGET_PER_NAMESPACE: "256"
+  DISPATCH_BUDGET_PER_NAMESPACE: "32"
   DISPATCH_BATCH_SIZE: "50"
   DISPATCH_ROUND_SIZE: "1"
   DISPATCH_BUDGET_CHECK_INTERVAL_SEC: "10"
@@ -163,7 +163,7 @@ data:
   FAIR_SHARE_WINDOW_DAYS: "7"
   NODE_LABEL_SELECTOR: "cluster-job=true"
   NODE_RESOURCE_SYNC_INTERVAL_SEC: "300"
-  MAX_QUEUED_JOBS_PER_NAMESPACE: "2000"
+  MAX_QUEUED_JOBS_PER_NAMESPACE: "500"
   DEFAULT_TIME_LIMIT_SECONDS: "86400"
   MAX_TIME_LIMIT_SECONDS: "604800"
   MAX_SWEEP_COMPLETIONS: "1000"
@@ -445,7 +445,7 @@ metadata:
   namespace: ${NS_NAME}
 spec:
   hard:
-    count/jobs.batch: "600"
+    count/jobs.batch: "100"
     requests.cpu: "300"
     requests.memory: "1250Gi"
     limits.cpu: "300"

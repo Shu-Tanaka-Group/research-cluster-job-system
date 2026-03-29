@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = ""
 
     # Dispatcher
-    DISPATCH_BUDGET_PER_NAMESPACE: int = 256
+    DISPATCH_BUDGET_PER_NAMESPACE: int = 32
     DISPATCH_BATCH_SIZE: int = 50
     DISPATCH_BUDGET_CHECK_INTERVAL_SEC: int = 10
     DISPATCH_ROUND_SIZE: int = 1                   # jobs per namespace per round-robin round
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     NODE_RESOURCE_SYNC_INTERVAL_SEC: int = 300     # 5 minutes
 
     # Submit API
-    MAX_QUEUED_JOBS_PER_NAMESPACE: int = 2000
+    MAX_QUEUED_JOBS_PER_NAMESPACE: int = 500
     MAX_SWEEP_COMPLETIONS: int = 1000
     DEFAULT_TIME_LIMIT_SECONDS: int = 86400   # 24 hours
     MAX_TIME_LIMIT_SECONDS: int = 604800      # 7 days

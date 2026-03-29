@@ -7,4 +7,4 @@ metadata:
   name: cjob-config
   namespace: cjob-system
 data:
-  DISPATCH_BUDGET_PER_NAMESPACE: "256"
+  DISPATCH_BUDGET_PER_NAMESPACE: "32"

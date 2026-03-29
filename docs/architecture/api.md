@@ -88,12 +88,12 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 ```
 
 namespace のジョブ総数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計）が
-`MAX_QUEUED_JOBS_PER_NAMESPACE`（デフォルト 2000）に達している場合は 429 を返す。
+`MAX_QUEUED_JOBS_PER_NAMESPACE`（デフォルト 500）に達している場合は 429 を返す。
 CANCELLED ジョブを含めることで、cancel → 再投入の無制限サイクルによる DB 肥大化を防ぐ。
 上限に達した場合は `cjob delete` で CANCELLED ジョブを削除してから再投入すること。
 
 ```json
-{ "detail": "投入可能なジョブ数の上限（2000件）に達しています" }
+{ "detail": "投入可能なジョブ数の上限（500件）に達しています" }
 ```
 
 namespace に `DELETING` 状態のジョブが1件でも存在する場合は 409 を返す（リセット処理中）。
