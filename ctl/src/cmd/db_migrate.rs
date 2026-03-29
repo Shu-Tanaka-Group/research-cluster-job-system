@@ -23,7 +23,13 @@ pub async fn migrate(client: &Client) -> Result<()> {
             updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW() \
         ); \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS time_limit_seconds INTEGER NOT NULL DEFAULT 86400; \
-        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;";
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ; \
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completions INTEGER; \
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS parallelism INTEGER; \
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completed_indexes TEXT; \
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS failed_indexes TEXT; \
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS succeeded_count INTEGER; \
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS failed_count INTEGER;";
 
     client
         .batch_execute(ddl)

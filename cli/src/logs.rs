@@ -17,7 +17,7 @@ fn stderr_path(log_dir: &str) -> PathBuf {
     PathBuf::from(log_dir).join("stderr.log")
 }
 
-pub async fn show_logs(job_id: u32, follow: bool, client: &CjobClient) -> Result<()> {
+pub async fn show_logs(job_id: u32, follow: bool, index: Option<u32>, client: &CjobClient) -> Result<()> {
     // Get current job status
     let job = client.get_job(job_id).await?;
 
@@ -25,6 +25,18 @@ pub async fn show_logs(job_id: u32, follow: bool, client: &CjobClient) -> Result
         Some(d) => d.as_str(),
         None => bail!("ジョブ {} の log_dir が設定されていません", job_id),
     };
+
+    let is_sweep = job.completions.is_some();
+
+    // Validate --index usage
+    if index.is_some() && !is_sweep {
+        bail!("--index はスイープジョブのみ使用できます");
+    }
+
+    // For sweep with --follow but no --index
+    if is_sweep && follow && index.is_none() {
+        bail!("スイープの全インデックスを追跡するには --index を指定してください\n例: cjob logs --follow {} --index 0", job_id);
+    }
 
     match job.status.as_str() {
         "QUEUED" | "DISPATCHING" | "DISPATCHED" => {
@@ -37,10 +49,26 @@ pub async fn show_logs(job_id: u32, follow: bool, client: &CjobClient) -> Result
         }
         "RUNNING" => {}
         "SUCCEEDED" | "FAILED" => {
+            if is_sweep {
+                return show_sweep_logs(log_dir, index, job.completions.unwrap());
+            }
             print_full_logs(log_dir)?;
             return Ok(());
         }
         "CANCELLED" => {
+            if is_sweep {
+                if let Some(idx) = index {
+                    let idx_dir = format!("{}/{}", log_dir, idx);
+                    if stdout_path(&idx_dir).exists() {
+                        print_full_logs(&idx_dir)?;
+                    } else {
+                        println!("No logs available");
+                    }
+                } else {
+                    return show_sweep_logs(log_dir, None, job.completions.unwrap_or(0));
+                }
+                return Ok(());
+            }
             if stdout_path(log_dir).exists() {
                 print_full_logs(log_dir)?;
             } else {
@@ -62,11 +90,59 @@ pub async fn show_logs(job_id: u32, follow: bool, client: &CjobClient) -> Result
         }
     }
 
+    // For RUNNING jobs
+    if is_sweep {
+        if let Some(idx) = index {
+            let idx_dir = format!("{}/{}", log_dir, idx);
+            if follow {
+                return tail_logs(&idx_dir).await;
+            } else {
+                return print_full_logs(&idx_dir);
+            }
+        } else {
+            // No --index, show all (non-follow, validated above)
+            return show_sweep_logs(log_dir, None, job.completions.unwrap());
+        }
+    }
+
     if follow {
         tail_logs(log_dir).await
     } else {
         print_full_logs(log_dir)
     }
+}
+
+fn show_sweep_logs(log_dir: &str, index: Option<u32>, completions: u32) -> Result<()> {
+    if let Some(idx) = index {
+        let idx_dir = format!("{}/{}", log_dir, idx);
+        return print_full_logs(&idx_dir);
+    }
+
+    // Show all indexes
+    let base = PathBuf::from(log_dir);
+    let mut found_any = false;
+    for i in 0..completions {
+        let idx_dir = base.join(i.to_string());
+        let stdout = idx_dir.join("stdout.log");
+        if stdout.exists() {
+            println!("=== [index {}] ===", i);
+            let content = std::fs::read_to_string(&stdout)?;
+            print!("{}", content);
+
+            let stderr = idx_dir.join("stderr.log");
+            if stderr.exists() {
+                let err_content = std::fs::read_to_string(&stderr)?;
+                if !err_content.is_empty() {
+                    eprint!("{}", err_content);
+                }
+            }
+            found_any = true;
+        }
+    }
+    if !found_any {
+        println!("No logs available");
+    }
+    Ok(())
 }
 
 async fn wait_for_start(job_id: u32, client: &CjobClient) -> Result<()> {

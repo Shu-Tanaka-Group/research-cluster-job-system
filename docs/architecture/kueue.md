@@ -74,7 +74,7 @@ preemption を禁止する理由：研究計算ではジョブが途中で強制
 各 user namespace に作成する。
 
 ```yaml
-apiVersion: kueue.x-k8s.io/v1beta1
+apiVersion: kueue.x-k8s.io/v1beta2
 kind: LocalQueue
 metadata:
   name: default

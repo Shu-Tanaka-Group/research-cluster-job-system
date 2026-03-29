@@ -35,6 +35,32 @@ enum Commands {
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
     },
+    /// パラメータスイープを投入する
+    Sweep {
+        /// タスク数
+        #[arg(short = 'n', long = "count")]
+        count: u32,
+
+        /// 並列数
+        #[arg(long = "parallel", default_value = "1")]
+        parallel: u32,
+
+        /// 実行時間の上限（例: 3600, 1h, 6h, 1d, 3d）
+        #[arg(long = "time-limit")]
+        time_limit: Option<String>,
+
+        /// CPU リソース（例: "2"）
+        #[arg(long, default_value = "1")]
+        cpu: String,
+
+        /// メモリリソース（例: "4Gi"）
+        #[arg(long, default_value = "1Gi")]
+        memory: String,
+
+        /// コマンド（-- の後に指定）
+        #[arg(trailing_var_arg = true, required = true)]
+        command: Vec<String>,
+    },
     /// ジョブ一覧を表示する
     List {
         /// ステータスでフィルタ
@@ -84,6 +110,10 @@ enum Commands {
         /// リアルタイムでログを追跡する
         #[arg(long)]
         follow: bool,
+
+        /// スイープのインデックス指定
+        #[arg(long)]
+        index: Option<u32>,
     },
     /// CLI を最新バージョンに更新する
     Update {
@@ -124,15 +154,47 @@ async fn main() -> Result<()> {
             memory,
             time_limit,
         } => cmd_add(&api_client, command, cpu, memory, time_limit).await,
+        Commands::Sweep {
+            count,
+            parallel,
+            time_limit,
+            cpu,
+            memory,
+            command,
+        } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, time_limit).await,
         Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status.map(|s| s.to_uppercase()), limit, reverse, all).await,
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
         Commands::Delete { job_ids, all } => cmd_delete(&api_client, job_ids, all).await,
         Commands::Usage => cmd_usage(&api_client).await,
         Commands::Reset => cmd_reset(&api_client).await,
-        Commands::Logs { job_id, follow } => logs::show_logs(job_id, follow, &api_client).await,
+        Commands::Logs { job_id, follow, index } => logs::show_logs(job_id, follow, index, &api_client).await,
         Commands::Update { .. } => unreachable!(),
     }
+}
+
+/// Quote a command argument for safe embedding in a bash -lc string.
+/// Uses double quotes so that shell variables (e.g. $CJOB_INDEX) expand
+/// in the Job Pod. Characters special inside double quotes are escaped.
+fn shell_quote(arg: &str) -> String {
+    if !arg.is_empty()
+        && !arg.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}".contains(c))
+    {
+        return arg.to_string();
+    }
+    let escaped = arg
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('`', "\\`")
+        .replace('!', "\\!");
+    format!("\"{}\"", escaped)
+}
+
+fn build_command_string(args: &[String]) -> String {
+    args.iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn parse_duration(s: &str) -> Result<u32> {
@@ -180,18 +242,7 @@ async fn cmd_add(
     // Collect exported environment variables
     let env: HashMap<String, String> = std::env::vars().collect();
 
-    let cmd_str = command
-        .iter()
-        .map(|arg| {
-            if arg.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}".contains(c)) {
-                // Wrap in single quotes, escaping any existing single quotes
-                format!("'{}'", arg.replace('\'', "'\\''"))
-            } else {
-                arg.clone()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
+    let cmd_str = build_command_string(&command);
 
     let time_limit_seconds = match time_limit {
         Some(ref s) => Some(parse_duration(s)?),
@@ -213,6 +264,66 @@ async fn cmd_add(
 
     let resp = client.submit_job(&req).await?;
     println!("ジョブ {} を投入しました。({})", resp.job_id, resp.status);
+    Ok(())
+}
+
+async fn cmd_sweep(
+    client: &client::CjobClient,
+    command: Vec<String>,
+    count: u32,
+    parallel: u32,
+    cpu: String,
+    memory: String,
+    time_limit: Option<String>,
+) -> Result<()> {
+    let cwd = std::env::current_dir()?
+        .to_string_lossy()
+        .to_string();
+
+    let image = std::env::var("CJOB_IMAGE")
+        .or_else(|_| std::env::var("JUPYTER_IMAGE"))
+        .unwrap_or_default();
+
+    if image.is_empty() {
+        anyhow::bail!("CJOB_IMAGE または JUPYTER_IMAGE 環境変数が設定されていません");
+    }
+
+    // Collect exported environment variables
+    let env: HashMap<String, String> = std::env::vars().collect();
+
+    // Replace _INDEX_ placeholder with $CJOB_INDEX before quoting.
+    // Double-quote strategy ensures $CJOB_INDEX expands in the Job Pod.
+    let quoted_args: Vec<String> = command
+        .iter()
+        .map(|arg| arg.replace("_INDEX_", "$CJOB_INDEX"))
+        .collect();
+    let cmd_str = build_command_string(&quoted_args);
+
+    let time_limit_seconds = match time_limit {
+        Some(ref s) => Some(parse_duration(s)?),
+        None => None,
+    };
+
+    let req = client::SweepSubmitRequest {
+        command: cmd_str,
+        image,
+        cwd,
+        env,
+        resources: client::ResourceSpec {
+            cpu,
+            memory,
+            gpu: 0,
+        },
+        completions: count,
+        parallelism: parallel,
+        time_limit_seconds,
+    };
+
+    let resp = client.submit_sweep(&req).await?;
+    println!(
+        "スイープ {} を投入しました。({}, {} タスク, 並列 {})",
+        resp.job_id, resp.status, count, parallel
+    );
     Ok(())
 }
 
@@ -598,5 +709,81 @@ mod tests {
     #[test]
     fn test_parse_duration_overflow() {
         assert!(parse_duration("99999999d").is_err());
+    }
+
+    // ── shell_quote / build_command_string ──
+
+    #[test]
+    fn test_shell_quote_simple() {
+        assert_eq!(shell_quote("echo"), "echo");
+        assert_eq!(shell_quote("main.py"), "main.py");
+        assert_eq!(shell_quote("--alpha"), "--alpha");
+    }
+
+    #[test]
+    fn test_shell_quote_with_spaces() {
+        assert_eq!(shell_quote("hello world"), "\"hello world\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_double_quote() {
+        assert_eq!(shell_quote("say \"hi\""), "\"say \\\"hi\\\"\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_single_quote() {
+        assert_eq!(shell_quote("it's"), "\"it's\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_dollar() {
+        // $ is not escaped — allows shell variable expansion in Job Pod
+        assert_eq!(shell_quote("$HOME"), "\"$HOME\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_backslash() {
+        assert_eq!(shell_quote("a\\b"), "\"a\\\\b\"");
+    }
+
+    #[test]
+    fn test_shell_quote_with_backtick() {
+        assert_eq!(shell_quote("a`b"), "\"a\\`b\"");
+    }
+
+    #[test]
+    fn test_shell_quote_empty() {
+        assert_eq!(shell_quote(""), "\"\"");
+    }
+
+    #[test]
+    fn test_build_command_string_simple() {
+        let args = vec!["echo".into(), "hello".into()];
+        assert_eq!(build_command_string(&args), "echo hello");
+    }
+
+    #[test]
+    fn test_build_command_string_with_spaces() {
+        let args = vec!["echo".into(), "hello world".into()];
+        assert_eq!(build_command_string(&args), "echo \"hello world\"");
+    }
+
+    #[test]
+    fn test_build_command_string_sweep_placeholder() {
+        // Simulates what cmd_sweep does: replace _INDEX_ then build
+        let args: Vec<String> = vec!["python".into(), "main.py".into(), "--trial".into(), "$CJOB_INDEX".into()];
+        assert_eq!(
+            build_command_string(&args),
+            "python main.py --trial \"$CJOB_INDEX\""
+        );
+    }
+
+    #[test]
+    fn test_build_command_string_sweep_placeholder_in_phrase() {
+        let args: Vec<String> = vec!["echo".into(), "index=$CJOB_INDEX".into()];
+        assert_eq!(
+            build_command_string(&args),
+            "echo \"index=$CJOB_INDEX\""
+        );
     }
 }

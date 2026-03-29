@@ -27,6 +27,12 @@ data:
         started_at    TIMESTAMPTZ,
         finished_at   TIMESTAMPTZ,
         last_error    TEXT,
+        completions       INTEGER,
+        parallelism       INTEGER,
+        completed_indexes TEXT,
+        failed_indexes    TEXT,
+        succeeded_count   INTEGER,
+        failed_count      INTEGER,
         PRIMARY KEY (namespace, job_id)
     );
     CREATE TABLE IF NOT EXISTS user_job_counters (

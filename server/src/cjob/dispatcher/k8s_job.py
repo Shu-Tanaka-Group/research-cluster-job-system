@@ -64,20 +64,35 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
     username = job.user
     k8s_job_name = f"cjob-{username}-{job.job_id}"
     log_dir = job.log_dir
+    is_sweep = job.completions is not None
 
     # Build tee-wrapped command
     user_command = job.command
-    wrapped_command = (
-        f'LOG_DIR={log_dir}\n'
-        f'mkdir -p "$LOG_DIR"\n'
-        f'exec > >(tee "$LOG_DIR/stdout.log") '
-        f'2> >(tee "$LOG_DIR/stderr.log" >&2)\n'
-        f'{user_command}\n'
-        f'EXIT_CODE=$?\n'
-        f'exec >&- 2>&-\n'
-        f'wait\n'
-        f'exit $EXIT_CODE'
-    )
+    if is_sweep:
+        wrapped_command = (
+            f'export CJOB_INDEX=$JOB_COMPLETION_INDEX\n'
+            f'LOG_DIR={log_dir}/$CJOB_INDEX\n'
+            f'mkdir -p "$LOG_DIR"\n'
+            f'exec > >(tee "$LOG_DIR/stdout.log") '
+            f'2> >(tee "$LOG_DIR/stderr.log" >&2)\n'
+            f'{user_command}\n'
+            f'EXIT_CODE=$?\n'
+            f'exec >&- 2>&-\n'
+            f'wait\n'
+            f'exit $EXIT_CODE'
+        )
+    else:
+        wrapped_command = (
+            f'LOG_DIR={log_dir}\n'
+            f'mkdir -p "$LOG_DIR"\n'
+            f'exec > >(tee "$LOG_DIR/stdout.log") '
+            f'2> >(tee "$LOG_DIR/stderr.log" >&2)\n'
+            f'{user_command}\n'
+            f'EXIT_CODE=$?\n'
+            f'exec >&- 2>&-\n'
+            f'wait\n'
+            f'exit $EXIT_CODE'
+        )
 
     # Build env vars from job.env_json
     env_vars = [
@@ -123,6 +138,17 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
         ],
     )
 
+    job_spec_kwargs = {
+        "active_deadline_seconds": job.time_limit_seconds,
+        "ttl_seconds_after_finished": 10800,
+        "template": k8s_client.V1PodTemplateSpec(spec=pod_spec),
+    }
+    if is_sweep:
+        job_spec_kwargs["completion_mode"] = "Indexed"
+        job_spec_kwargs["completions"] = job.completions
+        job_spec_kwargs["parallelism"] = job.parallelism
+        job_spec_kwargs["backoff_limit_per_index"] = 0
+
     return k8s_client.V1Job(
         api_version="batch/v1",
         kind="Job",
@@ -135,11 +161,7 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
                 "cjob.io/namespace": job.namespace,
             },
         ),
-        spec=k8s_client.V1JobSpec(
-            active_deadline_seconds=job.time_limit_seconds,
-            ttl_seconds_after_finished=10800,
-            template=k8s_client.V1PodTemplateSpec(spec=pod_spec),
-        ),
+        spec=k8s_client.V1JobSpec(**job_spec_kwargs),
     )
 
 

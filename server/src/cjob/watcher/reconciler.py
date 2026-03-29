@@ -66,9 +66,10 @@ def _delete_k8s_job(namespace: str, name: str):
 
 def _record_resource_usage(session: Session, job: Job):
     """Add resource usage to namespace_daily_usage on RUNNING transition."""
-    delta_cpu = job.time_limit_seconds * parse_cpu_millicores(job.cpu)
-    delta_mem = job.time_limit_seconds * parse_memory_mib(job.memory)
-    delta_gpu = job.time_limit_seconds * job.gpu
+    parallelism = job.parallelism if job.completions is not None else 1
+    delta_cpu = job.time_limit_seconds * parse_cpu_millicores(job.cpu) * parallelism
+    delta_mem = job.time_limit_seconds * parse_memory_mib(job.memory) * parallelism
+    delta_gpu = job.time_limit_seconds * job.gpu * parallelism
 
     session.execute(
         text(
@@ -147,8 +148,32 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
             _delete_k8s_job(ns, kj_name)
             continue
 
+        # Update sweep index tracking before status sync
+        if db_job.completions is not None and kj.status:
+            kj_status = kj.status
+            new_succeeded = kj_status.succeeded or 0
+            new_failed = kj_status.failed or 0
+            new_completed_indexes = getattr(kj_status, 'completed_indexes', None) or ""
+            new_failed_indexes = getattr(kj_status, 'failed_indexes', None) or ""
+            if (db_job.succeeded_count != new_succeeded
+                    or db_job.failed_count != new_failed
+                    or db_job.completed_indexes != new_completed_indexes
+                    or db_job.failed_indexes != new_failed_indexes):
+                db_job.succeeded_count = new_succeeded
+                db_job.failed_count = new_failed
+                db_job.completed_indexes = new_completed_indexes
+                db_job.failed_indexes = new_failed_indexes
+
         # Normal status sync (don't overwrite CANCELLED or DELETING)
         new_status, reason = determine_status(kj)
+
+        # For sweep: K8s Complete + failed_count > 0 → FAILED
+        if (db_job.completions is not None
+                and new_status == "SUCCEEDED"
+                and db_job.failed_count
+                and db_job.failed_count > 0):
+            new_status = "FAILED"
+
         if new_status and new_status != db_job.status:
             db_job.status = new_status
             if new_status == "RUNNING" and db_job.started_at is None:

@@ -102,6 +102,62 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 { "detail": "リセット処理中のためジョブを投入できません。しばらく待ってから再試行してください" }
 ```
 
+## 2.1 POST /v1/sweep
+
+パラメータスイープジョブを 1 件投入する。K8s Indexed Job として実行され、各タスクは `$CJOB_INDEX`（0-origin）で識別される。
+
+### request
+
+```json
+{
+  "command": "python main.py --trial $CJOB_INDEX",
+  "image": "yusekiya/stg-jupyter:2.1.0",
+  "cwd": "/home/jovyan/project-a",
+  "env": {
+    "OMP_NUM_THREADS": "4"
+  },
+  "resources": {
+    "cpu": "2",
+    "memory": "4Gi",
+    "gpu": 0
+  },
+  "completions": 100,
+  "parallelism": 10,
+  "time_limit_seconds": 21600
+}
+```
+
+### response
+
+```json
+{
+  "job_id": 3,
+  "status": "QUEUED"
+}
+```
+
+### バリデーション
+
+`POST /v1/jobs` と共通のバリデーション（GPU リジェクト、単一ノードリソース超過、time_limit、ジョブ数上限、DELETING チェック）に加え、以下の sweep 固有バリデーションを行う。
+
+- `completions` が 1 未満 → 400
+- `completions` が `MAX_SWEEP_COMPLETIONS`（デフォルト 1000）を超える → 400
+- `parallelism` が 1 未満 → 400
+- `parallelism` が `completions` を超える → 400
+- `parallelism × Pod リソース` がクラスタ全体の allocatable 合計を超える → 400
+
+```json
+{ "detail": "completions は 1 以上 1000 以下で指定してください" }
+```
+
+```json
+{ "detail": "parallelism は 1 以上 completions 以下で指定してください" }
+```
+
+```json
+{ "detail": "parallelism × 要求 CPU (20000m) がクラスタ全体の CPU (256000m) を超えています" }
+```
+
 ## 3. GET /v1/jobs
 
 ジョブ一覧を取得する。JWT の namespace に属するジョブのみ返す。
@@ -133,7 +189,11 @@ GET /v1/jobs?limit=50&order=desc
       "status": "RUNNING",
       "command": "python main.py --alpha 0.1 --beta 16",
       "created_at": "2026-03-23T12:34:56Z",
-      "finished_at": null
+      "finished_at": null,
+      "completions": null,
+      "parallelism": null,
+      "succeeded_count": null,
+      "failed_count": null
     }
   ],
   "total_count": 1,
@@ -158,6 +218,9 @@ GET /v1/jobs?limit=50&order=desc
   "namespace": "user-alice",
   "command": "python main.py --alpha 0.1 --beta 16",
   "cwd": "/home/jovyan/project-a/exp1",
+  "cpu": "2",
+  "memory": "4Gi",
+  "gpu": 0,
   "time_limit_seconds": 86400,
   "k8s_job_name": "cjob-alice-1",
   "log_dir": "/home/jovyan/.cjob/logs/1",
@@ -165,7 +228,13 @@ GET /v1/jobs?limit=50&order=desc
   "dispatched_at": "2026-03-23T12:35:02Z",
   "started_at": "2026-03-23T12:35:10Z",
   "finished_at": "2026-03-23T12:37:10Z",
-  "last_error": null
+  "last_error": null,
+  "completions": null,
+  "parallelism": null,
+  "succeeded_count": null,
+  "failed_count": null,
+  "completed_indexes": null,
+  "failed_indexes": null
 }
 ```
 
@@ -322,7 +391,38 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 }
 ```
 
-## 9. GET /v1/cli/version
+## 9. GET /v1/usage
+
+自身の namespace の直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース使用状況を取得する。`namespace_daily_usage` テーブルから日別の消費量を集計して返す。
+
+### response
+
+```json
+{
+  "window_days": 7,
+  "daily": [
+    {
+      "date": "2026-03-23",
+      "cpu_millicores_seconds": 86400000,
+      "memory_mib_seconds": 176947200,
+      "gpu_seconds": 0
+    },
+    {
+      "date": "2026-03-24",
+      "cpu_millicores_seconds": 45000000,
+      "memory_mib_seconds": 92160000,
+      "gpu_seconds": 0
+    }
+  ],
+  "total_cpu_millicores_seconds": 131400000,
+  "total_memory_mib_seconds": 269107200,
+  "total_gpu_seconds": 0
+}
+```
+
+`daily` は `usage_date` 昇順でソートされる。ウィンドウ内に使用実績がない場合は `daily` が空配列、各 total が 0 となる。
+
+## 10. GET /v1/cli/version
 
 PVC 上に配置された CLI バイナリの最新バージョンを返す。認証不要。
 
@@ -344,7 +444,7 @@ PVC に `latest` ファイルが存在しない場合（バイナリ未配置）
 { "detail": "CLI binary not found" }
 ```
 
-## 10. GET /v1/cli/versions
+## 11. GET /v1/cli/versions
 
 PVC 上に配置された CLI バイナリの全バージョン一覧を返す。認証不要。
 
@@ -367,7 +467,7 @@ PVC に `latest` ファイルが存在しない場合は 404 を返す。
 { "detail": "CLI binary not found" }
 ```
 
-## 11. GET /v1/cli/download
+## 12. GET /v1/cli/download
 
 PVC 上に配置された CLI バイナリを返す。認証不要。
 

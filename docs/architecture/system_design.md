@@ -7,19 +7,21 @@
 ### 1.1 CLI 機能
 
 - `cjob add`
+- `cjob sweep`
 - `cjob list`
 - `cjob status`
 - `cjob cancel`
 - `cjob delete`
+- `cjob usage`
 - `cjob reset`
-- `cjob logs`（`--follow` オプション含む）
+- `cjob logs`（`--follow` / `--index` オプション含む）
 - `cjob update`
 
 ### 1.2 submit 機能
 
 - 現在の作業ディレクトリ取得
 - export 済み環境変数取得
-- コンテナイメージ名取得（`JUPYTER_IMAGE` 環境変数から取得）
+- コンテナイメージ名取得（`CJOB_IMAGE` 環境変数から取得、未設定時は `JUPYTER_IMAGE` にフォールバック）
 - コマンド文字列の保存
 - ユーザー namespace 解決（ServiceAccount の namespace ファイルから取得）
 - namespace ごとのジョブ総数上限チェック（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計）
@@ -38,7 +40,7 @@
 
 ### 1.4 Kubernetes 実行機能
 
-- submit 時に取得した image（`JUPYTER_IMAGE`）で Job を作成
+- submit 時に取得した image（`CJOB_IMAGE` → `JUPYTER_IMAGE`）で Job を作成
 - PVC を `/home/jovyan` に mount
 - `workingDir` に submit 時の cwd を設定
 - `env` に submit 時の環境変数を注入

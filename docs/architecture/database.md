@@ -10,7 +10,7 @@ CREATE TABLE jobs (
     job_id        INTEGER NOT NULL,
     "user"        TEXT NOT NULL,
     namespace     TEXT NOT NULL,
-    image         TEXT NOT NULL,           -- CLI が JUPYTER_IMAGE 環境変数から取得したコンテナイメージ名
+    image         TEXT NOT NULL,           -- CLI が CJOB_IMAGE 環境変数から取得（未設定時は JUPYTER_IMAGE にフォールバック）
     command       TEXT NOT NULL,
     cwd           TEXT NOT NULL,
     env_json      JSONB NOT NULL DEFAULT '{}',
@@ -28,6 +28,12 @@ CREATE TABLE jobs (
     started_at    TIMESTAMPTZ,             -- Pod が RUNNING に遷移した時刻（Watcher が記録）
     finished_at   TIMESTAMPTZ,
     last_error    TEXT,
+    completions       INTEGER,       -- sweep のタスク総数。NULL = 通常ジョブ
+    parallelism       INTEGER,       -- sweep の同時実行数
+    completed_indexes TEXT,          -- 成功インデックス（K8s 圧縮表記、例: "0-49,51-99"）
+    failed_indexes    TEXT,          -- 失敗インデックス（K8s 圧縮表記、例: "50"）
+    succeeded_count   INTEGER,       -- 成功タスク数
+    failed_count      INTEGER,       -- 失敗タスク数
     PRIMARY KEY (namespace, job_id)
 );
 
@@ -38,6 +44,8 @@ CREATE INDEX idx_jobs_k8s_job_name ON jobs (k8s_job_name);
 -- Dispatcher の dispatch budget 計算を効率化するためのインデックス
 CREATE INDEX idx_jobs_namespace_status ON jobs (namespace, status);
 ```
+
+`completions IS NULL` で通常ジョブと sweep ジョブを判別する。sweep ジョブの場合、`completed_indexes` / `failed_indexes` は K8s API の `status.completedIndexes` / `status.failedIndexes`（圧縮表記文字列）を Watcher が書き込む。`succeeded_count` / `failed_count` は `completed_indexes` のパースなしに集計値を参照するためのキャッシュカラムである。
 
 ## 2. `user_job_counters` テーブル
 
@@ -123,7 +131,7 @@ CREATE TABLE namespace_daily_usage (
 
 Watcher がジョブを RUNNING に遷移させる際に、`started_at` の記録と同じトランザクション内で当日分の消費量を加算する。
 
-加算量の計算: `time_limit_seconds × リソース量`（方式 C: 予約のみ、返却なし）。ジョブが `time_limit_seconds` より早く完了しても返却しない。これにより、ユーザーが `time_limit_seconds` を適切に見積もるインセンティブが生まれ、隙間充填（gap filling）の推定精度も向上する。
+加算量の計算: `time_limit_seconds × リソース量`（方式 C: 予約のみ、返却なし）。sweep ジョブの場合は `time_limit_seconds × リソース量 × parallelism`（同時に使用するリソースの最大量を反映）。ジョブが `time_limit_seconds` より早く完了しても返却しない。これにより、ユーザーが `time_limit_seconds` を適切に見積もるインセンティブが生まれ、隙間充填（gap filling）の推定精度も向上する。
 
 CANCELLED に対する特別処理は不要。RUNNING 前のキャンセルは加算されておらず、RUNNING 中のキャンセルは既に加算済みで返却しない。
 
@@ -143,6 +151,8 @@ ON CONFLICT (namespace, usage_date) DO UPDATE SET
 Dispatcher が `fetch_dispatchable_jobs()` で DRF の dominant share を計算する際に、直近 `FAIR_SHARE_WINDOW_DAYS` 日分の消費量を集計する。
 
 ```sql
+-- window_days=7 の場合: CURRENT_DATE - 7 より後 = 6日前〜当日の 7 日分が集計対象
+-- （ちょうど 7 日前の行は §5.4 で削除済みかつ本条件でも対象外）
 SELECT namespace,
        SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,
        SUM(memory_mib_seconds) AS memory_mib_seconds,

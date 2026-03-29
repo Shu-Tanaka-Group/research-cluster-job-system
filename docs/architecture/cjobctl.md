@@ -84,7 +84,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 ```
 
-クラスタのリソース総量は DB の `node_resources` テーブルから `SUM()` で取得する。テーブルが空の場合はデフォルト値を使用する。
+クラスタのリソース総量は DB の `node_resources` テーブルから `SUM()` で取得する。テーブルが空の場合は dominant share 列を `N/A` と表示する（Dispatcher は DRF ソートを無効化して namespace 名順にフォールバックするが、cjobctl は表示ツールのため計算不能であることを明示する）。
 
 ### 5.3 namespace weight 管理
 

@@ -45,6 +45,12 @@ class Job(Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
+    completions: Mapped[int | None] = mapped_column(Integer)
+    parallelism: Mapped[int | None] = mapped_column(Integer)
+    completed_indexes: Mapped[str | None] = mapped_column(Text)
+    failed_indexes: Mapped[str | None] = mapped_column(Text)
+    succeeded_count: Mapped[int | None] = mapped_column(Integer)
+    failed_count: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (
         Index("idx_jobs_k8s_job_name", "k8s_job_name"),

@@ -62,3 +62,41 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    （`propagation_policy="Background"` の削除は非同期で完結するため、フェーズ 1 と同一サイクルでフェーズ 2 を実行してはならない）
 
 7. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
+8. DB 上で DISPATCHED / RUNNING だが、対応する K8s Job が K8s 上に存在しないジョブを FAILED に遷移させる（`last_error` に `"K8s Job not found (TTL expired or manually deleted)"` を設定し、`finished_at` を現在時刻に設定する）。これにより `ttlSecondsAfterFinished` による K8s Job の自動削除や、手動削除によって DB と K8s の状態が乖離した場合に自動修復される
+
+## 4. sweep ジョブの監視
+
+### 4.1 インデックス追跡
+
+ポーリングサイクルごとに K8s API から `status.completedIndexes` / `status.failedIndexes` / `status.succeeded` / `status.failed` を取得し、DB の対応カラムを更新する。
+
+```sql
+UPDATE jobs
+SET completed_indexes = :completed_indexes,
+    failed_indexes = :failed_indexes,
+    succeeded_count = :succeeded_count,
+    failed_count = :failed_count
+WHERE namespace = :namespace
+  AND job_id = :job_id;
+```
+
+### 4.2 状態遷移の判定
+
+K8s Job の `status.conditions` に従う（通常ジョブと同じロジック）。`Complete` または `Failed` の condition が出現した時点で最終ステータスを決定する。
+
+- K8s が `Complete` を返した場合: `failed_count > 0` なら **FAILED**、`failed_count == 0` なら **SUCCEEDED**
+- K8s が `Failed` を返した場合（`activeDeadlineSeconds` 超過等）: **FAILED**
+
+これにより、部分的に失敗したタスクがある sweep は常に FAILED として扱われる。
+
+### 4.3 RUNNING への遷移
+
+最初の Pod が RUNNING になった時点（K8s Job の `status.active >= 1`）で DB を RUNNING に更新する。通常ジョブと同様に `started_at` を記録する。
+
+### 4.4 リソース使用量の加算
+
+RUNNING 遷移時に `time_limit_seconds × リソース量 × parallelism` を加算する。同時に使用するリソースの最大量を反映し、DRF の公平性計算で sweep ジョブが適切に重く評価される。
+
+### 4.5 CANCELLED 時の処理
+
+通常ジョブと同じ流れで処理する。部分的に完了したタスクの `completed_indexes` / `failed_indexes` は、直前のポーリングサイクルで更新済みの値が DB に残る。

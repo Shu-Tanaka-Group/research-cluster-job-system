@@ -3,7 +3,7 @@ from unittest.mock import patch
 import pytest
 from fastapi import HTTPException
 
-from cjob.api.schemas import JobSubmitRequest, ResourceSpec
+from cjob.api.schemas import JobSubmitRequest, ResourceSpec, SweepSubmitRequest
 from cjob.api.services import (
     cancel_bulk,
     cancel_single,
@@ -13,6 +13,7 @@ from cjob.api.services import (
     list_jobs,
     reset,
     submit_job,
+    submit_sweep,
 )
 from cjob.models import Job, JobEvent, NamespaceDailyUsage
 
@@ -447,3 +448,166 @@ class TestGetUsage:
         resp = get_usage(db_session, NS)
         assert len(resp.daily) == 1
         assert resp.total_cpu_millicores_seconds == 1000
+
+
+# ── submit_sweep ──
+
+
+def _make_sweep_request(**overrides):
+    defaults = dict(
+        command="python main.py --trial $CJOB_INDEX",
+        image="test:1.0",
+        cwd="/home/jovyan",
+        env={},
+        resources=ResourceSpec(cpu="1", memory="1Gi", gpu=0),
+        completions=10,
+        parallelism=2,
+    )
+    defaults.update(overrides)
+    return SweepSubmitRequest(**defaults)
+
+
+class TestSubmitSweep:
+    def test_basic_sweep(self, db_session):
+        req = _make_sweep_request()
+        resp = submit_sweep(db_session, NS, "alice", req)
+        assert resp.job_id == 1
+        assert resp.status == "QUEUED"
+        job = db_session.get(Job, (NS, 1))
+        assert job.completions == 10
+        assert job.parallelism == 2
+        assert job.succeeded_count == 0
+        assert job.failed_count == 0
+
+    def test_sweep_completions_zero(self, db_session):
+        req = _make_sweep_request(completions=0)
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "completions" in exc_info.value.detail
+
+    def test_sweep_completions_exceeds_max(self, db_session):
+        req = _make_sweep_request(completions=9999)
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "1000" in exc_info.value.detail
+
+    def test_sweep_parallelism_zero(self, db_session):
+        req = _make_sweep_request(parallelism=0)
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "parallelism" in exc_info.value.detail
+
+    def test_sweep_parallelism_exceeds_completions(self, db_session):
+        req = _make_sweep_request(completions=5, parallelism=10)
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "parallelism" in exc_info.value.detail
+
+    def test_sweep_cluster_resource_exceeded(self, db_session):
+        from sqlalchemy import text
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 8000, 32768, 0)"
+            )
+        )
+        db_session.flush()
+        # parallelism=10, cpu=2 -> 20000m > 8000m cluster total
+        req = _make_sweep_request(
+            completions=100, parallelism=10,
+            resources=ResourceSpec(cpu="2", memory="1Gi", gpu=0),
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "CPU" in exc_info.value.detail
+
+    def test_sweep_cluster_memory_exceeded(self, db_session):
+        from sqlalchemy import text
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 64000, 32768, 0)"
+            )
+        )
+        db_session.flush()
+        # parallelism=10, memory=4Gi -> 40960Mi > 32768Mi cluster total
+        req = _make_sweep_request(
+            completions=100, parallelism=10,
+            resources=ResourceSpec(cpu="1", memory="4Gi", gpu=0),
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "メモリ" in exc_info.value.detail
+
+    def test_sweep_deleting_blocks(self, db_session):
+        _insert_job(db_session, 1, status="DELETING")
+        req = _make_sweep_request()
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 409
+
+    def test_sweep_gpu_rejected(self, db_session):
+        req = _make_sweep_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1))
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+
+    def test_sweep_time_limit_default(self, db_session):
+        req = _make_sweep_request()
+        resp = submit_sweep(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.time_limit_seconds == 86400
+
+    def test_sweep_cluster_check_skipped_when_empty(self, db_session):
+        """When node_resources is empty, cluster total check should be skipped."""
+        req = _make_sweep_request(completions=100, parallelism=50,
+                                   resources=ResourceSpec(cpu="32", memory="128Gi", gpu=0))
+        resp = submit_sweep(db_session, NS, "alice", req)
+        assert resp.status == "QUEUED"
+
+
+# ── list_jobs / get_job with sweep fields ──
+
+
+class TestSweepFieldsInResponses:
+    def test_list_jobs_sweep_fields(self, db_session):
+        _insert_job(db_session, 1, status="RUNNING",
+                     completions=100, parallelism=10,
+                     succeeded_count=48, failed_count=2)
+        resp = list_jobs(db_session, NS)
+        assert resp.jobs[0].completions == 100
+        assert resp.jobs[0].parallelism == 10
+        assert resp.jobs[0].succeeded_count == 48
+        assert resp.jobs[0].failed_count == 2
+
+    def test_list_jobs_normal_fields_null(self, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+        resp = list_jobs(db_session, NS)
+        assert resp.jobs[0].completions is None
+        assert resp.jobs[0].parallelism is None
+
+    def test_get_job_sweep_fields(self, db_session):
+        _insert_job(db_session, 1, status="RUNNING",
+                     completions=100, parallelism=10,
+                     succeeded_count=48, failed_count=2,
+                     completed_indexes="0-47",
+                     failed_indexes="12,37")
+        resp = get_job(db_session, NS, 1)
+        assert resp.completions == 100
+        assert resp.parallelism == 10
+        assert resp.succeeded_count == 48
+        assert resp.failed_count == 2
+        assert resp.completed_indexes == "0-47"
+        assert resp.failed_indexes == "12,37"
+
+    def test_get_job_normal_fields_null(self, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+        resp = get_job(db_session, NS, 1)
+        assert resp.completions is None
+        assert resp.completed_indexes is None

@@ -61,8 +61,8 @@ ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 nam
          GREATEST(                         -- DRF: dominant share / weight が小さい namespace を優先
            COALESCE(u.cpu_millicores_seconds, 0)::float / :cluster_cpu_millicores,
            COALESCE(u.memory_mib_seconds, 0)::float / :cluster_memory_mib,
-           COALESCE(u.gpu_seconds, 0)::float / NULLIF(:cluster_gpus, 0)
-         ) / COALESCE(w.weight, 1) ASC NULLS FIRST,
+           COALESCE(u.gpu_seconds, 0)::float / NULLIF(:cluster_gpus, 0)  -- GPU=0 のクラスタでは NULL → GREATEST が無視し CPU/mem のみで判定
+         ) / COALESCE(w.weight, 1) ASC NULLS FIRST,  -- 消費量レコードなし(NULL)の namespace が最優先
          q.namespace ASC                   -- 同率の場合は namespace 名で決定的に順序付け
 LIMIT :batch_size;                         -- 1サイクルの総取得数を固定
 ```
@@ -390,3 +390,50 @@ def on_startup():
     db.reset_stale_dispatching_jobs()
     # UPDATE jobs SET status = 'QUEUED', retry_after = NULL WHERE status = 'DISPATCHING'
 ```
+
+## 3. sweep ジョブの dispatch
+
+### 3.1 dispatch_budget の消費単位
+
+sweep 1 件 = budget 1 として消費する。`parallelism` の値に関わらず、DB 上の `jobs` テーブルの 1 行が budget 1 に対応する。
+
+### 3.2 K8s Indexed Job の構築
+
+sweep ジョブ（`jobs.completions IS NOT NULL`）の場合、`build_k8s_job` は以下のフィールドを追加した K8s Job マニフェストを生成する。
+
+```yaml
+spec:
+  completionMode: Indexed
+  completions: <completions>
+  parallelism: <parallelism>
+  backoffLimitPerIndex: 0
+  activeDeadlineSeconds: <time_limit_seconds>
+```
+
+`backoffLimitPerIndex: 0` により、1 回失敗したタスクは再試行せず即座に `failedIndexes` に追加される。
+
+### 3.3 コマンドラッパー
+
+sweep ジョブのコマンドラッパーは `CJOB_INDEX` の export とインデックス付きログディレクトリを使用する。
+
+```bash
+export CJOB_INDEX=$JOB_COMPLETION_INDEX
+LOG_DIR=/home/jovyan/.cjob/logs/{job_id}/$CJOB_INDEX
+mkdir -p "$LOG_DIR"
+exec > >(tee "$LOG_DIR/stdout.log") 2> >(tee "$LOG_DIR/stderr.log" >&2)
+{user_command}
+EXIT_CODE=$?
+exec >&- 2>&-
+wait
+exit $EXIT_CODE
+```
+
+通常ジョブのラッパーとの違いは `export CJOB_INDEX=$JOB_COMPLETION_INDEX` 行の追加と `LOG_DIR` にインデックスが含まれる点のみ。
+
+### 3.3.1 `_INDEX_` プレースホルダー
+
+コマンドラッパー構築時に、ユーザーコマンド中の `_INDEX_` を `$CJOB_INDEX` に置換する。これにより、ユーザーは `cjob sweep -- python main.py --trial _INDEX_` のようにシェル変数を意識せずにインデックスを参照できる。スクリプトファイル内では `$CJOB_INDEX` 環境変数を直接参照することもできる（ファイル内容はユーザーのシェルによる展開を受けないため）。
+
+### 3.4 隙間充填との関係
+
+隙間充填ロジックは既存のまま動作する。sweep ジョブの `time_limit_seconds` はsweep 全体の実行時間上限であり、隙間充填の推定に使用される。
