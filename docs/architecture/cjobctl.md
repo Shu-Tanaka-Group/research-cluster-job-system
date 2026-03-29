@@ -92,7 +92,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 - **GPU**: 指定 GPU 数（DB の `gpu` カラム、0 の場合は `-` 表示）
 - **NODE**: ジョブ実行ノード名（DB の `node_name` カラム、NULL の場合は `-` 表示）
 
-ノード名は Watcher が RUNNING 遷移時に Pod の `spec.nodeName` から取得し DB に記録する。QUEUED / DISPATCHED 等のジョブは `-` 表示となる。
+ノード名は Watcher が RUNNING 遷移時に Pod の `spec.nodeName` から取得し DB に記録する。一瞬で完了するジョブ（RUNNING を経由せず直接 SUCCEEDED/FAILED に遷移）の場合は、完了遷移時にフォールバックとして Pod から取得を試みる。QUEUED / DISPATCHED 等の未実行ジョブは `-` 表示となる。
 
 ### 5.2 リソース消費量
 
