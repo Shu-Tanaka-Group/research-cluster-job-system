@@ -177,6 +177,11 @@ async fn main() -> Result<()> {
 /// Uses double quotes so that shell variables (e.g. $CJOB_INDEX) expand
 /// in the Job Pod. Characters special inside double quotes are escaped.
 fn shell_quote(arg: &str) -> String {
+    if !arg.is_empty()
+        && !arg.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}".contains(c))
+    {
+        return arg.to_string();
+    }
     let escaped = arg
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
