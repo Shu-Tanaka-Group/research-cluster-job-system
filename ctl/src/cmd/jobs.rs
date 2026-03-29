@@ -156,7 +156,7 @@ pub async fn remaining(client: &Client, sort: Option<&str>, reverse: bool) -> Re
     };
 
     let query = format!(
-        "SELECT namespace, job_id, command, time_limit_seconds, started_at, \
+        "SELECT namespace, job_id, command, time_limit_seconds, \
            EXTRACT(EPOCH FROM \
              (started_at + MAKE_INTERVAL(secs => time_limit_seconds)) - NOW() \
            )::INT AS remaining_sec \
