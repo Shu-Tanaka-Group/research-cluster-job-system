@@ -27,4 +27,5 @@ data:
   USER_NAMESPACE_LABEL: cjob.io/user-namespace=true
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
+  TTL_SECONDS_AFTER_FINISHED: "1800"
   JOB_NODE_TAINT: "role=computing:NoSchedule"
