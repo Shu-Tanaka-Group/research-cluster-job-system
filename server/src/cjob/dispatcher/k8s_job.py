@@ -69,6 +69,8 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
     # Build tee-wrapped command
     user_command = job.command
     if is_sweep:
+        # Replace {INDEX} placeholder with $CJOB_INDEX shell variable
+        user_command = user_command.replace("{INDEX}", "$CJOB_INDEX")
         wrapped_command = (
             f'export CJOB_INDEX=$JOB_COMPLETION_INDEX\n'
             f'LOG_DIR={log_dir}/$CJOB_INDEX\n'

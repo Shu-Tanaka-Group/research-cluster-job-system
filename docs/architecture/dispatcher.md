@@ -430,6 +430,10 @@ exit $EXIT_CODE
 
 通常ジョブのラッパーとの違いは `export CJOB_INDEX=$JOB_COMPLETION_INDEX` 行の追加と `LOG_DIR` にインデックスが含まれる点のみ。
 
+### 3.3.1 `{INDEX}` プレースホルダー
+
+コマンドラッパー構築時に、ユーザーコマンド中の `{INDEX}` を `$CJOB_INDEX` に置換する。これにより、ユーザーは `cjob sweep -- python main.py --trial {INDEX}` のようにシェル変数を意識せずにインデックスを参照できる。スクリプトファイル内では `$CJOB_INDEX` 環境変数を直接参照することもできる（ファイル内容はユーザーのシェルによる展開を受けないため）。
+
 ### 3.4 隙間充填との関係
 
 隙間充填ロジックは既存のまま動作する。sweep ジョブの `time_limit_seconds` はsweep 全体の実行時間上限であり、隙間充填の推定に使用される。
