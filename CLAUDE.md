@@ -77,6 +77,7 @@ cjob update                          # CLI バイナリの更新
 - テスト: docs/testing.md
 - Git 運用規則: docs/git_conventions.md
 - 運用ガイド: docs/operations.md
+- バージョン管理: docs/versioning.md
 - バージョン移行手順: docs/migration.md
 
 ## 開発手順
