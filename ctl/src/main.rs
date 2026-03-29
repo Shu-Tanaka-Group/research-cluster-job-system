@@ -127,7 +127,11 @@ enum JobsCommands {
 #[derive(Subcommand)]
 enum UsageCommands {
     /// Show daily usage, 7-day aggregate, and DRF dominant share
-    List,
+    List {
+        /// Filter by namespace
+        #[arg(long)]
+        namespace: Option<String>,
+    },
     /// Reset usage data
     Reset {
         /// Target namespace
@@ -276,9 +280,9 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
-                UsageCommands::List => {
+                UsageCommands::List { namespace } => {
                     let totals = cmd::usage::ClusterTotals::from_db(&conn.client).await;
-                    cmd::usage::list(&conn.client, &totals).await
+                    cmd::usage::list(&conn.client, &totals, namespace.as_deref()).await
                 }
                 UsageCommands::Reset { namespace, all } => {
                     cmd::usage::reset(&conn.client, namespace.as_deref(), all).await
