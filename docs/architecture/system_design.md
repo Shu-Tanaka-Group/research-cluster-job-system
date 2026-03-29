@@ -41,7 +41,7 @@
 ### 1.4 Kubernetes 実行機能
 
 - submit 時に取得した image（`CJOB_IMAGE` → `JUPYTER_IMAGE`）で Job を作成
-- PVC を `/home/jovyan` に mount
+- PVC を `${WORKSPACE_MOUNT_PATH}`（デフォルト `/home/jovyan`）に mount
 - `workingDir` に submit 時の cwd を設定
 - `env` に submit 時の環境変数を注入
 - command を `/bin/bash -lc "<saved command>"` で実行
