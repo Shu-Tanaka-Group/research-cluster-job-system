@@ -103,6 +103,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: LOG_BASE_DIR
+            - name: TTL_SECONDS_AFTER_FINISHED
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: TTL_SECONDS_AFTER_FINISHED
             - name: JOB_NODE_TAINT
               valueFrom:
                 configMapKeyRef:

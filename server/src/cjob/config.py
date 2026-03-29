@@ -39,6 +39,9 @@ class Settings(BaseSettings):
     # CLI binary distribution
     CLI_BINARY_DIR: str = "/cli-binary"
 
+    # K8s Job
+    TTL_SECONDS_AFTER_FINISHED: int = 1800
+
     # Kueue
     KUEUE_LOCAL_QUEUE_NAME: str = "default"
 
