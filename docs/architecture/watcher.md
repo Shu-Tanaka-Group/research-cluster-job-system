@@ -97,6 +97,8 @@ K8s Job の `status.conditions` に従う（通常ジョブと同じロジック
 
 ### 4.3.1 node_name の記録
 
+定期同期（§1.1）ではなく、ジョブごとの状態遷移時に1回だけ実行される処理である。
+
 Watcher は RUNNING 遷移時に `CoreV1Api().list_namespaced_pod()` で Job の Pod を取得し、`spec.nodeName` を DB の `node_name` カラムに記録する。一瞬で完了するジョブ（RUNNING を経由せず直接 SUCCEEDED/FAILED に遷移）の場合は、完了遷移時に `node_name` が未記録であれば Pod からの取得を試みる（Pod は `ttlSecondsAfterFinished` の間は残存している）。Pod が既に削除済みの場合は `node_name` は NULL のままとなる。
 
 ### 4.4 リソース使用量の加算
