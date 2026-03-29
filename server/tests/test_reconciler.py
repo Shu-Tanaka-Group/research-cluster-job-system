@@ -54,11 +54,12 @@ def _insert_counter(session, namespace=NS, next_id=2):
     session.flush()
 
 
+@patch("cjob.watcher.reconciler._fetch_node_name", return_value=None)
 @patch("cjob.watcher.reconciler._delete_k8s_job")
 class TestReconcileStatusSync:
     """Test normal status synchronization from K8s to DB."""
 
-    def test_dispatched_to_running(self, mock_delete, db_session):
+    def test_dispatched_to_running(self, mock_delete, mock_fetch_node, db_session):
         _insert_job(db_session, 1, status="DISPATCHED")
         k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
 
@@ -68,7 +69,27 @@ class TestReconcileStatusSync:
         assert job.status == "RUNNING"
         assert job.started_at is not None
 
-    def test_running_to_succeeded(self, mock_delete, db_session):
+    def test_dispatched_to_running_records_node_name(self, mock_delete, mock_fetch_node, db_session):
+        mock_fetch_node.return_value = "node-compute-01"
+        _insert_job(db_session, 1, status="DISPATCHED")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.node_name == "node-compute-01"
+        mock_fetch_node.assert_called_once_with(NS, "cjob-alice-1")
+
+    def test_dispatched_to_running_node_name_none_when_unavailable(self, mock_delete, mock_fetch_node, db_session):
+        _insert_job(db_session, 1, status="DISPATCHED")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.node_name is None
+
+    def test_running_to_succeeded(self, mock_delete, mock_fetch_node, db_session):
         _insert_job(db_session, 1, status="RUNNING")
         k8s_jobs = [
             _make_k8s_job(NS, 1, "cjob-alice-1",
@@ -81,7 +102,7 @@ class TestReconcileStatusSync:
         assert job.status == "SUCCEEDED"
         assert job.finished_at is not None
 
-    def test_running_to_failed(self, mock_delete, db_session):
+    def test_running_to_failed(self, mock_delete, mock_fetch_node, db_session):
         _insert_job(db_session, 1, status="RUNNING")
         k8s_jobs = [
             _make_k8s_job(NS, 1, "cjob-alice-1",
@@ -94,7 +115,7 @@ class TestReconcileStatusSync:
         assert job.status == "FAILED"
         assert job.finished_at is not None
 
-    def test_deadline_exceeded_sets_last_error(self, mock_delete, db_session):
+    def test_deadline_exceeded_sets_last_error(self, mock_delete, mock_fetch_node, db_session):
         _insert_job(db_session, 1, status="RUNNING")
         k8s_jobs = [
             _make_k8s_job(NS, 1, "cjob-alice-1",
@@ -109,7 +130,7 @@ class TestReconcileStatusSync:
         assert job.status == "FAILED"
         assert job.last_error == "time limit exceeded"
 
-    def test_failed_other_reason_no_last_error(self, mock_delete, db_session):
+    def test_failed_other_reason_no_last_error(self, mock_delete, mock_fetch_node, db_session):
         _insert_job(db_session, 1, status="RUNNING")
         k8s_jobs = [
             _make_k8s_job(NS, 1, "cjob-alice-1",
@@ -124,7 +145,7 @@ class TestReconcileStatusSync:
         assert job.status == "FAILED"
         assert job.last_error is None
 
-    def test_started_at_not_overwritten_on_second_running(self, mock_delete, db_session):
+    def test_started_at_not_overwritten_on_second_running(self, mock_delete, mock_fetch_node, db_session):
         """started_at should only be set on the first RUNNING transition."""
         from datetime import datetime, timezone
         started = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -138,7 +159,7 @@ class TestReconcileStatusSync:
         # SQLite drops timezone info, so compare naive datetimes
         assert job.started_at.replace(tzinfo=None) == started.replace(tzinfo=None)
 
-    def test_no_status_change_when_same(self, mock_delete, db_session):
+    def test_no_status_change_when_same(self, mock_delete, mock_fetch_node, db_session):
         _insert_job(db_session, 1, status="RUNNING")
         k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
 
@@ -278,6 +299,7 @@ class TestParseMemoryMib:
 # ── Resource usage recording ──
 
 
+@patch("cjob.watcher.reconciler._fetch_node_name", return_value=None)
 @patch("cjob.watcher.reconciler._delete_k8s_job")
 class TestReconcileResourceUsage:
     """Test that RUNNING transition records resource usage."""
@@ -301,7 +323,7 @@ class TestReconcileResourceUsage:
         )
         return total
 
-    def test_running_transition_records_usage(self, mock_delete, db_session):
+    def test_running_transition_records_usage(self, mock_delete, mock_fetch_node, db_session):
         _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
                      gpu=0, time_limit_seconds=3600)
         k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
@@ -314,7 +336,7 @@ class TestReconcileResourceUsage:
         assert usage.memory_mib_seconds == 3600 * 4096      # 14_745_600
         assert usage.gpu_seconds == 0
 
-    def test_second_running_accumulates_usage(self, mock_delete, db_session):
+    def test_second_running_accumulates_usage(self, mock_delete, mock_fetch_node, db_session):
         _insert_job(db_session, 1, status="DISPATCHED", cpu="1", memory="1Gi",
                      time_limit_seconds=100)
         _insert_job(db_session, 2, status="DISPATCHED", cpu="2", memory="2Gi",
@@ -337,7 +359,7 @@ class TestReconcileResourceUsage:
         assert usage.cpu_millicores_seconds == 100 * 1000 + 200 * 2000  # 500_000
         assert usage.memory_mib_seconds == 100 * 1024 + 200 * 2048     # 512_000
 
-    def test_already_running_no_duplicate_usage(self, mock_delete, db_session):
+    def test_already_running_no_duplicate_usage(self, mock_delete, mock_fetch_node, db_session):
         """No usage recorded when job is already RUNNING (started_at set)."""
         from datetime import datetime, timezone
         _insert_job(db_session, 1, status="RUNNING", cpu="2", memory="4Gi",
@@ -350,7 +372,7 @@ class TestReconcileResourceUsage:
         usage = self._get_usage(db_session)
         assert usage is None  # No usage recorded
 
-    def test_sweep_resource_usage_multiplied_by_parallelism(self, mock_delete, db_session):
+    def test_sweep_resource_usage_multiplied_by_parallelism(self, mock_delete, mock_fetch_node, db_session):
         """Sweep resource usage should be multiplied by parallelism."""
         _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
                      gpu=0, time_limit_seconds=3600,
@@ -395,11 +417,12 @@ def _make_sweep_k8s_job(namespace, job_id, name, conditions=None, active=None,
     )
 
 
+@patch("cjob.watcher.reconciler._fetch_node_name", return_value=None)
 @patch("cjob.watcher.reconciler._delete_k8s_job")
 class TestReconcileSweep:
     """Test sweep-specific reconciliation behavior."""
 
-    def test_sweep_complete_all_succeeded(self, mock_delete, db_session):
+    def test_sweep_complete_all_succeeded(self, mock_delete, mock_fetch_node, db_session):
         """Sweep with all tasks succeeded → SUCCEEDED."""
         _insert_job(db_session, 1, status="RUNNING",
                      completions=10, parallelism=5,
@@ -419,7 +442,7 @@ class TestReconcileSweep:
         assert job.failed_count == 0
         assert job.completed_indexes == "0-9"
 
-    def test_sweep_complete_with_failures(self, mock_delete, db_session):
+    def test_sweep_complete_with_failures(self, mock_delete, mock_fetch_node, db_session):
         """Sweep with K8s Complete but failed_count > 0 → FAILED."""
         _insert_job(db_session, 1, status="RUNNING",
                      completions=10, parallelism=5,
@@ -441,7 +464,7 @@ class TestReconcileSweep:
         assert job.completed_indexes == "0-7"
         assert job.failed_indexes == "8,9"
 
-    def test_sweep_failed_condition(self, mock_delete, db_session):
+    def test_sweep_failed_condition(self, mock_delete, mock_fetch_node, db_session):
         """Sweep with K8s Failed condition (e.g. DeadlineExceeded) → FAILED."""
         _insert_job(db_session, 1, status="RUNNING",
                      completions=100, parallelism=10,
@@ -462,7 +485,7 @@ class TestReconcileSweep:
         assert job.status == "FAILED"
         assert job.last_error == "time limit exceeded"
 
-    def test_sweep_index_tracking_updates(self, mock_delete, db_session):
+    def test_sweep_index_tracking_updates(self, mock_delete, mock_fetch_node, db_session):
         """Index tracking should update on each reconcile cycle."""
         _insert_job(db_session, 1, status="RUNNING",
                      completions=100, parallelism=10,

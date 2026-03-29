@@ -64,6 +64,22 @@ def _delete_k8s_job(namespace: str, name: str):
             logger.error("Failed to delete K8s Job %s/%s: %s", namespace, name, e)
 
 
+def _fetch_node_name(namespace: str, k8s_job_name: str) -> str | None:
+    """Fetch the node name where the Job's Pod is running."""
+    core_v1 = k8s_client.CoreV1Api()
+    try:
+        pods = core_v1.list_namespaced_pod(
+            namespace=namespace,
+            label_selector=f"job-name={k8s_job_name}",
+        )
+        for pod in pods.items:
+            if pod.spec and pod.spec.node_name:
+                return pod.spec.node_name
+    except ApiException as e:
+        logger.warning("Failed to fetch Pod for %s/%s: %s", namespace, k8s_job_name, e)
+    return None
+
+
 def _record_resource_usage(session: Session, job: Job):
     """Add resource usage to namespace_daily_usage on RUNNING transition."""
     parallelism = job.parallelism if job.completions is not None else 1
@@ -178,6 +194,8 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
             db_job.status = new_status
             if new_status == "RUNNING" and db_job.started_at is None:
                 db_job.started_at = func.now()
+                if kj.metadata and kj.metadata.name:
+                    db_job.node_name = _fetch_node_name(ns, kj.metadata.name)
                 _record_resource_usage(session, db_job)
             if new_status in ("SUCCEEDED", "FAILED"):
                 db_job.finished_at = func.now()
