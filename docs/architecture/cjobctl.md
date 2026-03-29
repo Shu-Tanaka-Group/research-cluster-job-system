@@ -64,7 +64,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 
 | コマンド | 概要 | 対象テーブル |
 |---|---|---|
-| `cjobctl jobs list [--namespace <ns>] [--status <s>] [--sort <field>] [--reverse]` | ジョブ一覧 | `jobs` |
+| `cjobctl jobs list [--namespace <ns>] [--status <s>] [--sort <field>] [--reverse] [-o wide]` | ジョブ一覧 | `jobs` |
 | `cjobctl jobs summary` | namespace × ステータスのジョブ数（ピボットテーブル） | `jobs` |
 | `cjobctl jobs stalled [--sort <field>] [--reverse]` | DISPATCHED のまま滞留しているジョブ | `jobs` |
 | `cjobctl jobs remaining [--sort <field>] [--reverse]` | RUNNING ジョブの残り時間 | `jobs` |
@@ -83,12 +83,25 @@ namespace = "cjob-system"   # 省略時デフォルト
 
 `--sort FINISHED` を `stalled` / `remaining` で指定した場合はエラーとする（該当カラムが存在しないため）。
 
+#### `-o wide` オプション
+
+`jobs list` に `-o wide`（`--output wide`）を指定すると、通常の表示に加えて以下のカラムが追加される:
+
+- **CPU**: 指定 CPU リソース量（DB の `cpu` カラム）
+- **MEMORY**: 指定メモリリソース量（DB の `memory` カラム）
+- **GPU**: 指定 GPU 数（DB の `gpu` カラム、0 の場合は `-` 表示）
+- **NODE**: ジョブ実行ノード名（DB の `node_name` カラム、NULL の場合は `-` 表示）
+
+ノード名は Watcher が RUNNING 遷移時に Pod の `spec.nodeName` から取得し DB に記録する。QUEUED / DISPATCHED 等のジョブは `-` 表示となる。
+
 ### 5.2 リソース消費量
 
 | コマンド | 概要 | 対象テーブル |
 |---|---|---|
-| `cjobctl usage list` | 日別消費量・7日ウィンドウ集計・DRF dominant share | `namespace_daily_usage`, `namespace_weights` |
+| `cjobctl usage list [--namespace <ns>]` | 日別消費量・7日ウィンドウ集計・DRF dominant share | `namespace_daily_usage`, `namespace_weights` |
 | `cjobctl usage reset [--namespace <ns> \| --all]` | 消費量データの削除 | `namespace_daily_usage` |
+
+`usage list` の Daily Usage はデフォルトで日付昇順（古い日付が上）で表示する。`--namespace` オプションで特定 namespace のデータのみに絞り込める（Daily / 7-Day Window / DRF すべてのセクションに適用）。
 
 `usage list` の DRF dominant share 計算は Dispatcher（`server/src/cjob/dispatcher/scheduler.py`）と同一の式を使用する:
 
@@ -115,6 +128,7 @@ dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 | コマンド | 概要 | 対象テーブル |
 |---|---|---|
 | `cjobctl cluster resources` | ノードごとの allocatable、クラスタ合計、ノード最大値（リジェクト閾値）を表示 | `node_resources` |
+| `cjobctl cluster flavor-usage` | ResourceFlavor ごとのリソース使用率を表示 | K8s: ClusterQueue |
 
 出力例:
 
@@ -134,6 +148,23 @@ GPU:    4
 CPU:    64 cores (64000m)
 Memory: 256.0 GiB (262144 MiB)
 GPU:    4
+```
+
+#### `cjobctl cluster flavor-usage`
+
+ClusterQueue の各 ResourceFlavor について、nominalQuota に対する現在の予約済みリソース（`status.flavorsReservation`）の使用率を表示する。
+
+出力例:
+
+```
+=== ResourceFlavor Usage (cjob-cluster-queue) ===
+FLAVOR          RESOURCE          RESERVED    NOMINAL   USAGE
+cpu-flavor      cpu                     48        256   18.8%
+cpu-flavor      memory               192Gi     1000Gi   19.2%
+cpu-flavor      nvidia.com/gpu           0          0       -
+gpu-flavor      cpu                     16         64   25.0%
+gpu-flavor      memory                64Gi      500Gi   12.8%
+gpu-flavor      nvidia.com/gpu           2          4   50.0%
 ```
 
 ### 5.5 K8s 状態確認
