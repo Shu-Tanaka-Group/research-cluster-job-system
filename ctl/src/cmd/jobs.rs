@@ -30,7 +30,7 @@ fn parse_sort_field(s: &str, allowed: &[SortField]) -> Result<SortField> {
     Ok(field)
 }
 
-pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>, sort: Option<&str>, reverse: bool) -> Result<()> {
+pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>, sort: Option<&str>, reverse: bool, wide: bool) -> Result<()> {
     let allowed = [SortField::Namespace, SortField::Created, SortField::Finished];
     let sort_field = sort.map(|s| parse_sort_field(s, &allowed)).transpose()?;
 
@@ -45,8 +45,14 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
         }
     };
 
+    let select_cols = if wide {
+        "namespace, job_id, status, command, created_at, started_at, finished_at, cpu, memory, gpu, node_name"
+    } else {
+        "namespace, job_id, status, command, created_at, started_at, finished_at"
+    };
+
     let query = format!(
-        "SELECT namespace, job_id, status, command, created_at, started_at, finished_at \
+        "SELECT {select_cols} \
          FROM jobs \
          WHERE ($1::TEXT IS NULL OR namespace = $1) \
            AND ($2::TEXT IS NULL OR status = $2) \
@@ -61,10 +67,18 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
         return Ok(());
     }
 
-    println!(
-        "{:<20} {:<8} {:<12} {:<40} {:<20} {}",
-        "NAMESPACE", "JOB_ID", "STATUS", "COMMAND", "CREATED", "FINISHED"
-    );
+    if wide {
+        println!(
+            "{:<20} {:<8} {:<12} {:<40} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
+            "NAMESPACE", "JOB_ID", "STATUS", "COMMAND", "CREATED", "FINISHED",
+            "CPU", "MEMORY", "GPU", "NODE"
+        );
+    } else {
+        println!(
+            "{:<20} {:<8} {:<12} {:<40} {:<20} {}",
+            "NAMESPACE", "JOB_ID", "STATUS", "COMMAND", "CREATED", "FINISHED"
+        );
+    }
     for row in &rows {
         let ns: &str = row.get(0);
         let job_id: i32 = row.get(1);
@@ -83,10 +97,25 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
             .map(|t| t.format("%Y-%m-%dT%H:%M").to_string())
             .unwrap_or_else(|| "-".to_string());
 
-        println!(
-            "{:<20} {:<8} {:<12} {:<40} {:<20} {}",
-            ns, job_id, status, cmd_display, created, finished
-        );
+        if wide {
+            let cpu: &str = row.get(7);
+            let memory: &str = row.get(8);
+            let gpu: i32 = row.get(9);
+            let node_name: Option<&str> = row.get(10);
+            let gpu_display = if gpu > 0 { gpu.to_string() } else { "-".to_string() };
+            let node_display = node_name.unwrap_or("-");
+
+            println!(
+                "{:<20} {:<8} {:<12} {:<40} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
+                ns, job_id, status, cmd_display, created, finished,
+                cpu, memory, gpu_display, node_display
+            );
+        } else {
+            println!(
+                "{:<20} {:<8} {:<12} {:<40} {:<20} {}",
+                ns, job_id, status, cmd_display, created, finished
+            );
+        }
     }
     Ok(())
 }

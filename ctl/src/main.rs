@@ -83,6 +83,9 @@ enum JobsCommands {
         /// Reverse sort order (descending)
         #[arg(long)]
         reverse: bool,
+        /// Output format (wide: show resources and node)
+        #[arg(short, long)]
+        output: Option<String>,
     },
     /// Show DISPATCHED jobs that appear stuck
     Stalled {
@@ -242,9 +245,16 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
-                JobsCommands::List { namespace, status, sort, reverse } => {
+                JobsCommands::List { namespace, status, sort, reverse, output } => {
                     let status_upper = status.map(|s| s.to_uppercase());
-                    cmd::jobs::list(&conn.client, namespace.as_deref(), status_upper.as_deref(), sort.as_deref(), reverse).await
+                    let wide = match output.as_deref() {
+                        Some("wide") => true,
+                        Some(other) => {
+                            anyhow::bail!("Unknown output format '{}'. Valid values: wide", other);
+                        }
+                        None => false,
+                    };
+                    cmd::jobs::list(&conn.client, namespace.as_deref(), status_upper.as_deref(), sort.as_deref(), reverse, wide).await
                 }
                 JobsCommands::Stalled { sort, reverse } => cmd::jobs::stalled(&conn.client, sort.as_deref(), reverse).await,
                 JobsCommands::Remaining { sort, reverse } => cmd::jobs::remaining(&conn.client, sort.as_deref(), reverse).await,
