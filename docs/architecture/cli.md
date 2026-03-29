@@ -51,13 +51,13 @@ cjob add -- python main.py --config config.yaml
 
 ```bash
 # 100 タスクを並列 10 で実行
-cjob sweep -n 100 --parallel 10 -- python main.py --trial {INDEX}
+cjob sweep -n 100 --parallel 10 -- python main.py --trial _INDEX_
 
 # 時間制限付き
 cjob sweep -n 50 --parallel 5 --time-limit 6h -- bash run.sh
 ```
 
-各タスクは `{INDEX}` プレースホルダーで識別される（0-origin、0 〜 completions-1）。`{INDEX}` は Job Pod 実行時に実際のインデックス値（`$CJOB_INDEX`）に置換される。
+各タスクは `_INDEX_` プレースホルダーで識別される（0-origin、0 〜 completions-1）。`_INDEX_` は Job Pod 実行時に実際のインデックス値（`$CJOB_INDEX`）に置換される。
 
 ### 2.5 ジョブ一覧表示
 
@@ -120,14 +120,14 @@ cjob delete --all
 | `--memory <memory>` | 任意 | メモリリソース。デフォルト "1Gi" |
 | `-- <command>` | 必須 | 各タスクで実行するコマンド |
 
-### `{INDEX}` プレースホルダー
+### `_INDEX_` プレースホルダー
 
-コマンド中の `{INDEX}` は Dispatcher がコマンドラッパーを構築する際に `$CJOB_INDEX` シェル変数に置換される。Job Pod 実行時に `CJOB_INDEX` 環境変数（= K8s の `JOB_COMPLETION_INDEX`）が展開され、各タスク固有のインデックス値となる。
+コマンド中の `_INDEX_` は Dispatcher がコマンドラッパーを構築する際に `$CJOB_INDEX` シェル変数に置換される。Job Pod 実行時に `CJOB_INDEX` 環境変数（= K8s の `JOB_COMPLETION_INDEX`）が展開され、各タスク固有のインデックス値となる。
 
 - 0-origin（K8s の `JOB_COMPLETION_INDEX` と同一）
 - 値の範囲: `0` 〜 `completions - 1`
 
-スクリプトファイル内では `$CJOB_INDEX` 環境変数を直接参照できる。スクリプトファイルの中身はユーザーのシェルによる展開を受けないため、`{INDEX}` プレースホルダーを使わずに `$CJOB_INDEX` をそのまま記述できる。
+スクリプトファイル内では `$CJOB_INDEX` 環境変数を直接参照できる。スクリプトファイルの中身はユーザーのシェルによる展開を受けないため、`_INDEX_` プレースホルダーを使わずに `$CJOB_INDEX` をそのまま記述できる。
 
 ```bash
 # run.sh
