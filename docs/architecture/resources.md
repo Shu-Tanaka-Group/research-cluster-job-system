@@ -10,6 +10,7 @@ ResourceQuota はリソースを均等分配するためではなく、バグ等
 設定根拠：
 - CPU / memory：クラスタ総量より少し大きめに設定し、Kueue の admission 制御に任せる。Job Pod（最大 dispatch_limit 分）に加えてユーザーが使用している他の計算リソース（ジョブ投入用Podやデータ解析用Podなど）の分も余裕として含める
 - Job 数：dispatch_limit(32) と `ttlSecondsAfterFinished`(1800秒=30分) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大32) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう余裕を持たせて設定 → 50。sweep 機能（1 Job で数百〜数千タスクを実行可能）があるため、Job 数の上限を抑えても実質的な計算能力は制限されない
+- GPU：GPU ノードの総 GPU 数に合わせて設定する。`"0"` に設定するとそのユーザーは GPU ジョブを実行できない。GPU を使わないユーザーには `"0"` を設定するか、GPU 関連の項目を省略する
 
 ```yaml
 apiVersion: v1
@@ -24,6 +25,8 @@ spec:
     requests.memory: "1250Gi"
     limits.cpu: "300"
     limits.memory: "1250Gi"
+    requests.nvidia.com/gpu: "4"
+    limits.nvidia.com/gpu: "4"
 ```
 
 ## 2. リソース制限まとめ
@@ -85,7 +88,8 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
 |---|---|---|---|---|---|
-| `NODE_LABEL_SELECTOR` | ConfigMap | `cluster-job=true` | Watcher | 全体 | ノードリソース取得時の label selector。Kueue ResourceFlavor の `nodeLabels` と一致させる |
+| `NODE_LABEL_SELECTOR` | ConfigMap | `cluster-job=true` | Watcher | 全体 | CPU ノードのリソース取得時の label selector。Kueue cpu-flavor の `nodeLabels` と一致させる |
+| `GPU_NODE_LABEL_SELECTOR` | ConfigMap | `cluster-gpu-job=true` | Watcher | 全体 | GPU ノードのリソース取得時の label selector。Kueue gpu-flavor の `nodeLabels` と一致させる。空文字列の場合は GPU ノードの同期をスキップする |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | ConfigMap | 300 (5分) | Watcher | 全体 | ノードリソース同期間隔（秒）。Watcher のメインループの N サイクルに 1 回実行する |
 
 ノードリソース同期の詳細は [watcher.md](watcher.md) §1.1、DB テーブル定義は [database.md](database.md) §6 を参照。

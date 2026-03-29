@@ -232,9 +232,9 @@ cjobctl db migrate
 
 ## 7. 計算ノードの追加
 
-### 7.1 ノードラベル・taint の付与
+### 7.1 CPU ノードのラベル・taint の付与
 
-新しいノードには以下のラベルと taint を付与する。taint の値は ConfigMap `cjob-config` の `JOB_NODE_TAINT` に合わせること（デフォルト: `role=computing:NoSchedule`）。
+新しい CPU ノードには以下のラベルと taint を付与する。taint の値は ConfigMap `cjob-config` の `JOB_NODE_TAINT` に合わせること（デフォルト: `role=computing:NoSchedule`）。
 
 ```bash
 kubectl label node <node-name> cluster-job=true
@@ -244,7 +244,7 @@ kubectl taint node <node-name> role=computing:NoSchedule
 ラベル `cluster-job=true` は ConfigMap `cjob-config` の `NODE_LABEL_SELECTOR` で指定された値と一致している必要がある。値を変更している場合は、ConfigMap の設定に合わせること。
 
 ```bash
-# 現在の設定を確認（NODE_LABEL_SELECTOR と JOB_NODE_TAINT）
+# 現在の設定を確認（NODE_LABEL_SELECTOR, GPU_NODE_LABEL_SELECTOR, JOB_NODE_TAINT）
 cjobctl config show
 ```
 
@@ -252,10 +252,26 @@ cjobctl config show
 
 | 参照元 | 用途 |
 |---|---|
-| Kueue ResourceFlavor（`nodeLabels`） | Job Pod をラベル付きノードにのみスケジュールする |
+| Kueue cpu-flavor（`nodeLabels`） | CPU Job Pod をラベル付きノードにのみスケジュールする |
 | Watcher（`NODE_LABEL_SELECTOR`） | ラベル付きノードの allocatable リソースを DB に同期する |
 
 taint はジョブ以外の Pod が計算ノードにスケジュールされることを防ぐ。ConfigMap `JOB_NODE_TAINT`・Kueue ResourceFlavor の `nodeTaints`・ノードの Taint の 3 箇所は同じ値に統一する必要がある。`JOB_NODE_TAINT` が空文字列の場合は taint を付与しない。
+
+### 7.1.1 GPU ノードのラベル・taint の付与
+
+GPU ノードには CPU ノードとは異なるラベル `cluster-gpu-job=true` を付与する。taint は CPU ノードと同じ値を使用する。
+
+```bash
+kubectl label node <gpu-node-name> cluster-gpu-job=true
+kubectl taint node <gpu-node-name> role=computing:NoSchedule
+```
+
+ラベル `cluster-gpu-job=true` は ConfigMap `cjob-config` の `GPU_NODE_LABEL_SELECTOR` で指定された値と一致している必要がある。
+
+| 参照元 | 用途 |
+|---|---|
+| Kueue gpu-flavor（`nodeLabels`） | GPU Job Pod をラベル付きノードにのみスケジュールする |
+| Watcher（`GPU_NODE_LABEL_SELECTOR`） | GPU ノードの allocatable リソースを DB に同期する |
 
 ### 7.2 リソース情報の反映確認
 

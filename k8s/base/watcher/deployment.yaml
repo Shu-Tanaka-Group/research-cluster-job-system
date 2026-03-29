@@ -53,6 +53,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: NODE_LABEL_SELECTOR
+            - name: GPU_NODE_LABEL_SELECTOR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: GPU_NODE_LABEL_SELECTOR
             - name: NODE_RESOURCE_SYNC_INTERVAL_SEC
               valueFrom:
                 configMapKeyRef:

@@ -3,8 +3,8 @@
 ## 1. 基本コマンド
 
 ```bash
-cjob add [--time-limit <duration>] -- <command...>
-cjob sweep -n <count> --parallel <n> [--time-limit <duration>] -- <command...>
+cjob add [--gpu <N>] [--time-limit <duration>] -- <command...>
+cjob sweep -n <count> --parallel <n> [--gpu <N>] [--time-limit <duration>] -- <command...>
 cjob list
 cjob status <job-id>
 cjob cancel <job-id>              # 単体指定
@@ -31,6 +31,9 @@ cjob update
 
 ```bash
 cjob add -- python main.py --alpha 0.1 --beta 16
+
+# GPU ジョブの投入
+cjob add --gpu 1 -- python train.py --epochs 100
 ```
 
 ### 2.2 シェルスクリプトの実行
@@ -118,6 +121,7 @@ cjob delete --all
 | `--time-limit <duration>` | 任意 | sweep **全体**の実行時間上限。省略時はサーバ側デフォルト |
 | `--cpu <cpu>` | 任意 | CPU リソース。デフォルト "1" |
 | `--memory <memory>` | 任意 | メモリリソース。デフォルト "1Gi" |
+| `--gpu <N>` | 任意 | GPU 数。デフォルト 0（GPU なし） |
 | `-- <command>` | 必須 | 各タスクで実行するコマンド |
 
 ### `_INDEX_` プレースホルダー

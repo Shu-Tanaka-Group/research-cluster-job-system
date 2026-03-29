@@ -131,11 +131,54 @@ class TestSubmitJob:
             submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
 
-    def test_gpu_rejected(self, db_session):
+    def test_gpu_accepted(self, db_session):
+        """GPU job should be accepted when GPU nodes exist."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('gpu-node', 32000, 131072, 4)"
+            )
+        )
+        db_session.flush()
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1))
+        resp = submit_job(db_session, NS, "alice", req)
+        assert resp.status == "QUEUED"
+
+    def test_gpu_no_gpu_nodes(self, db_session):
+        """GPU job should be rejected when no GPU nodes exist."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('cpu-node', 32000, 131072, 0)"
+            )
+        )
+        db_session.flush()
         req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1))
         with pytest.raises(HTTPException) as exc_info:
             submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
+        assert "GPU ノード" in exc_info.value.detail
+
+    def test_gpu_exceeds_max_node(self, db_session):
+        """GPU job requesting more GPUs than max node should be rejected."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('gpu-node', 32000, 131072, 2)"
+            )
+        )
+        db_session.flush()
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=4))
+        with pytest.raises(HTTPException) as exc_info:
+            submit_job(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "GPU" in exc_info.value.detail
 
     def test_deleting_blocks_submit(self, db_session):
         _insert_job(db_session, 1, status="DELETING")
@@ -552,11 +595,44 @@ class TestSubmitSweep:
             submit_sweep(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 409
 
-    def test_sweep_gpu_rejected(self, db_session):
-        req = _make_sweep_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1))
+    def test_sweep_gpu_accepted(self, db_session):
+        """Sweep with GPU should be accepted when GPU nodes exist."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('gpu-node', 32000, 131072, 4)"
+            )
+        )
+        db_session.flush()
+        req = _make_sweep_request(
+            completions=10, parallelism=2,
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1),
+        )
+        resp = submit_sweep(db_session, NS, "alice", req)
+        assert resp.status == "QUEUED"
+
+    def test_sweep_gpu_exceeds_cluster_total(self, db_session):
+        """Sweep where parallelism * gpu exceeds cluster total should be rejected."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('gpu-node', 32000, 131072, 4)"
+            )
+        )
+        db_session.flush()
+        # parallelism=5, gpu=1 -> 5 > 4 cluster total GPU
+        req = _make_sweep_request(
+            completions=10, parallelism=5,
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1),
+        )
         with pytest.raises(HTTPException) as exc_info:
             submit_sweep(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
+        assert "GPU" in exc_info.value.detail
 
     def test_sweep_time_limit_default(self, db_session):
         req = _make_sweep_request()

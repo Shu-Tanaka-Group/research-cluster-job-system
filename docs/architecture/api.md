@@ -55,13 +55,6 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 
 ### バリデーション
 
-`resources.gpu > 0` の場合は 400 を返す。GPU 対応は初期スコープ外（[implementation.md](implementation.md) §1 参照）であり、
-将来 GPU 対応を追加する際にこのバリデーションを外す。
-
-```json
-{ "detail": "GPU ジョブは現在サポートされていません" }
-```
-
 要求リソース（CPU / メモリ）がクラスタ内の最大ノードの allocatable を超える場合は 400 を返す。
 単一ノードに収まらないジョブは原理的に実行不可能であり、DISPATCHED 状態のまま無期限に滞留することを防ぐ。
 `node_resources` テーブルが空の場合（Watcher 未起動等）はこのバリデーションをスキップする。
@@ -72,6 +65,16 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 
 ```json
 { "detail": "要求メモリ (2Ti) がクラスタ内の最大ノード (262144Mi) を超えています" }
+```
+
+`resources.gpu > 0` の場合、GPU ノードが登録されていなければ 400 を返す。要求 GPU がクラスタ内の最大ノードの GPU 数を超える場合も 400 を返す。
+
+```json
+{ "detail": "GPU ノードがクラスタに登録されていません" }
+```
+
+```json
+{ "detail": "要求 GPU (8) がクラスタ内の最大ノード (4) を超えています" }
 ```
 
 `time_limit_seconds` は省略可能。省略時はサーバ側デフォルト（ConfigMap: `DEFAULT_TIME_LIMIT_SECONDS`、デフォルト 86400 = 24時間）を使用する。
@@ -138,7 +141,7 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 
 ### バリデーション
 
-`POST /v1/jobs` と共通のバリデーション（GPU リジェクト、単一ノードリソース超過、time_limit、ジョブ数上限、DELETING チェック）に加え、以下の sweep 固有バリデーションを行う。
+`POST /v1/jobs` と共通のバリデーション（単一ノードリソース超過、GPU バリデーション、time_limit、ジョブ数上限、DELETING チェック）に加え、以下の sweep 固有バリデーションを行う。
 
 - `completions` が 1 未満 → 400
 - `completions` が `MAX_SWEEP_COMPLETIONS`（デフォルト 1000）を超える → 400
@@ -156,6 +159,10 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 
 ```json
 { "detail": "parallelism × 要求 CPU (20000m) がクラスタ全体の CPU (256000m) を超えています" }
+```
+
+```json
+{ "detail": "parallelism × 要求 GPU (8) がクラスタ全体の GPU (4) を超えています" }
 ```
 
 ## 3. GET /v1/jobs

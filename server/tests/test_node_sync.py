@@ -10,6 +10,7 @@ def _make_settings(**overrides):
     defaults = dict(
         POSTGRES_PASSWORD="test",
         NODE_LABEL_SELECTOR="cluster-job=true",
+        GPU_NODE_LABEL_SELECTOR="",
         NODE_RESOURCE_SYNC_INTERVAL_SEC=300,
     )
     defaults.update(overrides)
@@ -154,3 +155,71 @@ class TestSyncNodeResources:
         sync_node_resources(db_session, settings)
 
         mock_api.list_node.assert_called_once_with(label_selector="my-label=true")
+
+    def test_gpu_selector_merges_nodes(self, mock_k8s, db_session):
+        """GPU_NODE_LABEL_SELECTOR fetches additional nodes and merges them."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+
+        cpu_response = MagicMock()
+        cpu_response.items = [_make_node("cpu-node", cpu="32", memory="128Gi")]
+        gpu_response = MagicMock()
+        gpu_response.items = [_make_node("gpu-node", cpu="16", memory="64Gi", gpu="4")]
+
+        mock_api.list_node.side_effect = [cpu_response, gpu_response]
+
+        settings = _make_settings(GPU_NODE_LABEL_SELECTOR="cluster-gpu-job=true")
+        sync_node_resources(db_session, settings)
+
+        assert _get_node_names(db_session) == ["cpu-node", "gpu-node"]
+        n = _get_node(db_session, "gpu-node")
+        assert n[2] == 4  # gpu
+
+    def test_gpu_selector_deduplicates(self, mock_k8s, db_session):
+        """Nodes matching both selectors appear only once."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+
+        shared_node = _make_node("shared-node", cpu="32", memory="128Gi", gpu="2")
+        cpu_response = MagicMock()
+        cpu_response.items = [shared_node]
+        gpu_response = MagicMock()
+        gpu_response.items = [shared_node]
+
+        mock_api.list_node.side_effect = [cpu_response, gpu_response]
+
+        settings = _make_settings(GPU_NODE_LABEL_SELECTOR="cluster-gpu-job=true")
+        sync_node_resources(db_session, settings)
+
+        assert _get_node_names(db_session) == ["shared-node"]
+
+    def test_gpu_selector_empty_skips_second_query(self, mock_k8s, db_session):
+        """Empty GPU_NODE_LABEL_SELECTOR should not make a second list_node call."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [_make_node("node-1")]
+
+        settings = _make_settings(GPU_NODE_LABEL_SELECTOR="")
+        sync_node_resources(db_session, settings)
+
+        mock_api.list_node.assert_called_once_with(label_selector="cluster-job=true")
+
+    def test_gpu_selector_api_error_still_syncs_cpu_nodes(self, mock_k8s, db_session):
+        """GPU API call failure should not prevent CPU node sync."""
+        from kubernetes.client.rest import ApiException
+
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+
+        cpu_response = MagicMock()
+        cpu_response.items = [_make_node("cpu-node", cpu="32", memory="128Gi")]
+
+        mock_api.list_node.side_effect = [
+            cpu_response,
+            ApiException(status=500, reason="Internal"),
+        ]
+
+        settings = _make_settings(GPU_NODE_LABEL_SELECTOR="cluster-gpu-job=true")
+        sync_node_resources(db_session, settings)
+
+        assert _get_node_names(db_session) == ["cpu-node"]

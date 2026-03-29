@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # Watcher - Node Resource Sync
     NODE_LABEL_SELECTOR: str = "cluster-job=true"
+    GPU_NODE_LABEL_SELECTOR: str = ""
     NODE_RESOURCE_SYNC_INTERVAL_SEC: int = 300     # 5 minutes
 
     # Submit API
