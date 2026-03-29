@@ -79,6 +79,7 @@ Co-Authored-By: <モデル名> <noreply@anthropic.com>
 
 - タイトルは短く（70文字以内）
 - body に `## Summary`（箇条書き）と `## Test plan`（チェックリスト）を含める
+- 変更の適用後に手動操作が必要な場合は `## Post-apply actions` セクションを追加する
 - issue をクローズする場合は body に `Closes #<issue番号>` を記述する
 
 ## 4. main への直接コミット
