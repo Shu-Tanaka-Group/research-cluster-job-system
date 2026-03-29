@@ -9,7 +9,7 @@ ResourceQuota はリソースを均等分配するためではなく、バグ等
 
 設定根拠：
 - CPU / memory：クラスタ総量より少し大きめに設定し、Kueue の admission 制御に任せる。Job Pod（最大 dispatch_limit 分）に加えてユーザーが使用している他の計算リソース（ジョブ投入用Podやデータ解析用Podなど）の分も余裕として含める
-- Job 数：dispatch_limit(32) と `ttlSecondsAfterFinished`(10800秒=3時間) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大32) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう余裕を持たせて dispatch_limit の約3倍に設定 → 100
+- Job 数：dispatch_limit(32) と `ttlSecondsAfterFinished`(1800秒=30分) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大32) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう余裕を持たせて設定 → 50。sweep 機能（1 Job で数百〜数千タスクを実行可能）があるため、Job 数の上限を抑えても実質的な計算能力は制限されない
 
 ```yaml
 apiVersion: v1
@@ -19,7 +19,7 @@ metadata:
   namespace: user-alice
 spec:
   hard:
-    count/jobs.batch: "100"
+    count/jobs.batch: "50"
     requests.cpu: "300"
     requests.memory: "1250Gi"
     limits.cpu: "300"
@@ -36,7 +36,7 @@ spec:
 | `DISPATCH_BUDGET_PER_NAMESPACE` | ConfigMap | 32 | Dispatcher | ユーザーごと | DB 上の active ジョブ数（DISPATCHING + DISPATCHED + RUNNING の合計）。上限に達すると Dispatcher が新規 dispatch を停止する |
 | `DISPATCH_BATCH_SIZE` | ConfigMap | 50 | Dispatcher | サイクルごと（全体） | 1回の dispatch サイクルで取得するジョブの総数上限。namespace 間でラウンドロビン・DRF 優先で公平に分配される |
 | `DISPATCH_ROUND_SIZE` | ConfigMap | 1 | Dispatcher | サイクルごと（namespace あたり） | ラウンドロビンの 1 ラウンドで各 namespace から取得するジョブ数。5 に設定すると各 namespace から 5 件ずつ交互に取得する |
-| `count/jobs.batch` | ResourceQuota | 100 | Kubernetes | ユーザーごと | K8s 上に存在する `batch/v1 Job` オブジェクトの総数。実行中 + TTL 待ち完了済みジョブの合計が対象 |
+| `count/jobs.batch` | ResourceQuota | 50 | Kubernetes | ユーザーごと | K8s 上に存在する `batch/v1 Job` オブジェクトの総数。実行中 + TTL 待ち完了済みジョブの合計が対象 |
 
 4つの制限は独立したレイヤーで機能する。
 
@@ -46,10 +46,10 @@ cjob add → DB 登録（MAX_QUEUED_JOBS_PER_NAMESPACE: 500件上限）
 Dispatcher がスキャン → dispatch_budget チェック（DISPATCH_BUDGET_PER_NAMESPACE: 32件上限）
                       → batch_size チェック（DISPATCH_BATCH_SIZE: 50件/サイクル上限）
               ↓
-K8s Job を作成 → count/jobs.batch チェック（100件上限）
+K8s Job を作成 → count/jobs.batch チェック（50件上限）
 ```
 
-`count/jobs.batch` を 100 に設定する理由：dispatch_budget の上限（32件）で動作していても、SUCCEEDED/FAILED になった K8s Job が TTL（3時間）が切れるまで K8s 上に残り続けるため、実行中 + TTL 待ち完了済みジョブの合計を吸収できるよう dispatch_limit の約3倍に設定している。
+`count/jobs.batch` を 50 に設定する理由：dispatch_budget の上限（32件）で動作していても、SUCCEEDED/FAILED になった K8s Job が TTL（30分）が切れるまで K8s 上に残り続けるため、実行中 + TTL 待ち完了済みジョブの合計を吸収できるよう設定している。TTL を 1,800秒（30分）に短縮したことで、長時間〜中程度のジョブでは TTL 待ちの蓄積が少なく、50 で十分な余裕がある。短時間ジョブが大量に回転して一時的に quota に達した場合は TTL 経過で自然に回復し、Dispatcher の retry により自動復旧する。
 
 ### CPU・メモリに関する制限
 
