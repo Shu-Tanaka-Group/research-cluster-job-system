@@ -173,6 +173,25 @@ async fn main() -> Result<()> {
     }
 }
 
+/// Quote a command argument for safe embedding in a bash -lc string.
+/// Uses double quotes so that shell variables (e.g. $CJOB_INDEX) expand
+/// in the Job Pod. Characters special inside double quotes are escaped.
+fn shell_quote(arg: &str) -> String {
+    let escaped = arg
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('`', "\\`")
+        .replace('!', "\\!");
+    format!("\"{}\"", escaped)
+}
+
+fn build_command_string(args: &[String]) -> String {
+    args.iter()
+        .map(|arg| shell_quote(arg))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 fn parse_duration(s: &str) -> Result<u32> {
     let s = s.trim();
     if let Ok(secs) = s.parse::<u32>() {
@@ -218,18 +237,7 @@ async fn cmd_add(
     // Collect exported environment variables
     let env: HashMap<String, String> = std::env::vars().collect();
 
-    let cmd_str = command
-        .iter()
-        .map(|arg| {
-            if arg.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}".contains(c)) {
-                // Wrap in single quotes, escaping any existing single quotes
-                format!("'{}'", arg.replace('\'', "'\\''"))
-            } else {
-                arg.clone()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
+    let cmd_str = build_command_string(&command);
 
     let time_limit_seconds = match time_limit {
         Some(ref s) => Some(parse_duration(s)?),
@@ -278,32 +286,13 @@ async fn cmd_sweep(
     // Collect exported environment variables
     let env: HashMap<String, String> = std::env::vars().collect();
 
-    // Replace _INDEX_ placeholder with $CJOB_INDEX.
-    // Use double quotes (not single) so $CJOB_INDEX expands in the Job Pod.
-    // Escape characters that are special inside double quotes: $ ` " \ !
-    // but leave $CJOB_INDEX unescaped.
-    let cmd_str = command
+    // Replace _INDEX_ placeholder with $CJOB_INDEX before quoting.
+    // Double-quote strategy ensures $CJOB_INDEX expands in the Job Pod.
+    let quoted_args: Vec<String> = command
         .iter()
-        .map(|arg| {
-            let has_placeholder = arg.contains("_INDEX_");
-            let arg = arg.replace("_INDEX_", "$CJOB_INDEX");
-            if has_placeholder {
-                // Use double quotes to allow $CJOB_INDEX expansion.
-                // Escape existing " and \ and ` and ! but NOT $CJOB_INDEX.
-                let escaped = arg
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"")
-                    .replace('`', "\\`")
-                    .replace('!', "\\!");
-                format!("\"{}\"", escaped)
-            } else if arg.contains(|c: char| c.is_whitespace() || "\"'\\$`!#&|;(){}".contains(c)) {
-                format!("'{}'", arg.replace('\'', "'\\''"))
-            } else {
-                arg.clone()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
+        .map(|arg| arg.replace("_INDEX_", "$CJOB_INDEX"))
+        .collect();
+    let cmd_str = build_command_string(&quoted_args);
 
     let time_limit_seconds = match time_limit {
         Some(ref s) => Some(parse_duration(s)?),
