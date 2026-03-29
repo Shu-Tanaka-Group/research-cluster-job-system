@@ -185,6 +185,8 @@ enum WeightCommands {
 enum ClusterCommands {
     /// Show node resources, cluster totals, and rejection thresholds
     Resources,
+    /// Show ResourceFlavor resource usage
+    FlavorUsage,
     /// Show current ClusterQueue nominalQuota
     ShowQuota,
     /// Update ClusterQueue nominalQuota
@@ -324,6 +326,10 @@ async fn main() -> Result<()> {
                     let conn =
                         db::connect(&config.database, config.system_namespace()).await?;
                     cmd::cluster::resources(&conn.client).await
+                }
+                ClusterCommands::FlavorUsage => {
+                    let k8s_client = k8s::client().await?;
+                    cmd::cluster::flavor_usage(&k8s_client).await
                 }
                 ClusterCommands::ShowQuota => {
                     let k8s_client = k8s::client().await?;
