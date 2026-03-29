@@ -75,6 +75,7 @@ kind: ClusterQueue
 metadata:
   name: cjob-cluster-queue
 spec:
+  cohort: cjob-cohort
   namespaceSelector: {}
   resourceGroups:
     - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
@@ -105,13 +106,17 @@ spec:
 
 Kueue は同じリソース名を複数の `resourceGroups` に含めることを許可しないため、cpu / memory / nvidia.com/gpu を 1 つの `resourceGroups` にまとめ、cpu-flavor と gpu-flavor の 2 つの flavor を配置する。cpu-flavor の `nvidia.com/gpu` を `"0"` にすることで、GPU を要求しないジョブは cpu-flavor にマッチし、GPU を要求するジョブは gpu-flavor にマッチする。
 
+### lendingLimit による GPU リソースの保護
+
 gpu-flavor の全リソースに `lendingLimit: "0"` を設定する。これにより、CPU ジョブが `BestEffortFIFO` の下で gpu-flavor の cpu / memory を借用することを禁止し、GPU ジョブが常に admit 可能な状態を維持する。`lendingLimit` を設定しない場合、cpu-flavor の nominalQuota を超える CPU ジョブが gpu-flavor の quota を消費し、GPU ジョブが admit できなくなる。
+
+`lendingLimit` は `cohort` に所属する ClusterQueue でのみ使用可能であるため、`cohort: cjob-cohort` を設定する。cohort 内に他の ClusterQueue がなくても `lendingLimit` は有効に機能する。将来 GPU の種類が増えた場合（例: A100, H100）は、ResourceFlavor の追加と ClusterQueue の flavors リストへの追加のみで対応でき、LocalQueue や Dispatcher の変更は不要である。
+
+### 設計判断
 
 GPU 用の `nominalQuota`（cpu / memory / nvidia.com/gpu）は GPU ノードの allocatable に合わせて設定する。`cjobctl cluster set-quota` で更新できる。
 
 `BestEffortFIFO` を採用する理由：空きリソースがあれば他ユーザーの idle quota を利用できる（1ユーザーが全コアを使える）ため、かつ `StrictFIFO` では1ユーザーの大量投入が全体を止める可能性があるため。単一 ClusterQueue 内でのユーザー間リソース共有は `cohort` ではなくこの `queueingStrategy` が担う。
-
-`cohort` を設定しない理由：`cohort` は複数 ClusterQueue 間のリソース共有に使う仕組みであり、本設計の単一 ClusterQueue 構成では意味を持たないため削除する。将来 GPU ノードが増えて GPU 専用キューの独立管理が必要になった場合に複数 ClusterQueue + cohort 構成への拡張を検討すること。
 
 preemption を禁止する理由：研究計算ではジョブが途中で強制終了されると結果が失われるケースが多いため。
 
