@@ -86,6 +86,9 @@ pub fn print_job_detail(job: &JobDetailResponse) {
     println!("status:        {}", job.status);
     println!("command:       {}", job.command);
     println!("cwd:           {}", job.cwd);
+    println!("cpu:           {}", job.cpu);
+    println!("memory:        {}", job.memory);
+    println!("gpu:           {}", job.gpu);
     if let (Some(completions), Some(parallelism)) = (job.completions, job.parallelism) {
         println!("completions:   {}", completions);
         println!("parallelism:   {}", parallelism);
@@ -161,6 +164,9 @@ mod tests {
             namespace: "user-test".to_string(),
             command: "echo hello".to_string(),
             cwd: "/home/jovyan".to_string(),
+            cpu: "1".to_string(),
+            memory: "1Gi".to_string(),
+            gpu: 0,
             time_limit_seconds,
             k8s_job_name: None,
             log_dir: None,
@@ -230,6 +236,9 @@ mod tests {
             namespace: "user-test".to_string(),
             command: "python main.py --trial $CJOB_INDEX".to_string(),
             cwd: "/home/jovyan/project-a".to_string(),
+            cpu: "2".to_string(),
+            memory: "4Gi".to_string(),
+            gpu: 0,
             time_limit_seconds: 21600,
             k8s_job_name: Some("cjob-test-3".to_string()),
             log_dir: Some("/home/jovyan/.cjob/logs/3".to_string()),

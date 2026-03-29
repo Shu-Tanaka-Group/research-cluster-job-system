@@ -58,6 +58,9 @@ class JobDetailResponse(BaseModel):
     namespace: str
     command: str
     cwd: str
+    cpu: str
+    memory: str
+    gpu: int
     time_limit_seconds: int
     k8s_job_name: str | None
     log_dir: str | None
