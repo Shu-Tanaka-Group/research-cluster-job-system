@@ -188,6 +188,32 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
             )
             logger.info("Updated %s/%d: %s -> %s", ns, jid, db_job.status, new_status)
 
+    # Step 8: Mark DISPATCHED/RUNNING jobs with no K8s Job as FAILED
+    disappeared_jobs = (
+        session.query(Job)
+        .filter(Job.status.in_(["DISPATCHED", "RUNNING"]))
+        .all()
+    )
+    for job in disappeared_jobs:
+        if (job.namespace, job.job_id) not in k8s_map:
+            job.status = "FAILED"
+            job.last_error = (
+                "K8s Job not found (TTL expired or manually deleted)"
+            )
+            job.finished_at = func.now()
+            session.add(
+                JobEvent(
+                    namespace=job.namespace,
+                    job_id=job.job_id,
+                    event_type="FAILED",
+                )
+            )
+            logger.info(
+                "Marked %s/%d as FAILED: K8s Job not found",
+                job.namespace,
+                job.job_id,
+            )
+
     # DELETING Phase 2: For each namespace with DELETING jobs,
     # check if all K8s Jobs are gone. If so, clean up DB.
     for ns, del_jobs in deleting_by_ns.items():
