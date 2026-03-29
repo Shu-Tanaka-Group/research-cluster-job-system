@@ -2,16 +2,58 @@ use anyhow::{bail, Result};
 use std::io::{self, Write};
 use tokio_postgres::Client;
 
-pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>) -> Result<()> {
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SortField {
+    Namespace,
+    Created,
+    Finished,
+}
+
+fn parse_sort_field(s: &str, allowed: &[SortField]) -> Result<SortField> {
+    let field = match s.to_uppercase().as_str() {
+        "NAMESPACE" => SortField::Namespace,
+        "CREATED" => SortField::Created,
+        "FINISHED" => SortField::Finished,
+        _ => bail!(
+            "Unknown sort field '{}'. Valid values: {}",
+            s,
+            allowed.iter().map(|f| format!("{:?}", f).to_uppercase()).collect::<Vec<_>>().join(", ")
+        ),
+    };
+    if !allowed.contains(&field) {
+        bail!(
+            "--sort {} is not available for this command. Valid values: {}",
+            s.to_uppercase(),
+            allowed.iter().map(|f| format!("{:?}", f).to_uppercase()).collect::<Vec<_>>().join(", ")
+        );
+    }
+    Ok(field)
+}
+
+pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>, sort: Option<&str>, reverse: bool) -> Result<()> {
+    let allowed = [SortField::Namespace, SortField::Created, SortField::Finished];
+    let sort_field = sort.map(|s| parse_sort_field(s, &allowed)).transpose()?;
+
+    let dir = if reverse { "DESC" } else { "ASC" };
+    let nulls = if reverse { "NULLS FIRST" } else { "NULLS LAST" };
+    let order_clause = match sort_field {
+        Some(SortField::Created) => format!("ORDER BY created_at {dir}"),
+        Some(SortField::Finished) => format!("ORDER BY finished_at {dir} {nulls}"),
+        Some(SortField::Namespace) | None => {
+            let secondary_dir = if reverse { "DESC" } else { "ASC" };
+            format!("ORDER BY namespace {dir}, job_id {secondary_dir}")
+        }
+    };
+
+    let query = format!(
+        "SELECT namespace, job_id, status, command, created_at, started_at, finished_at \
+         FROM jobs \
+         WHERE ($1::TEXT IS NULL OR namespace = $1) \
+           AND ($2::TEXT IS NULL OR status = $2) \
+         {order_clause}"
+    );
     let rows = client
-        .query(
-            "SELECT namespace, job_id, status, command, created_at, started_at, finished_at \
-             FROM jobs \
-             WHERE ($1::TEXT IS NULL OR namespace = $1) \
-               AND ($2::TEXT IS NULL OR status = $2) \
-             ORDER BY namespace, job_id",
-            &[&namespace, &status],
-        )
+        .query(&query, &[&namespace, &status])
         .await?;
 
     if rows.is_empty() {
@@ -49,17 +91,28 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
     Ok(())
 }
 
-pub async fn stalled(client: &Client) -> Result<()> {
-    let rows = client
-        .query(
-            "SELECT namespace, job_id, dispatched_at, \
-               EXTRACT(EPOCH FROM NOW() - dispatched_at)::INT AS elapsed_sec \
-             FROM jobs \
-             WHERE status = 'DISPATCHED' \
-             ORDER BY dispatched_at",
-            &[],
-        )
-        .await?;
+pub async fn stalled(client: &Client, sort: Option<&str>, reverse: bool) -> Result<()> {
+    let allowed = [SortField::Namespace, SortField::Created];
+    let sort_field = sort.map(|s| parse_sort_field(s, &allowed)).transpose()?;
+
+    let dir = if reverse { "DESC" } else { "ASC" };
+    let order_clause = match sort_field {
+        Some(SortField::Namespace) => {
+            let secondary_dir = if reverse { "DESC" } else { "ASC" };
+            format!("ORDER BY namespace {dir}, job_id {secondary_dir}")
+        }
+        Some(SortField::Created) | None => format!("ORDER BY dispatched_at {dir}"),
+        _ => unreachable!(),
+    };
+
+    let query = format!(
+        "SELECT namespace, job_id, dispatched_at, \
+           EXTRACT(EPOCH FROM NOW() - dispatched_at)::INT AS elapsed_sec \
+         FROM jobs \
+         WHERE status = 'DISPATCHED' \
+         {order_clause}"
+    );
+    let rows = client.query(&query, &[]).await?;
 
     if rows.is_empty() {
         println!("No stalled jobs.");
@@ -87,19 +140,31 @@ pub async fn stalled(client: &Client) -> Result<()> {
     Ok(())
 }
 
-pub async fn remaining(client: &Client) -> Result<()> {
-    let rows = client
-        .query(
-            "SELECT namespace, job_id, command, time_limit_seconds, started_at, \
-               EXTRACT(EPOCH FROM \
-                 (started_at + MAKE_INTERVAL(secs => time_limit_seconds)) - NOW() \
-               )::INT AS remaining_sec \
-             FROM jobs \
-             WHERE status = 'RUNNING' AND started_at IS NOT NULL \
-             ORDER BY remaining_sec",
-            &[],
-        )
-        .await?;
+pub async fn remaining(client: &Client, sort: Option<&str>, reverse: bool) -> Result<()> {
+    let allowed = [SortField::Namespace, SortField::Created];
+    let sort_field = sort.map(|s| parse_sort_field(s, &allowed)).transpose()?;
+
+    let dir = if reverse { "DESC" } else { "ASC" };
+    let order_clause = match sort_field {
+        Some(SortField::Namespace) => {
+            let secondary_dir = if reverse { "DESC" } else { "ASC" };
+            format!("ORDER BY namespace {dir}, job_id {secondary_dir}")
+        }
+        Some(SortField::Created) => format!("ORDER BY started_at {dir}"),
+        None => format!("ORDER BY remaining_sec {dir}"),
+        _ => unreachable!(),
+    };
+
+    let query = format!(
+        "SELECT namespace, job_id, command, time_limit_seconds, started_at, \
+           EXTRACT(EPOCH FROM \
+             (started_at + MAKE_INTERVAL(secs => time_limit_seconds)) - NOW() \
+           )::INT AS remaining_sec \
+         FROM jobs \
+         WHERE status = 'RUNNING' AND started_at IS NOT NULL \
+         {order_clause}"
+    );
+    let rows = client.query(&query, &[]).await?;
 
     if rows.is_empty() {
         println!("No running jobs.");
@@ -311,5 +376,49 @@ fn format_duration(secs: i32) -> String {
         format!("{}h {}m", hours, minutes)
     } else {
         format!("{}m", minutes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_sort_field_valid_namespace() {
+        let allowed = [SortField::Namespace, SortField::Created, SortField::Finished];
+        assert_eq!(parse_sort_field("NAMESPACE", &allowed).unwrap(), SortField::Namespace);
+    }
+
+    #[test]
+    fn parse_sort_field_valid_created() {
+        let allowed = [SortField::Namespace, SortField::Created, SortField::Finished];
+        assert_eq!(parse_sort_field("CREATED", &allowed).unwrap(), SortField::Created);
+    }
+
+    #[test]
+    fn parse_sort_field_valid_finished() {
+        let allowed = [SortField::Namespace, SortField::Created, SortField::Finished];
+        assert_eq!(parse_sort_field("FINISHED", &allowed).unwrap(), SortField::Finished);
+    }
+
+    #[test]
+    fn parse_sort_field_case_insensitive() {
+        let allowed = [SortField::Namespace, SortField::Created];
+        assert_eq!(parse_sort_field("namespace", &allowed).unwrap(), SortField::Namespace);
+        assert_eq!(parse_sort_field("Created", &allowed).unwrap(), SortField::Created);
+    }
+
+    #[test]
+    fn parse_sort_field_unknown_field() {
+        let allowed = [SortField::Namespace, SortField::Created];
+        let err = parse_sort_field("INVALID", &allowed).unwrap_err();
+        assert!(err.to_string().contains("Unknown sort field"));
+    }
+
+    #[test]
+    fn parse_sort_field_finished_not_allowed() {
+        let allowed = [SortField::Namespace, SortField::Created];
+        let err = parse_sort_field("FINISHED", &allowed).unwrap_err();
+        assert!(err.to_string().contains("not available"));
     }
 }

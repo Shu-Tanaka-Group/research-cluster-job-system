@@ -77,11 +77,31 @@ enum JobsCommands {
         /// Filter by status
         #[arg(long)]
         status: Option<String>,
+        /// Sort by field (NAMESPACE, CREATED, FINISHED)
+        #[arg(long)]
+        sort: Option<String>,
+        /// Reverse sort order (descending)
+        #[arg(long)]
+        reverse: bool,
     },
     /// Show DISPATCHED jobs that appear stuck
-    Stalled,
+    Stalled {
+        /// Sort by field (NAMESPACE, CREATED)
+        #[arg(long)]
+        sort: Option<String>,
+        /// Reverse sort order (descending)
+        #[arg(long)]
+        reverse: bool,
+    },
     /// Show remaining time for RUNNING jobs
-    Remaining,
+    Remaining {
+        /// Sort by field (NAMESPACE, CREATED)
+        #[arg(long)]
+        sort: Option<String>,
+        /// Reverse sort order (descending)
+        #[arg(long)]
+        reverse: bool,
+    },
     /// Show job count by namespace and status
     Summary,
     /// Cancel jobs in a namespace
@@ -222,12 +242,12 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
-                JobsCommands::List { namespace, status } => {
+                JobsCommands::List { namespace, status, sort, reverse } => {
                     let status_upper = status.map(|s| s.to_uppercase());
-                    cmd::jobs::list(&conn.client, namespace.as_deref(), status_upper.as_deref()).await
+                    cmd::jobs::list(&conn.client, namespace.as_deref(), status_upper.as_deref(), sort.as_deref(), reverse).await
                 }
-                JobsCommands::Stalled => cmd::jobs::stalled(&conn.client).await,
-                JobsCommands::Remaining => cmd::jobs::remaining(&conn.client).await,
+                JobsCommands::Stalled { sort, reverse } => cmd::jobs::stalled(&conn.client, sort.as_deref(), reverse).await,
+                JobsCommands::Remaining { sort, reverse } => cmd::jobs::remaining(&conn.client, sort.as_deref(), reverse).await,
                 JobsCommands::Summary => cmd::jobs::summary(&conn.client).await,
                 JobsCommands::Cancel { namespace, job_id, status, all } => {
                     let status_upper = status.map(|s| s.to_uppercase());
