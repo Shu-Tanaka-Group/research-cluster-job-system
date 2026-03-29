@@ -412,6 +412,10 @@ spec:
 
 `backoffLimitPerIndex: 0` により、1 回失敗したタスクは再試行せず即座に `failedIndexes` に追加される。
 
+### 3.2.1 GPU リソースの設定
+
+`job.gpu > 0` の場合、`build_k8s_job` はコンテナの `resources.requests` と `resources.limits` に `nvidia.com/gpu` を追加する。`job.gpu == 0` の場合は従来通り CPU / メモリのみを設定する。Kueue が GPU リソースの要求を検知し、`gpu-flavor` の `nodeLabels` に基づいて GPU ノードにスケジュールする。Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。
+
 ### 3.3 コマンドラッパー
 
 sweep ジョブのコマンドラッパーは `CJOB_INDEX` の export とインデックス付きログディレクトリを使用する。

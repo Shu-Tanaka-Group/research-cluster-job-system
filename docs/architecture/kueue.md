@@ -2,13 +2,15 @@
 
 ## 1. ResourceFlavor
 
-ジョブキューシステム専用ノード（`cluster-job=true`）を対象とする。
+### 1.1 CPU ノード用 ResourceFlavor
+
+CPU ジョブ専用ノード（`cluster-job=true`）を対象とする。
 
 ```yaml
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: ResourceFlavor
 metadata:
-  name: cluster-job-flavor
+  name: cpu-flavor
 spec:
   nodeLabels:
     cluster-job: "true"
@@ -32,13 +34,40 @@ spec:
 apiVersion: kueue.x-k8s.io/v1beta2
 kind: ResourceFlavor
 metadata:
-  name: cluster-job-flavor
+  name: cpu-flavor
 spec:
   nodeLabels:
     cluster-job: "true"
 ```
 
+### 1.2 GPU ノード用 ResourceFlavor
+
+GPU ジョブ用ノード（`cluster-gpu-job=true`）を対象とする。CPU ノードとは異なるラベルで識別し、Kueue が `nodeLabels` に基づいて GPU ジョブを GPU ノードに自動的に振り分ける。
+
+```yaml
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: gpu-flavor
+spec:
+  nodeLabels:
+    cluster-gpu-job: "true"
+  nodeTaints:
+    - key: "role"
+      value: "computing"
+      effect: "NoSchedule"
+  tolerations:
+    - key: "role"
+      operator: "Equal"
+      value: "computing"
+      effect: "NoSchedule"
+```
+
+GPU ノードには CPU ノードと同じ taint（`role=computing:NoSchedule`）を付与する。追加の taint は不要。Dispatcher 側の toleration 設定も変更不要であり、ノードの振り分けは Kueue の ResourceFlavor `nodeLabels` が担う。
+
 ## 2. ClusterQueue
+
+単一の ClusterQueue に CPU 用と GPU 用の 2 つの ResourceFlavor を配置する。GPU ジョブと CPU ジョブは同じキューで管理され、Kueue が ResourceFlavor の `nodeLabels` に基づいてノードを自動的に振り分ける。
 
 ```yaml
 apiVersion: kueue.x-k8s.io/v1beta2
@@ -50,24 +79,36 @@ spec:
   resourceGroups:
     - coveredResources: ["cpu", "memory"]
       flavors:
-        - name: cluster-job-flavor
+        - name: cpu-flavor
           resources:
             - name: cpu
               nominalQuota: "256"
             - name: memory
               nominalQuota: "1000Gi"
+    - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+      flavors:
+        - name: gpu-flavor
+          resources:
+            - name: cpu
+              nominalQuota: "16"
+            - name: memory
+              nominalQuota: "64Gi"
+            - name: nvidia.com/gpu
+              nominalQuota: "4"
   queueingStrategy: BestEffortFIFO
   preemption:
     withinClusterQueue: Never   # 実行中ジョブの強制終了を禁止
 ```
 
+GPU 用の `nominalQuota`（cpu / memory / nvidia.com/gpu）は GPU ノードの allocatable に合わせて設定する。`cjobctl cluster set-quota` で更新できる。
+
 `BestEffortFIFO` を採用する理由：空きリソースがあれば他ユーザーの idle quota を利用できる（1ユーザーが全コアを使える）ため、かつ `StrictFIFO` では1ユーザーの大量投入が全体を止める可能性があるため。単一 ClusterQueue 内でのユーザー間リソース共有は `cohort` ではなくこの `queueingStrategy` が担う。
 
-`cohort` を設定しない理由：`cohort` は複数 ClusterQueue 間のリソース共有に使う仕組みであり、本設計の単一 ClusterQueue 構成では意味を持たないため削除する。将来 GPU 専用キューなど複数 ClusterQueue 構成に拡張する際に追加すること。
+`cohort` を設定しない理由：`cohort` は複数 ClusterQueue 間のリソース共有に使う仕組みであり、本設計の単一 ClusterQueue 構成では意味を持たないため削除する。将来 GPU ノードが増えて GPU 専用キューの独立管理が必要になった場合に複数 ClusterQueue + cohort 構成への拡張を検討すること。
 
 preemption を禁止する理由：研究計算ではジョブが途中で強制終了されると結果が失われるケースが多いため。
 
-以上の設定により：`BestEffortFIFO` により空きリソースは他ユーザーが利用できる。`preemption.withinClusterQueue: Never` により実行中のジョブは強制終了されない。
+以上の設定により：`BestEffortFIFO` により空きリソースは他ユーザーが利用できる。`preemption.withinClusterQueue: Never` により実行中のジョブは強制終了されない。GPU リソースを要求しない CPU ジョブは `cpu-flavor` にマッチし、`nvidia.com/gpu` を要求する GPU ジョブは `gpu-flavor` にマッチする。
 
 ## 3. LocalQueue
 
@@ -142,9 +183,11 @@ spec:
             requests:
               cpu: "2"
               memory: "4Gi"
+              # nvidia.com/gpu: "1"   # GPU ジョブの場合のみ Dispatcher が動的に追加
             limits:
               cpu: "2"
               memory: "4Gi"
+              # nvidia.com/gpu: "1"   # GPU ジョブの場合のみ Dispatcher が動的に追加
       volumes:
         - name: workspace
           persistentVolumeClaim:

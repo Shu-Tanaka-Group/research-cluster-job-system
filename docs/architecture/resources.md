@@ -85,7 +85,8 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
 |---|---|---|---|---|---|
-| `NODE_LABEL_SELECTOR` | ConfigMap | `cluster-job=true` | Watcher | 全体 | ノードリソース取得時の label selector。Kueue ResourceFlavor の `nodeLabels` と一致させる |
+| `NODE_LABEL_SELECTOR` | ConfigMap | `cluster-job=true` | Watcher | 全体 | CPU ノードのリソース取得時の label selector。Kueue cpu-flavor の `nodeLabels` と一致させる |
+| `GPU_NODE_LABEL_SELECTOR` | ConfigMap | `cluster-gpu-job=true` | Watcher | 全体 | GPU ノードのリソース取得時の label selector。Kueue gpu-flavor の `nodeLabels` と一致させる。空文字列の場合は GPU ノードの同期をスキップする |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | ConfigMap | 300 (5分) | Watcher | 全体 | ノードリソース同期間隔（秒）。Watcher のメインループの N サイクルに 1 回実行する |
 
 ノードリソース同期の詳細は [watcher.md](watcher.md) §1.1、DB テーブル定義は [database.md](database.md) §6 を参照。
