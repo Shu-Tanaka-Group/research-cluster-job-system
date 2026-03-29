@@ -482,3 +482,62 @@ class TestReconcileSweep:
         assert job.failed_count == 1
         assert job.completed_indexes == "0-39"
         assert job.failed_indexes == "40"
+
+
+# ── Disappeared K8s Jobs (Step 8) ──
+
+
+@patch("cjob.watcher.reconciler._delete_k8s_job")
+class TestReconcileDisappearedJobs:
+    """Test Step 8: DISPATCHED/RUNNING jobs with no K8s Job are marked FAILED."""
+
+    def test_dispatched_job_without_k8s_job_marked_failed(self, mock_delete, db_session):
+        _insert_job(db_session, 1, status="DISPATCHED")
+
+        reconcile_cycle(db_session, [])
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+
+    def test_running_job_without_k8s_job_marked_failed(self, mock_delete, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+
+        reconcile_cycle(db_session, [])
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+
+    def test_disappeared_job_sets_last_error(self, mock_delete, db_session):
+        _insert_job(db_session, 1, status="DISPATCHED")
+
+        reconcile_cycle(db_session, [])
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.last_error == "K8s Job not found (TTL expired or manually deleted)"
+
+    def test_disappeared_job_sets_finished_at(self, mock_delete, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+
+        reconcile_cycle(db_session, [])
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.finished_at is not None
+
+    def test_succeeded_job_not_affected(self, mock_delete, db_session):
+        _insert_job(db_session, 1, status="SUCCEEDED")
+
+        reconcile_cycle(db_session, [])
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "SUCCEEDED"
+        assert job.last_error is None
+
+    def test_job_with_k8s_job_not_affected(self, mock_delete, db_session):
+        """DISPATCHED job with a corresponding K8s Job should not be marked FAILED."""
+        _insert_job(db_session, 1, status="DISPATCHED")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1")]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "DISPATCHED"
