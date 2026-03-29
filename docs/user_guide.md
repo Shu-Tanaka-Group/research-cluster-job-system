@@ -75,14 +75,14 @@ cjob sweep -n 10 --parallel 5 -- bash run.sh
 
 ### 2.3 並列数の選び方
 
-`--parallel` の値は、同時に実行できるジョブ数の上限（32 件）以下に設定してください。他のジョブも同時に実行したい場合は、その分を差し引いた値にするとよいでしょう。
+`--parallel` は 1 つの sweep ジョブの中で同時に実行するタスク数です。並列数を増やすとその分だけ CPU やメモリを同時に消費するため、クラスタのリソース状況に応じて適切な値を設定してください。
 
 ```bash
-# 他にジョブがなければ最大 32 まで並列にできる
-cjob sweep -n 100 --parallel 32 -- python main.py --trial _INDEX_
+# 10 タスクずつ並列で実行
+cjob sweep -n 100 --parallel 10 -- python main.py --trial _INDEX_
 
-# 他のジョブ用に枠を残しておく場合
-cjob sweep -n 100 --parallel 20 -- python main.py --trial _INDEX_
+# 並列数を控えめにしてリソースの消費を抑える
+cjob sweep -n 100 --parallel 5 -- python main.py --trial _INDEX_
 ```
 
 ### 2.4 sweep のログ確認
