@@ -62,14 +62,23 @@ cjob sweep -n 100 --parallel 10 -- python main.py --trial _INDEX_
 # 番号をそのままパラメータとして使う
 cjob sweep -n 50 --parallel 5 -- python train.py --seed _INDEX_
 
-# 番号で入力ファイルを切り替える
+# 番号で入力ファイルを切り替える（run.sh の中で番号に応じたファイルを読み込む）
 cjob sweep -n 10 --parallel 5 -- bash run.sh _INDEX_
 ```
 
-スクリプトファイルの中では `$CJOB_INDEX` という変数名で番号を参照できます。
+上の例では `run.sh` に番号が引数として渡されます。スクリプトの中でその番号を使って入力ファイルを切り替えることができます。
 
 ```bash
-# run.sh の中身の例
+# run.sh の中身の例（$1 に _INDEX_ の値が入る）
+python train.py --config configs/config_${1}.yaml
+```
+
+この場合、番号 0 のジョブは `config_0.yaml`、番号 1 のジョブは `config_1.yaml` を読み込みます。
+
+スクリプトファイルの中では、引数の代わりに `$CJOB_INDEX` という変数名で番号を直接参照することもできます。
+
+```bash
+# run.sh の中身の例（$CJOB_INDEX を使う場合）
 python train.py --config configs/config_${CJOB_INDEX}.yaml
 ```
 
