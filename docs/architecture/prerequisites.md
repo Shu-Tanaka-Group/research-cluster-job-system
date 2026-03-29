@@ -7,8 +7,7 @@
 - Kubernetes クラスタが存在する
 - ユーザーごとに namespace が分離されている（手動作成・スクリプトで自動化）
 - ユーザー namespace ごとに作業用 PVC が存在する
-- ユーザー Pod はその PVC を `/home/jovyan` に mount している
-- 認証基盤として Keycloak + JupyterHub が既にある
+- PVC の mount path はデフォルト `/home/jovyan` とし、ConfigMap の `WORKSPACE_MOUNT_PATH` で変更可能
 - Kueue を Kubernetes クラスタに導入する
 - 状態管理用に PostgreSQL を使用する（新規デプロイ）
 - NFS subdir external provisioner を導入済み
@@ -26,12 +25,11 @@
 - CLI は image には含めない
 - ベース OS：Ubuntu 24.04
 - PVC 名はユーザー名と一致している
-- mount path はデフォルト `/home/jovyan` とし、ConfigMap の `WORKSPACE_MOUNT_PATH` で変更可能とする
 - 実行 shell は `/bin/bash -lc` を基本とする
-- 作業ディレクトリは `/home/jovyan` 配下に限定する
+- 作業ディレクトリは `${WORKSPACE_MOUNT_PATH}` 配下に限定する
 - export 済み環境変数のみ再現対象とする（仮想環境の `PATH` / `VIRTUAL_ENV` を含む）
 - shell function / alias / shell option は再現対象外とする
-- ユーザーは `/home/jovyan` 配下に Python 仮想環境を作成して管理する
+- ユーザーは `${WORKSPACE_MOUNT_PATH}` 配下に Python 仮想環境を作成して管理する
 - Job Pod と User Pod は同一 image のため、venv 内の C 拡張ライブラリ互換性が保たれる
 
 ## 3. スケジューリング前提

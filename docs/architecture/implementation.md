@@ -118,13 +118,7 @@
 ### Step 3: Submit API 実装
 
 - ServiceAccount JWT による認証・認可
-- `POST /v1/jobs`
-- `GET /v1/jobs`
-- `GET /v1/jobs/{job_id}`
-- `POST /v1/jobs/{job_id}/cancel`
-- `POST /v1/jobs/cancel`
-- `POST /v1/jobs/delete`
-- `POST /v1/reset`
+- API エンドポイントの実装（詳細は [api.md](api.md) を参照）
 
 併せて PostgreSQL スキーマを作成する。
 

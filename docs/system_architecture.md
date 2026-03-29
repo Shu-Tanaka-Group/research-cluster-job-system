@@ -9,7 +9,7 @@
 
 - ユーザー操作は `cjob add <job command>` を基本とする
 - 実行環境は Kubernetes 上に構築する
-- 実行単位は **1コマンド = 1 Kubernetes Job**
+- 実行単位は **1コマンド = 1 Kubernetes Job**（sweep 時は 1 Indexed Job で複数タスクを実行）
 - ジョブ投入数が非常に多くなることを想定し、**DB スキャン型 Dispatcher** により dispatch を制御する
 - Kubernetes 上の実行制御には **Kueue** を用いる
 - ユーザーの作業ディレクトリと環境変数を可能な範囲でそのまま再現してジョブを実行する
