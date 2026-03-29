@@ -91,16 +91,21 @@ spec:
           resources:
             - name: cpu
               nominalQuota: "64"
+              lendingLimit: "0"
             - name: memory
               nominalQuota: "500Gi"
+              lendingLimit: "0"
             - name: nvidia.com/gpu
               nominalQuota: "4"
+              lendingLimit: "0"
   queueingStrategy: BestEffortFIFO
   preemption:
     withinClusterQueue: Never   # 実行中ジョブの強制終了を禁止
 ```
 
 Kueue は同じリソース名を複数の `resourceGroups` に含めることを許可しないため、cpu / memory / nvidia.com/gpu を 1 つの `resourceGroups` にまとめ、cpu-flavor と gpu-flavor の 2 つの flavor を配置する。cpu-flavor の `nvidia.com/gpu` を `"0"` にすることで、GPU を要求しないジョブは cpu-flavor にマッチし、GPU を要求するジョブは gpu-flavor にマッチする。
+
+gpu-flavor の全リソースに `lendingLimit: "0"` を設定する。これにより、CPU ジョブが `BestEffortFIFO` の下で gpu-flavor の cpu / memory を借用することを禁止し、GPU ジョブが常に admit 可能な状態を維持する。`lendingLimit` を設定しない場合、cpu-flavor の nominalQuota を超える CPU ジョブが gpu-flavor の quota を消費し、GPU ジョブが admit できなくなる。
 
 GPU 用の `nominalQuota`（cpu / memory / nvidia.com/gpu）は GPU ノードの allocatable に合わせて設定する。`cjobctl cluster set-quota` で更新できる。
 
@@ -110,7 +115,7 @@ GPU 用の `nominalQuota`（cpu / memory / nvidia.com/gpu）は GPU ノードの
 
 preemption を禁止する理由：研究計算ではジョブが途中で強制終了されると結果が失われるケースが多いため。
 
-以上の設定により：`BestEffortFIFO` により空きリソースは他ユーザーが利用できる。`preemption.withinClusterQueue: Never` により実行中のジョブは強制終了されない。GPU リソースを要求しない CPU ジョブは `cpu-flavor` にマッチし、`nvidia.com/gpu` を要求する GPU ジョブは `gpu-flavor` にマッチする。
+以上の設定により：`BestEffortFIFO` により空きリソースは他ユーザーが利用できる。`preemption.withinClusterQueue: Never` により実行中のジョブは強制終了されない。GPU リソースを要求しない CPU ジョブは `cpu-flavor` にマッチし、`nvidia.com/gpu` を要求する GPU ジョブは `gpu-flavor` にマッチする。gpu-flavor の `lendingLimit: "0"` により GPU ノードのリソースは GPU ジョブ専用に確保される。
 
 ## 3. LocalQueue
 
