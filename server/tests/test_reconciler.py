@@ -89,6 +89,44 @@ class TestReconcileStatusSync:
         job = db_session.get(Job, (NS, 1))
         assert job.node_name is None
 
+    def test_node_name_recorded_on_succeeded_if_missed_running(self, mock_delete, mock_fetch_node, db_session):
+        """If RUNNING was skipped, node_name should be recorded on SUCCEEDED."""
+        mock_fetch_node.return_value = "node-compute-02"
+        _insert_job(db_session, 1, status="DISPATCHED")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1",
+                                   conditions=[V1JobCondition(type="Complete", status="True")])]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "SUCCEEDED"
+        assert job.node_name == "node-compute-02"
+
+    def test_node_name_recorded_on_failed_if_missed_running(self, mock_delete, mock_fetch_node, db_session):
+        """If RUNNING was skipped, node_name should be recorded on FAILED."""
+        mock_fetch_node.return_value = "node-gpu-01"
+        _insert_job(db_session, 1, status="DISPATCHED")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1",
+                                   conditions=[V1JobCondition(type="Failed", status="True")])]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.node_name == "node-gpu-01"
+
+    def test_node_name_not_overwritten_on_succeeded(self, mock_delete, mock_fetch_node, db_session):
+        """If node_name is already set, it should not be overwritten on completion."""
+        _insert_job(db_session, 1, status="RUNNING", node_name="node-compute-01")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1",
+                                   conditions=[V1JobCondition(type="Complete", status="True")])]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.node_name == "node-compute-01"
+        mock_fetch_node.assert_not_called()
+
     def test_running_to_succeeded(self, mock_delete, mock_fetch_node, db_session):
         _insert_job(db_session, 1, status="RUNNING")
         k8s_jobs = [
