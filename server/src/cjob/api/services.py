@@ -81,13 +81,6 @@ def _validate_common(
             detail=f"投入可能なジョブ数の上限（{settings.MAX_QUEUED_JOBS_PER_NAMESPACE}件）に達しています",
         )
 
-    # Reject GPU jobs
-    if resources.gpu > 0:
-        raise HTTPException(
-            status_code=400,
-            detail="GPU ジョブは現在サポートされていません",
-        )
-
     # Check resource exceeds max node allocatable
     max_resources = session.execute(
         text(
@@ -113,6 +106,21 @@ def _validate_common(
                 status_code=400,
                 detail=f"要求メモリ ({resources.memory}) がクラスタ内の最大ノード "
                        f"({max_resources['max_memory']}Mi) を超えています",
+            )
+
+    # Check GPU resource
+    if resources.gpu > 0:
+        max_gpu = max_resources["max_gpu"] if max_resources and max_resources["max_gpu"] is not None else 0
+        if max_gpu == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="GPU ノードがクラスタに登録されていません",
+            )
+        if resources.gpu > max_gpu:
+            raise HTTPException(
+                status_code=400,
+                detail=f"要求 GPU ({resources.gpu}) がクラスタ内の最大ノード "
+                       f"({max_gpu}) を超えています",
             )
 
     # Resolve time_limit_seconds
@@ -199,7 +207,8 @@ def submit_sweep(
     cluster_totals = session.execute(
         text(
             "SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu, "
-            "       COALESCE(SUM(memory_mib), 0) AS total_memory "
+            "       COALESCE(SUM(memory_mib), 0) AS total_memory, "
+            "       COALESCE(SUM(gpu), 0) AS total_gpu "
             "FROM node_resources"
         )
     ).mappings().first()
@@ -221,6 +230,16 @@ def submit_sweep(
                 status_code=400,
                 detail=f"parallelism × 要求メモリ ({total_mem}Mi) がクラスタ全体のメモリ "
                        f"({cluster_totals['total_memory']}Mi) を超えています",
+            )
+
+    if req.resources.gpu > 0 and cluster_totals:
+        total_gpu = req.resources.gpu * req.parallelism
+        cluster_gpu = cluster_totals["total_gpu"]
+        if cluster_gpu == 0 or total_gpu > cluster_gpu:
+            raise HTTPException(
+                status_code=400,
+                detail=f"parallelism × 要求 GPU ({total_gpu}) がクラスタ全体の GPU "
+                       f"({cluster_gpu}) を超えています",
             )
 
     # Allocate job_id
