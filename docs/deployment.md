@@ -447,11 +447,13 @@ metadata:
   namespace: ${NS_NAME}
 spec:
   hard:
-    count/jobs.batch: "100"
+    count/jobs.batch: "50"
     requests.cpu: "300"
     requests.memory: "1250Gi"
     limits.cpu: "300"
     limits.memory: "1250Gi"
+    requests.nvidia.com/gpu: "4"
+    limits.nvidia.com/gpu: "4"
 EOF
 
 echo "Done: ns=${NS_NAME}, user=${USERNAME}"

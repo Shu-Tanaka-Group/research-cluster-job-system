@@ -10,6 +10,7 @@ ResourceQuota はリソースを均等分配するためではなく、バグ等
 設定根拠：
 - CPU / memory：クラスタ総量より少し大きめに設定し、Kueue の admission 制御に任せる。Job Pod（最大 dispatch_limit 分）に加えてユーザーが使用している他の計算リソース（ジョブ投入用Podやデータ解析用Podなど）の分も余裕として含める
 - Job 数：dispatch_limit(32) と `ttlSecondsAfterFinished`(1800秒=30分) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大32) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう余裕を持たせて設定 → 50。sweep 機能（1 Job で数百〜数千タスクを実行可能）があるため、Job 数の上限を抑えても実質的な計算能力は制限されない
+- GPU：GPU ノードの総 GPU 数に合わせて設定する。`"0"` に設定するとそのユーザーは GPU ジョブを実行できない。GPU を使わないユーザーには `"0"` を設定するか、GPU 関連の項目を省略する
 
 ```yaml
 apiVersion: v1
@@ -24,6 +25,8 @@ spec:
     requests.memory: "1250Gi"
     limits.cpu: "300"
     limits.memory: "1250Gi"
+    requests.nvidia.com/gpu: "4"
+    limits.nvidia.com/gpu: "4"
 ```
 
 ## 2. リソース制限まとめ

@@ -77,7 +77,7 @@ metadata:
 spec:
   namespaceSelector: {}
   resourceGroups:
-    - coveredResources: ["cpu", "memory"]
+    - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
       flavors:
         - name: cpu-flavor
           resources:
@@ -85,20 +85,22 @@ spec:
               nominalQuota: "256"
             - name: memory
               nominalQuota: "1000Gi"
-    - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
-      flavors:
+            - name: nvidia.com/gpu
+              nominalQuota: "0"
         - name: gpu-flavor
           resources:
             - name: cpu
-              nominalQuota: "16"
+              nominalQuota: "64"
             - name: memory
-              nominalQuota: "64Gi"
+              nominalQuota: "500Gi"
             - name: nvidia.com/gpu
               nominalQuota: "4"
   queueingStrategy: BestEffortFIFO
   preemption:
     withinClusterQueue: Never   # 実行中ジョブの強制終了を禁止
 ```
+
+Kueue は同じリソース名を複数の `resourceGroups` に含めることを許可しないため、cpu / memory / nvidia.com/gpu を 1 つの `resourceGroups` にまとめ、cpu-flavor と gpu-flavor の 2 つの flavor を配置する。cpu-flavor の `nvidia.com/gpu` を `"0"` にすることで、GPU を要求しないジョブは cpu-flavor にマッチし、GPU を要求するジョブは gpu-flavor にマッチする。
 
 GPU 用の `nominalQuota`（cpu / memory / nvidia.com/gpu）は GPU ノードの allocatable に合わせて設定する。`cjobctl cluster set-quota` で更新できる。
 
