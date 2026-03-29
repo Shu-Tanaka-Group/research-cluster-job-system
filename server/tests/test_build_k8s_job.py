@@ -88,6 +88,27 @@ class TestBuildK8sJob:
         assert container.resources.requests == {"cpu": "4", "memory": "8Gi"}
         assert container.resources.limits == {"cpu": "4", "memory": "8Gi"}
 
+    def test_gpu_resource_in_manifest(self):
+        job = _make_job(gpu=2)
+        settings = _make_settings()
+        manifest = build_k8s_job(job, settings)
+
+        container = manifest.spec.template.spec.containers[0]
+        assert container.resources.requests["nvidia.com/gpu"] == "2"
+        assert container.resources.limits["nvidia.com/gpu"] == "2"
+        # CPU and memory should still be present
+        assert container.resources.requests["cpu"] == "2"
+        assert container.resources.requests["memory"] == "4Gi"
+
+    def test_no_gpu_resource_when_zero(self):
+        job = _make_job(gpu=0)
+        settings = _make_settings()
+        manifest = build_k8s_job(job, settings)
+
+        container = manifest.spec.template.spec.containers[0]
+        assert "nvidia.com/gpu" not in container.resources.requests
+        assert "nvidia.com/gpu" not in container.resources.limits
+
     def test_container_image(self):
         job = _make_job(image="custom:1.0")
         settings = _make_settings()
