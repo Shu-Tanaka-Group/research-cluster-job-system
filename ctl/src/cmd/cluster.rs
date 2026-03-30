@@ -259,8 +259,11 @@ pub async fn set_quota(
         validate_memory_format(mem)?;
     }
 
-    // Fetch allocatable totals from DB for validation
-    let totals = ClusterTotals::from_db(db_client).await;
+    // Map Kueue flavor name to DB flavor value (e.g. "cpu-flavor" → "cpu")
+    let db_flavor = flavor.strip_suffix("-flavor").unwrap_or(flavor);
+
+    // Fetch allocatable totals for the corresponding node flavor
+    let totals = ClusterTotals::from_db_by_flavor(db_client, db_flavor).await;
     let alloc_cpu_cores = totals.cpu_millicores / 1000;
     let alloc_mem_mib = totals.memory_mib;
     let alloc_gpu = totals.gpus;
@@ -272,13 +275,13 @@ pub async fn set_quota(
         if (c as i64) > alloc_cpu_cores {
             exceeds = true;
             eprintln!(
-                "Error: CPU {} exceeds cluster allocatable total ({} cores)",
-                c, alloc_cpu_cores,
+                "Error: CPU {} exceeds '{}' node allocatable total ({} cores)",
+                c, db_flavor, alloc_cpu_cores,
             );
         } else if (c as i64) < alloc_cpu_cores / 10 {
             eprintln!(
-                "Warning: CPU {} is very small compared to cluster allocatable total ({} cores)",
-                c, alloc_cpu_cores,
+                "Warning: CPU {} is very small compared to '{}' node allocatable total ({} cores)",
+                c, db_flavor, alloc_cpu_cores,
             );
         }
     }
@@ -289,14 +292,14 @@ pub async fn set_quota(
             if (mem_mib as i64) > alloc_mem_mib {
                 exceeds = true;
                 eprintln!(
-                    "Error: Memory {} exceeds cluster allocatable total ({:.1} GiB)",
-                    mem,
+                    "Error: Memory {} exceeds '{}' node allocatable total ({:.1} GiB)",
+                    mem, db_flavor,
                     alloc_mem_mib as f64 / 1024.0,
                 );
             } else if (mem_mib as i64) < alloc_mem_mib / 10 {
                 eprintln!(
-                    "Warning: Memory {} is very small compared to cluster allocatable total ({:.1} GiB)",
-                    mem,
+                    "Warning: Memory {} is very small compared to '{}' node allocatable total ({:.1} GiB)",
+                    mem, db_flavor,
                     alloc_mem_mib as f64 / 1024.0,
                 );
             }
@@ -308,13 +311,13 @@ pub async fn set_quota(
         if (g as i64) > alloc_gpu {
             exceeds = true;
             eprintln!(
-                "Error: GPU {} exceeds cluster allocatable total ({})",
-                g, alloc_gpu,
+                "Error: GPU {} exceeds '{}' node allocatable total ({})",
+                g, db_flavor, alloc_gpu,
             );
         } else if alloc_gpu > 0 && (g as i64) < alloc_gpu / 10 {
             eprintln!(
-                "Warning: GPU {} is very small compared to cluster allocatable total ({})",
-                g, alloc_gpu,
+                "Warning: GPU {} is very small compared to '{}' node allocatable total ({})",
+                g, db_flavor, alloc_gpu,
             );
         }
     }
