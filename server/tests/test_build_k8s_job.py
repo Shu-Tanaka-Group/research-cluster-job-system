@@ -77,7 +77,7 @@ class TestBuildK8sJob:
         settings = _make_settings()
         manifest = build_k8s_job(job, settings)
 
-        assert manifest.spec.ttl_seconds_after_finished == 1800
+        assert manifest.spec.ttl_seconds_after_finished == 300
 
     def test_container_resources(self):
         job = _make_job(cpu="4", memory="8Gi")
