@@ -17,6 +17,7 @@ CREATE TABLE jobs (
     cpu           TEXT NOT NULL,
     memory        TEXT NOT NULL,
     gpu           INTEGER NOT NULL DEFAULT 0,
+    flavor        TEXT NOT NULL DEFAULT 'cpu', -- ジョブ実行先の ResourceFlavor 名（例: 'cpu', 'gpu-a100'）
     time_limit_seconds INTEGER NOT NULL,   -- 実行時間上限（秒）。K8s Job の activeDeadlineSeconds に設定される
     status        TEXT NOT NULL,
     retry_count   INTEGER NOT NULL DEFAULT 0,
@@ -192,16 +193,16 @@ CREATE TABLE node_resources (
     cpu_millicores      INTEGER NOT NULL,    -- allocatable CPU（ミリコア）
     memory_mib          INTEGER NOT NULL,    -- allocatable memory（MiB）
     gpu                 INTEGER NOT NULL DEFAULT 0,  -- allocatable GPU（nvidia.com/gpu）
-    flavor              TEXT NOT NULL DEFAULT 'cpu', -- ResourceFlavor 区分（'cpu' or 'gpu'）
+    flavor              TEXT NOT NULL DEFAULT 'cpu', -- ResourceFlavor 名（RESOURCE_FLAVORS 設定の name と一致）
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
-`flavor` 列は Watcher がノードの取得元セレクタに基づいて設定する。`NODE_LABEL_SELECTOR` 由来のノードは `'cpu'`、`GPU_NODE_LABEL_SELECTOR` 由来のノードは `'gpu'` となる。`DEFAULT 'cpu'` により、GPU セレクタ未設定の環境や既存データとの後方互換性を確保する。
+`flavor` 列は Watcher がノードの取得元セレクタに基づいて設定する。`RESOURCE_FLAVORS` 設定（[resources.md](resources.md) 参照）の各 flavor 定義の `label_selector` で取得したノードに、その flavor の `name` を設定する。`DEFAULT 'cpu'` により、既存データとの後方互換性を確保する。
 
 ### 6.1 同期処理
 
-Watcher が `NODE_LABEL_SELECTOR`（デフォルト `cluster-job=true`）および `GPU_NODE_LABEL_SELECTOR`（デフォルト `cluster-gpu-job=true`）に一致するノードの `status.allocatable` を取得し、ノードごとに UPSERT する。DB に存在するが K8s から消えたノード（撤去・ラベル除去）は DELETE する。
+Watcher が `RESOURCE_FLAVORS` 設定（[resources.md](resources.md) 参照）の各 flavor 定義の `label_selector` に一致するノードの `status.allocatable` を取得し、ノードごとに UPSERT する。DB に存在するが K8s から消えたノード（撤去・ラベル除去）は DELETE する。
 
 ```sql
 -- UPSERT（ノードごと）
@@ -220,13 +221,14 @@ DELETE FROM node_resources WHERE node_name != ALL(:current_node_names);
 
 ### 6.2 参照パターン
 
-**Submit API（リソース超過リジェクト判定）**: 各リソースについて、全ノードの最大値を取得する。要求リソースがいずれかのノードの allocatable を超える場合、そのジョブは原理的に実行不可能であるため 400 でリジェクトする。
+**Submit API（リソース超過リジェクト判定）**: 指定された flavor のノードに限定して各リソースの最大値を取得する。要求リソースが flavor 内のいずれのノードの allocatable も超える場合、そのジョブは原理的に実行不可能であるため 400 でリジェクトする。
 
 ```sql
 SELECT MAX(cpu_millicores) AS max_cpu,
        MAX(memory_mib) AS max_memory,
        MAX(gpu) AS max_gpu
-FROM node_resources;
+FROM node_resources
+WHERE flavor = :flavor;
 ```
 
 **Dispatcher（DRF 正規化）**: クラスタ全体のリソース合計を取得する。従来 ConfigMap で手動設定していた `CLUSTER_TOTAL_CPU_MILLICORES` / `CLUSTER_TOTAL_MEMORY_MIB` / `CLUSTER_TOTAL_GPUS` の代わりに使用する。
@@ -238,7 +240,7 @@ SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu,
 FROM node_resources;
 ```
 
-**cjobctl（flavor 別 allocatable 合計）**: `set-quota` のバリデーションで、指定 flavor に対応するノード群の allocatable 合計を取得する。
+**cjobctl（flavor 別 allocatable 合計）**: `set-quota` のバリデーションで、指定 flavor に対応するノード群の allocatable 合計を取得する。flavor 名は Kueue ResourceFlavor 名と統一されているため、変換処理なしでそのままクエリに使用する。
 
 ```sql
 SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu,
@@ -254,6 +256,7 @@ WHERE flavor = :flavor;
 - **updated_at**: cjobctl でノード情報の鮮度を確認するために使用する。Watcher が停止した場合に古いデータを検知可能にする
 - **行数の見積もり**: 計算ノード数と同数。10〜50 ノード程度を想定しており、クエリのコストは無視できる
 - **テーブルが空の場合のフォールバック**: Watcher 未起動時は `node_resources` が空となる。Submit API はバリデーションをスキップし、Dispatcher は DRF ソートを無効化して namespace 名順にフォールバックする。これにより Watcher 起動前でもシステムが動作する
+- **flavor 名の統一**: `node_resources.flavor` と `jobs.flavor` の値は Kueue ResourceFlavor の `metadata.name` と一致させる。これにより DB クエリと Kueue API の間で名前変換が不要になる
 
 ## 7. 状態遷移
 

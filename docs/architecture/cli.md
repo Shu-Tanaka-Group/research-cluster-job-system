@@ -3,8 +3,8 @@
 ## 1. 基本コマンド
 
 ```bash
-cjob add [--gpu <N>] [--time-limit <duration>] -- <command...>
-cjob sweep -n <count> --parallel <n> [--gpu <N>] [--time-limit <duration>] -- <command...>
+cjob add [--flavor <name>] [--gpu <N>] [--time-limit <duration>] -- <command...>
+cjob sweep -n <count> --parallel <n> [--flavor <name>] [--gpu <N>] [--time-limit <duration>] -- <command...>
 cjob list
 cjob status <job-id>
 cjob cancel <job-id>              # 単体指定
@@ -32,8 +32,8 @@ cjob update
 ```bash
 cjob add -- python main.py --alpha 0.1 --beta 16
 
-# GPU ジョブの投入
-cjob add --gpu 1 -- python train.py --epochs 100
+# GPU ジョブの投入（flavor を指定）
+cjob add --flavor gpu-a100 --gpu 1 -- python train.py --epochs 100
 ```
 
 ### 2.2 シェルスクリプトの実行
@@ -122,6 +122,7 @@ cjob delete --all
 | `--cpu <cpu>` | 任意 | CPU リソース。デフォルト "1" |
 | `--memory <memory>` | 任意 | メモリリソース。デフォルト "1Gi" |
 | `--gpu <N>` | 任意 | GPU 数。デフォルト 0（GPU なし） |
+| `--flavor <name>` | 任意 | ResourceFlavor 名（例: "cpu", "gpu-a100"）。省略時はサーバ側デフォルト |
 | `-- <command>` | 必須 | 各タスクで実行するコマンド |
 
 ### `_INDEX_` プレースホルダー
@@ -261,6 +262,7 @@ job_id:       2
 status:       RUNNING
 command:      python main.py --alpha 0.2 --beta 16
 cwd:          /home/jovyan/project-a/exp1
+flavor:       cpu
 cpu:          2
 memory:       4Gi
 gpu:          0
