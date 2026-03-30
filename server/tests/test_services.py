@@ -132,36 +132,52 @@ class TestSubmitJob:
         assert exc_info.value.status_code == 400
 
     def test_gpu_accepted(self, db_session):
-        """GPU job should be accepted when GPU nodes exist."""
+        """GPU job should be accepted when GPU nodes exist in the gpu flavor."""
         from sqlalchemy import text
 
         db_session.execute(
             text(
-                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
-                "VALUES ('gpu-node', 32000, 131072, 4)"
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('gpu-node', 32000, 131072, 4, 'gpu')"
             )
         )
         db_session.flush()
-        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1))
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1, flavor="gpu"))
         resp = submit_job(db_session, NS, "alice", req)
         assert resp.status == "QUEUED"
 
     def test_gpu_no_gpu_nodes(self, db_session):
-        """GPU job should be rejected when no GPU nodes exist."""
+        """GPU job should be rejected when no GPU nodes exist in the gpu flavor."""
         from sqlalchemy import text
 
         db_session.execute(
             text(
-                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
-                "VALUES ('cpu-node', 32000, 131072, 0)"
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('cpu-node', 32000, 131072, 0, 'cpu')"
             )
         )
         db_session.flush()
-        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1))
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1, flavor="gpu"))
         with pytest.raises(HTTPException) as exc_info:
             submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
         assert "GPU ノード" in exc_info.value.detail
+
+    def test_gpu_on_cpu_flavor_rejected(self, db_session):
+        """GPU job on a flavor without gpu_resource_name should be rejected."""
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1, flavor="cpu"))
+        with pytest.raises(HTTPException) as exc_info:
+            submit_job(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "GPU をサポートしていません" in exc_info.value.detail
+
+    def test_unknown_flavor_rejected(self, db_session):
+        """Job with an unknown flavor should be rejected."""
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", flavor="nonexistent"))
+        with pytest.raises(HTTPException) as exc_info:
+            submit_job(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "nonexistent" in exc_info.value.detail
 
     def test_gpu_exceeds_max_node(self, db_session):
         """GPU job requesting more GPUs than max node should be rejected."""
@@ -169,16 +185,30 @@ class TestSubmitJob:
 
         db_session.execute(
             text(
-                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
-                "VALUES ('gpu-node', 32000, 131072, 2)"
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('gpu-node', 32000, 131072, 2, 'gpu')"
             )
         )
         db_session.flush()
-        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=4))
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=4, flavor="gpu"))
         with pytest.raises(HTTPException) as exc_info:
             submit_job(db_session, NS, "alice", req)
         assert exc_info.value.status_code == 400
         assert "GPU" in exc_info.value.detail
+
+    def test_flavor_stored_in_job(self, db_session):
+        """Flavor should be stored in the Job record."""
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", flavor="cpu"))
+        resp = submit_job(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.flavor == "cpu"
+
+    def test_default_flavor(self, db_session):
+        """When flavor is omitted, DEFAULT_FLAVOR should be used."""
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi"))
+        resp = submit_job(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.flavor == "cpu"
 
     def test_deleting_blocks_submit(self, db_session):
         _insert_job(db_session, 1, status="DELETING")
@@ -596,38 +626,38 @@ class TestSubmitSweep:
         assert exc_info.value.status_code == 409
 
     def test_sweep_gpu_accepted(self, db_session):
-        """Sweep with GPU should be accepted when GPU nodes exist."""
+        """Sweep with GPU should be accepted when GPU nodes exist in the gpu flavor."""
         from sqlalchemy import text
 
         db_session.execute(
             text(
-                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
-                "VALUES ('gpu-node', 32000, 131072, 4)"
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('gpu-node', 32000, 131072, 4, 'gpu')"
             )
         )
         db_session.flush()
         req = _make_sweep_request(
             completions=10, parallelism=2,
-            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1),
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1, flavor="gpu"),
         )
         resp = submit_sweep(db_session, NS, "alice", req)
         assert resp.status == "QUEUED"
 
-    def test_sweep_gpu_exceeds_cluster_total(self, db_session):
-        """Sweep where parallelism * gpu exceeds cluster total should be rejected."""
+    def test_sweep_gpu_exceeds_flavor_total(self, db_session):
+        """Sweep where parallelism * gpu exceeds flavor total should be rejected."""
         from sqlalchemy import text
 
         db_session.execute(
             text(
-                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
-                "VALUES ('gpu-node', 32000, 131072, 4)"
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('gpu-node', 32000, 131072, 4, 'gpu')"
             )
         )
         db_session.flush()
-        # parallelism=5, gpu=1 -> 5 > 4 cluster total GPU
+        # parallelism=5, gpu=1 -> 5 > 4 flavor total GPU
         req = _make_sweep_request(
             completions=10, parallelism=5,
-            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1),
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1, flavor="gpu"),
         )
         with pytest.raises(HTTPException) as exc_info:
             submit_sweep(db_session, NS, "alice", req)

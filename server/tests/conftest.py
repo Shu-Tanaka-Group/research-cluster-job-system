@@ -49,11 +49,17 @@ def db_session():
 @pytest.fixture()
 def settings():
     """Create test Settings."""
+    import json
     return Settings(
         POSTGRES_PASSWORD="test",
         MAX_QUEUED_JOBS_PER_NAMESPACE=10,
         DEFAULT_TIME_LIMIT_SECONDS=86400,
         MAX_TIME_LIMIT_SECONDS=604800,
+        RESOURCE_FLAVORS=json.dumps([
+            {"name": "cpu", "label_selector": "cluster-job=true"},
+            {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"},
+        ]),
+        DEFAULT_FLAVOR="cpu",
     )
 
 

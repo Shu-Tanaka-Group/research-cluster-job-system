@@ -7,6 +7,7 @@ class ResourceSpec(BaseModel):
     cpu: str = "1"
     memory: str = "1Gi"
     gpu: int = 0
+    flavor: str | None = None
 
 
 class JobSubmitRequest(BaseModel):
@@ -61,6 +62,7 @@ class JobDetailResponse(BaseModel):
     cpu: str
     memory: str
     gpu: int
+    flavor: str
     time_limit_seconds: int
     k8s_job_name: str | None
     log_dir: str | None
