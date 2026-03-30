@@ -126,7 +126,7 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"cpu\"}\n/\nkueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"cpu\"}",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu\", resource=\"cpu\"}\n/\nkueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu\", resource=\"cpu\"}",
           "legendFormat": "CPU 予約率",
           "refId": "A"
         }
@@ -171,7 +171,7 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"nvidia.com/gpu\"}\n/\nkueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"nvidia.com/gpu\"}",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"nvidia.com/gpu\"}\n/\nkueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"nvidia.com/gpu\"}",
           "legendFormat": "GPU 予約率",
           "refId": "A"
         }
@@ -428,12 +428,12 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"cpu\"}",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu\", resource=\"cpu\"}",
           "legendFormat": "予約中",
           "refId": "A"
         },
         {
-          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"cpu\"}",
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu\", resource=\"cpu\"}",
           "legendFormat": "クォータ上限",
           "refId": "B"
         }
@@ -483,12 +483,12 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu\", resource=\"memory\"} / 1024 / 1024 / 1024",
           "legendFormat": "予約中",
           "refId": "A"
         },
         {
-          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu\", resource=\"memory\"} / 1024 / 1024 / 1024",
           "legendFormat": "クォータ上限",
           "refId": "B"
         }
@@ -546,12 +546,12 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"nvidia.com/gpu\"}",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"nvidia.com/gpu\"}",
           "legendFormat": "予約中",
           "refId": "A"
         },
         {
-          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"nvidia.com/gpu\"}",
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"nvidia.com/gpu\"}",
           "legendFormat": "クォータ上限",
           "refId": "B"
         }
@@ -601,12 +601,12 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"cpu\"}",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"cpu\"}",
           "legendFormat": "予約中",
           "refId": "A"
         },
         {
-          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"cpu\"}",
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"cpu\"}",
           "legendFormat": "クォータ上限",
           "refId": "B"
         }
@@ -656,12 +656,12 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"memory\"} / 1024 / 1024 / 1024",
           "legendFormat": "予約中",
           "refId": "A"
         },
         {
-          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"memory\"} / 1024 / 1024 / 1024",
           "legendFormat": "クォータ上限",
           "refId": "B"
         }

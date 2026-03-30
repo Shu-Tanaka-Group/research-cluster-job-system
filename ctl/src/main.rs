@@ -191,7 +191,7 @@ enum ClusterCommands {
     ShowQuota,
     /// Update ClusterQueue nominalQuota for a specific ResourceFlavor
     SetQuota {
-        /// ResourceFlavor name (e.g. cpu-flavor, gpu-flavor)
+        /// ResourceFlavor name (e.g. cpu, gpu)
         #[arg(long)]
         flavor: String,
         /// CPU cores (e.g. 256)

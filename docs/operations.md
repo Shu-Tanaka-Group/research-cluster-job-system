@@ -108,20 +108,20 @@ cjobctl cluster show-quota
 `--flavor` で更新対象の ResourceFlavor を指定する（必須）。`--cpu`、`--memory`、`--gpu` で更新するリソースを指定する（少なくとも 1 つ必須）。
 
 ```bash
-# cpu-flavor の CPU とメモリを更新
-cjobctl cluster set-quota --flavor cpu-flavor --cpu 256 --memory 1000Gi
+# cpu の CPU とメモリを更新
+cjobctl cluster set-quota --flavor cpu --cpu 256 --memory 1000Gi
 
-# cpu-flavor の CPU のみ更新（メモリは現在値を維持）
-cjobctl cluster set-quota --flavor cpu-flavor --cpu 128
+# cpu の CPU のみ更新（メモリは現在値を維持）
+cjobctl cluster set-quota --flavor cpu --cpu 128
 
-# gpu-flavor の GPU を更新
-cjobctl cluster set-quota --flavor gpu-flavor --gpu 4
+# gpu の GPU を更新
+cjobctl cluster set-quota --flavor gpu --gpu 4
 
-# gpu-flavor の CPU・メモリ・GPU をまとめて更新
-cjobctl cluster set-quota --flavor gpu-flavor --cpu 64 --memory 500Gi --gpu 4
+# gpu の CPU・メモリ・GPU をまとめて更新
+cjobctl cluster set-quota --flavor gpu --cpu 64 --memory 500Gi --gpu 4
 
-# cpu-flavor の GPU quota を削除
-cjobctl cluster set-quota --flavor cpu-flavor --gpu 0
+# cpu の GPU quota を削除
+cjobctl cluster set-quota --flavor cpu --gpu 0
 ```
 
 指定値は `node_resources` テーブルの allocatable 合計と比較してバリデーションされる。
