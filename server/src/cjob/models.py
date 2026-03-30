@@ -90,6 +90,7 @@ class NodeResource(Base):
     cpu_millicores: Mapped[int] = mapped_column(Integer, nullable=False)
     memory_mib: Mapped[int] = mapped_column(Integer, nullable=False)
     gpu: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    flavor: Mapped[str] = mapped_column(String, nullable=False, server_default="cpu")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
