@@ -13,6 +13,7 @@ from .schemas import (
     DeleteResponse,
     FlavorInfo,
     FlavorListResponse,
+    FlavorNodeInfo,
     JobDetailResponse,
     JobListResponse,
     JobSubmitRequest,
@@ -539,27 +540,31 @@ def get_usage(session: Session, namespace: str) -> UsageResponse:
 def list_flavors(session: Session) -> FlavorListResponse:
     settings = get_settings()
 
-    # Fetch per-flavor max resources from node_resources
+    # Fetch all nodes grouped by flavor
     result = session.execute(
         text(
-            "SELECT flavor, MAX(cpu_millicores) AS max_cpu, "
-            "       MAX(memory_mib) AS max_memory, "
-            "       MAX(gpu) AS max_gpu "
+            "SELECT node_name, cpu_millicores, memory_mib, gpu, flavor "
             "FROM node_resources "
-            "GROUP BY flavor"
+            "ORDER BY flavor, node_name"
         )
     )
-    db_maxes = {row["flavor"]: row for row in result.mappings()}
+    nodes_by_flavor: dict[str, list[FlavorNodeInfo]] = {}
+    for row in result.mappings():
+        nodes_by_flavor.setdefault(row["flavor"], []).append(
+            FlavorNodeInfo(
+                node_name=row["node_name"],
+                cpu_millicores=row["cpu_millicores"],
+                memory_mib=row["memory_mib"],
+                gpu=row["gpu"],
+            )
+        )
 
     flavors = []
     for flavor_def in settings.flavors:
-        db_row = db_maxes.get(flavor_def.name)
         flavors.append(FlavorInfo(
             name=flavor_def.name,
             has_gpu=flavor_def.gpu_resource_name is not None,
-            max_cpu_millicores=db_row["max_cpu"] if db_row else None,
-            max_memory_mib=db_row["max_memory"] if db_row else None,
-            max_gpu=db_row["max_gpu"] if db_row else None,
+            nodes=nodes_by_flavor.get(flavor_def.name, []),
         ))
 
     return FlavorListResponse(

@@ -129,12 +129,17 @@ class ResetErrorResponse(BaseModel):
     blocking_job_ids: list[int] | None = None
 
 
+class FlavorNodeInfo(BaseModel):
+    node_name: str
+    cpu_millicores: int
+    memory_mib: int
+    gpu: int
+
+
 class FlavorInfo(BaseModel):
     name: str
     has_gpu: bool
-    max_cpu_millicores: int | None = None
-    max_memory_mib: int | None = None
-    max_gpu: int | None = None
+    nodes: list[FlavorNodeInfo]
 
 
 class FlavorListResponse(BaseModel):

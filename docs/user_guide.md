@@ -126,22 +126,20 @@ cjob add --flavor gpu --gpu 1 -- python train.py --epochs 100
 
 ```
 $ cjob flavor list
-NAME             GPU    DEFAULT
-cpu              -        *
-gpu              yes
+NAME             GPU    NODES    DEFAULT
+cpu              -      2          *
+gpu              yes    1
 ```
 
-各種類のリソース上限（1 ジョブで使える最大の CPU コア数やメモリ量）を確認するには `cjob flavor info` を使います。
+各種類にどのノードが含まれているか、各ノードの CPU コア数やメモリ量を確認するには `cjob flavor info` を使います。
 
 ```
 $ cjob flavor info gpu
 name:   gpu
 GPU:    対応
 
-1 ジョブあたりのリソース上限（ノード最大値）:
-  CPU:    128 コア (128000m)
-  メモリ: 503.6 GiB (515686 MiB)
-  GPU:    4
+NODE                     CPU (cores)   Memory (GiB)    GPU
+gworker02                        128          503.6      4
 ```
 
 ### 3.3 sweep での使い方

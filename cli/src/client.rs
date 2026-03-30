@@ -148,12 +148,18 @@ pub struct UsageResponse {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct FlavorNodeInfo {
+    pub node_name: String,
+    pub cpu_millicores: i64,
+    pub memory_mib: i64,
+    pub gpu: i64,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct FlavorInfo {
     pub name: String,
     pub has_gpu: bool,
-    pub max_cpu_millicores: Option<i64>,
-    pub max_memory_mib: Option<i64>,
-    pub max_gpu: Option<i64>,
+    pub nodes: Vec<FlavorNodeInfo>,
 }
 
 #[derive(Debug, Deserialize)]

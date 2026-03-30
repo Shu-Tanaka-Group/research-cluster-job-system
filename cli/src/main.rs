@@ -681,11 +681,11 @@ async fn cmd_update_list(
 async fn cmd_flavor_list(client: &client::CjobClient) -> Result<()> {
     let resp = client.get_flavors().await?;
 
-    println!("{:<16} {:<6} {}", "NAME", "GPU", "DEFAULT");
+    println!("{:<16} {:<6} {:<8} {}", "NAME", "GPU", "NODES", "DEFAULT");
     for f in &resp.flavors {
         let gpu = if f.has_gpu { "yes" } else { "-" };
         let default_marker = if f.name == resp.default_flavor { "  *" } else { "" };
-        println!("{:<16} {:<6} {}", f.name, gpu, default_marker);
+        println!("{:<16} {:<6} {:<8} {}", f.name, gpu, f.nodes.len(), default_marker);
     }
     Ok(())
 }
@@ -709,19 +709,33 @@ async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> 
     println!("name:   {}", flavor.name);
     println!("GPU:    {}", if flavor.has_gpu { "対応" } else { "非対応" });
 
-    match (flavor.max_cpu_millicores, flavor.max_memory_mib, flavor.max_gpu) {
-        (Some(cpu), Some(mem), Some(gpu)) => {
-            println!();
-            println!("1 ジョブあたりのリソース上限（ノード最大値）:");
-            println!("  CPU:    {} コア ({}m)", cpu / 1000, cpu);
-            println!("  メモリ: {:.1} GiB ({} MiB)", mem as f64 / 1024.0, mem);
-            if flavor.has_gpu {
-                println!("  GPU:    {}", gpu);
-            }
+    if flavor.nodes.is_empty() {
+        println!();
+        println!("（ノード情報がまだ取得されていません）");
+        return Ok(());
+    }
+
+    println!();
+    if flavor.has_gpu {
+        println!("{:<24} {:>12} {:>14} {:>6}", "NODE", "CPU (cores)", "Memory (GiB)", "GPU");
+        for n in &flavor.nodes {
+            println!(
+                "{:<24} {:>12} {:>14.1} {:>6}",
+                n.node_name,
+                n.cpu_millicores / 1000,
+                n.memory_mib as f64 / 1024.0,
+                n.gpu,
+            );
         }
-        _ => {
-            println!();
-            println!("（ノード情報がまだ取得されていません）");
+    } else {
+        println!("{:<24} {:>12} {:>14}", "NODE", "CPU (cores)", "Memory (GiB)");
+        for n in &flavor.nodes {
+            println!(
+                "{:<24} {:>12} {:>14.1}",
+                n.node_name,
+                n.cpu_millicores / 1000,
+                n.memory_mib as f64 / 1024.0,
+            );
         }
     }
 

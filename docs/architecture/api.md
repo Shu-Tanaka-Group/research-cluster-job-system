@@ -456,23 +456,24 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
     {
       "name": "cpu",
       "has_gpu": false,
-      "max_cpu_millicores": 128000,
-      "max_memory_mib": 515481,
-      "max_gpu": 0
+      "nodes": [
+        {"node_name": "worker07", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0},
+        {"node_name": "worker08", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0}
+      ]
     },
     {
       "name": "gpu",
       "has_gpu": true,
-      "max_cpu_millicores": 128000,
-      "max_memory_mib": 515686,
-      "max_gpu": 4
+      "nodes": [
+        {"node_name": "gworker02", "cpu_millicores": 128000, "memory_mib": 515686, "gpu": 4}
+      ]
     }
   ],
   "default_flavor": "cpu"
 }
 ```
 
-`max_cpu_millicores` / `max_memory_mib` / `max_gpu` は `node_resources` テーブルの flavor 別 MAX 値。Watcher 未起動でノード情報がない flavor は `null` となる。
+各 flavor の `nodes` には `node_resources` テーブルからその flavor に属するノードの一覧が含まれる。Watcher 未起動でノード情報がない flavor は `nodes` が空配列となる。
 
 `default_flavor` は ConfigMap `DEFAULT_FLAVOR` の値。
 

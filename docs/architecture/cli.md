@@ -556,24 +556,34 @@ $ cjob update --version 1.3.1-beta.1
 
 ```
 $ cjob flavor list
-NAME             GPU    DEFAULT
-cpu              -        *
-gpu              yes
+NAME             GPU    NODES    DEFAULT
+cpu              -      2          *
+gpu              yes    1
 ```
 
 ### `cjob flavor info <name>`
 
-指定した flavor のリソース上限（ノード最大値）を表示する。1 ジョブが要求できるリソースの上限を確認できる。
+指定した flavor に属するノードの一覧とリソース情報を表示する。
+
+```
+$ cjob flavor info cpu
+name:   cpu
+GPU:    非対応
+
+NODE                     CPU (cores)   Memory (GiB)
+worker07                         128          503.4
+worker08                         128          503.4
+```
+
+GPU 対応 flavor の場合は GPU 列も表示する。
 
 ```
 $ cjob flavor info gpu
 name:   gpu
 GPU:    対応
 
-1 ジョブあたりのリソース上限（ノード最大値）:
-  CPU:    128 コア (128000m)
-  メモリ: 503.6 GiB (515686 MiB)
-  GPU:    4
+NODE                     CPU (cores)   Memory (GiB)    GPU
+gworker02                        128          503.6      4
 ```
 
 存在しない flavor を指定した場合はエラーを表示する。
