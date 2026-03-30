@@ -32,6 +32,7 @@ class Job(Base):
     cpu: Mapped[str] = mapped_column(String, nullable=False)
     memory: Mapped[str] = mapped_column(String, nullable=False)
     gpu: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    flavor: Mapped[str] = mapped_column(String, nullable=False, server_default="cpu")
     time_limit_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")

@@ -1,6 +1,14 @@
+import json
 from functools import lru_cache
 
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
+
+
+class FlavorDefinition(BaseModel):
+    name: str
+    label_selector: str
+    gpu_resource_name: str | None = None
 
 
 class Settings(BaseSettings):
@@ -26,9 +34,9 @@ class Settings(BaseSettings):
     # Dispatcher - Fair Sharing
     FAIR_SHARE_WINDOW_DAYS: int = 7
 
-    # Watcher - Node Resource Sync
-    NODE_LABEL_SELECTOR: str = "cluster-job=true"
-    GPU_NODE_LABEL_SELECTOR: str = ""
+    # ResourceFlavor
+    RESOURCE_FLAVORS: str = '[{"name": "cpu", "label_selector": "cluster-job=true"}]'
+    DEFAULT_FLAVOR: str = "cpu"
     NODE_RESOURCE_SYNC_INTERVAL_SEC: int = 300     # 5 minutes
 
     # Submit API
@@ -58,6 +66,16 @@ class Settings(BaseSettings):
 
     # Logging
     LOG_LEVEL: str = "INFO"
+
+    @property
+    def flavors(self) -> list[FlavorDefinition]:
+        return [FlavorDefinition(**item) for item in json.loads(self.RESOURCE_FLAVORS)]
+
+    def get_flavor_definition(self, name: str) -> FlavorDefinition | None:
+        for f in self.flavors:
+            if f.name == name:
+                return f
+        return None
 
     @property
     def database_url(self) -> str:
