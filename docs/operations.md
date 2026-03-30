@@ -97,7 +97,7 @@ cjobctl cluster resources
 
 ### 1.8 ClusterQueue の nominalQuota 確認
 
-Kueue ClusterQueue に設定されている現在の nominalQuota（CPU / メモリ / GPU）を表示する。
+Kueue ClusterQueue に設定されている現在の nominalQuota を ResourceFlavor ごとに表示する。`lendingLimit` が設定されている場合はその値も併記される。
 
 ```bash
 cjobctl cluster show-quota
@@ -105,21 +105,24 @@ cjobctl cluster show-quota
 
 ### 1.9 ClusterQueue の nominalQuota 更新
 
+`--flavor` で更新対象の ResourceFlavor を指定する（必須）。`--cpu`、`--memory`、`--gpu` で更新するリソースを指定する（少なくとも 1 つ必須）。
+
 ```bash
-# CPU とメモリを更新
-cjobctl cluster set-quota --cpu 256 --memory 1000Gi
+# cpu-flavor の CPU とメモリを更新
+cjobctl cluster set-quota --flavor cpu-flavor --cpu 256 --memory 1000Gi
 
-# CPU のみ更新（メモリは現在値を維持）
-cjobctl cluster set-quota --cpu 128
+# cpu-flavor の CPU のみ更新（メモリは現在値を維持）
+cjobctl cluster set-quota --flavor cpu-flavor --cpu 128
 
-# GPU も含めて更新
-cjobctl cluster set-quota --cpu 256 --memory 1000Gi --gpu 4
+# gpu-flavor の GPU を更新
+cjobctl cluster set-quota --flavor gpu-flavor --gpu 4
 
-# GPU quota を削除
-cjobctl cluster set-quota --gpu 0
+# gpu-flavor の CPU・メモリ・GPU をまとめて更新
+cjobctl cluster set-quota --flavor gpu-flavor --cpu 64 --memory 500Gi --gpu 4
+
+# cpu-flavor の GPU quota を削除
+cjobctl cluster set-quota --flavor cpu-flavor --gpu 0
 ```
-
-`--cpu`、`--memory`、`--gpu` はすべてオプショナルで、指定されたリソースのみ更新される。指定されなかったリソースは現在値が維持される。少なくとも 1 つは指定が必要。
 
 指定値は `node_resources` テーブルの allocatable 合計と比較してバリデーションされる。
 
