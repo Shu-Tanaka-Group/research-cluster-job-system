@@ -259,6 +259,26 @@ pub async fn set_quota(
         validate_memory_format(mem)?;
     }
 
+    // Verify flavor exists in ClusterQueue before proceeding
+    let api = cluster_queue_api(k8s_client);
+    let cq = api
+        .get(CLUSTER_QUEUE_NAME)
+        .await
+        .context("Failed to get ClusterQueue")?;
+
+    let flavor_quotas = extract_flavor_quotas(&cq);
+    let current_flavor = flavor_quotas
+        .iter()
+        .find(|f| f.name == flavor)
+        .with_context(|| {
+            let available: Vec<&str> = flavor_quotas.iter().map(|f| f.name.as_str()).collect();
+            format!(
+                "Flavor '{}' not found in ClusterQueue. Available flavors: {}",
+                flavor,
+                available.join(", "),
+            )
+        })?;
+
     // Map Kueue flavor name to DB flavor value (e.g. "cpu-flavor" → "cpu")
     let db_flavor = flavor.strip_suffix("-flavor").unwrap_or(flavor);
 
@@ -325,27 +345,6 @@ pub async fn set_quota(
     if exceeds && !force {
         bail!("Specified values exceed cluster allocatable totals. Use --force to override.");
     }
-
-    // Fetch current ClusterQueue
-    let api = cluster_queue_api(k8s_client);
-    let cq = api
-        .get(CLUSTER_QUEUE_NAME)
-        .await
-        .context("Failed to get ClusterQueue")?;
-
-    // Find the target flavor and show current values
-    let flavor_quotas = extract_flavor_quotas(&cq);
-    let current_flavor = flavor_quotas
-        .iter()
-        .find(|f| f.name == flavor)
-        .with_context(|| {
-            let available: Vec<&str> = flavor_quotas.iter().map(|f| f.name.as_str()).collect();
-            format!(
-                "Flavor '{}' not found in ClusterQueue. Available flavors: {}",
-                flavor,
-                available.join(", "),
-            )
-        })?;
 
     // Show current → new (only for specified resources)
     println!(
