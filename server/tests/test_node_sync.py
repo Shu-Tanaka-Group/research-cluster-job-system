@@ -34,7 +34,7 @@ def _get_node_names(session):
 
 def _get_node(session, name):
     row = session.execute(
-        text("SELECT cpu_millicores, memory_mib, gpu FROM node_resources WHERE node_name = :name"),
+        text("SELECT cpu_millicores, memory_mib, gpu, flavor FROM node_resources WHERE node_name = :name"),
         {"name": name},
     ).first()
     return row
@@ -57,10 +57,12 @@ class TestSyncNodeResources:
         assert n1[0] == 32000  # cpu_millicores
         assert n1[1] == 131072  # memory_mib
         assert n1[2] == 0  # gpu
+        assert n1[3] == "cpu"  # flavor
 
         n2 = _get_node(db_session, "node-2")
         assert n2[0] == 64000
         assert n2[1] == 262144
+        assert n2[3] == "cpu"  # flavor
 
     def test_updates_existing_nodes(self, mock_k8s, db_session):
         mock_api = MagicMock()
@@ -172,8 +174,11 @@ class TestSyncNodeResources:
         sync_node_resources(db_session, settings)
 
         assert _get_node_names(db_session) == ["cpu-node", "gpu-node"]
-        n = _get_node(db_session, "gpu-node")
-        assert n[2] == 4  # gpu
+        cpu_n = _get_node(db_session, "cpu-node")
+        assert cpu_n[3] == "cpu"  # flavor
+        gpu_n = _get_node(db_session, "gpu-node")
+        assert gpu_n[2] == 4  # gpu
+        assert gpu_n[3] == "gpu"  # flavor
 
     def test_gpu_selector_deduplicates(self, mock_k8s, db_session):
         """Nodes matching both selectors appear only once."""

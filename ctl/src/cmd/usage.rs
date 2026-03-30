@@ -234,4 +234,45 @@ impl ClusterTotals {
             }
         }
     }
+
+    /// Fetch allocatable totals for nodes matching a specific DB flavor value.
+    /// Falls back to cluster-wide totals if no nodes match the given flavor.
+    pub async fn from_db_by_flavor(client: &Client, flavor: &str) -> Self {
+        match client
+            .query_one(
+                "SELECT COALESCE(SUM(cpu_millicores), 0)::BIGINT, \
+                        COALESCE(SUM(memory_mib), 0)::BIGINT, \
+                        COALESCE(SUM(gpu), 0)::BIGINT \
+                 FROM node_resources WHERE flavor = $1",
+                &[&flavor],
+            )
+            .await
+        {
+            Ok(row) => {
+                let cpu: i64 = row.get(0);
+                let mem: i64 = row.get(1);
+                let gpus: i64 = row.get(2);
+                if cpu == 0 && mem == 0 {
+                    eprintln!(
+                        "Warning: No nodes with flavor '{}' found. Falling back to cluster totals.",
+                        flavor,
+                    );
+                    Self::from_db(client).await
+                } else {
+                    Self {
+                        cpu_millicores: cpu,
+                        memory_mib: mem,
+                        gpus,
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: Could not query node_resources by flavor ({}). Using cluster totals.",
+                    e,
+                );
+                Self::from_db(client).await
+            }
+        }
+    }
 }

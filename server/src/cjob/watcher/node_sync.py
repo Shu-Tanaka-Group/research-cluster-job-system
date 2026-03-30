@@ -21,8 +21,9 @@ def sync_node_resources(session: Session, settings: Settings):
         logger.error("Failed to list nodes (selector=%s): %s", settings.NODE_LABEL_SELECTOR, e)
         return
 
-    all_items = list(nodes.items)
-    seen_names = {n.metadata.name for n in all_items}
+    # Tag each node with its flavor based on which selector matched it
+    tagged_items: list[tuple] = [(node, "cpu") for node in nodes.items]
+    seen_names = {n.metadata.name for n in nodes.items}
 
     # Fetch GPU nodes if GPU_NODE_LABEL_SELECTOR is set
     if settings.GPU_NODE_LABEL_SELECTOR:
@@ -30,7 +31,7 @@ def sync_node_resources(session: Session, settings: Settings):
             gpu_nodes = core_v1.list_node(label_selector=settings.GPU_NODE_LABEL_SELECTOR)
             for node in gpu_nodes.items:
                 if node.metadata.name not in seen_names:
-                    all_items.append(node)
+                    tagged_items.append((node, "gpu"))
                     seen_names.add(node.metadata.name)
         except ApiException as e:
             logger.error(
@@ -40,7 +41,7 @@ def sync_node_resources(session: Session, settings: Settings):
 
     current_nodes: set[str] = set()
 
-    for node in all_items:
+    for node, flavor in tagged_items:
         name = node.metadata.name
         alloc = node.status.allocatable or {}
         cpu = parse_cpu_millicores(alloc.get("cpu", "0"))
@@ -51,13 +52,13 @@ def sync_node_resources(session: Session, settings: Settings):
         session.execute(
             text(
                 "INSERT INTO node_resources "
-                "(node_name, cpu_millicores, memory_mib, gpu, updated_at) "
-                "VALUES (:name, :cpu, :mem, :gpu, NOW()) "
+                "(node_name, cpu_millicores, memory_mib, gpu, flavor, updated_at) "
+                "VALUES (:name, :cpu, :mem, :gpu, :flavor, NOW()) "
                 "ON CONFLICT (node_name) DO UPDATE SET "
                 "cpu_millicores = :cpu, memory_mib = :mem, gpu = :gpu, "
-                "updated_at = NOW()"
+                "flavor = :flavor, updated_at = NOW()"
             ),
-            {"name": name, "cpu": cpu, "mem": mem, "gpu": gpu},
+            {"name": name, "cpu": cpu, "mem": mem, "gpu": gpu, "flavor": flavor},
         )
 
     # Delete nodes that no longer exist in K8s

@@ -133,10 +133,14 @@ dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 
 ### 5.4 クラスタリソース確認
 
-| コマンド | 概要 | 対象テーブル |
+| コマンド | 概要 | 対象 |
 |---|---|---|
-| `cjobctl cluster resources` | ノードごとの allocatable、クラスタ合計、ノード最大値（リジェクト閾値）を表示 | `node_resources` |
+| `cjobctl cluster resources` | ノードごとの allocatable、クラスタ合計、ノード最大値（リジェクト閾値）を表示 | DB: `node_resources` |
 | `cjobctl cluster flavor-usage` | ResourceFlavor ごとのリソース使用率を表示 | K8s: ClusterQueue |
+| `cjobctl cluster show-quota` | ClusterQueue の nominalQuota を ResourceFlavor ごとに表示 | K8s: ClusterQueue |
+| `cjobctl cluster set-quota --flavor <name> [--cpu <n>] [--memory <s>] [--gpu <n>] [--force]` | 指定 ResourceFlavor の nominalQuota を更新 | DB + K8s: ClusterQueue |
+
+#### `cjobctl cluster resources`
 
 出力例:
 
@@ -174,6 +178,40 @@ gpu-flavor      cpu                     16         64   25.0%
 gpu-flavor      memory                64Gi      500Gi   12.8%
 gpu-flavor      nvidia.com/gpu           2          4   50.0%
 ```
+
+#### `cjobctl cluster show-quota`
+
+ClusterQueue の各 ResourceFlavor について nominalQuota を表示する。`lendingLimit` が設定されているリソースはその値も併記する。
+
+出力例:
+
+```
+=== ClusterQueue nominalQuota (cjob-cluster-queue) ===
+
+[cpu-flavor]
+  CPU:    256
+  Memory: 1000Gi
+  GPU:    0
+
+[gpu-flavor]
+  CPU:    64      (lendingLimit: 0)
+  Memory: 500Gi   (lendingLimit: 0)
+  GPU:    4        (lendingLimit: 0)
+```
+
+#### `cjobctl cluster set-quota`
+
+指定した ResourceFlavor の nominalQuota を更新する。`--flavor` は必須で、更新対象の ResourceFlavor 名を指定する。`--cpu`、`--memory`、`--gpu` はすべてオプショナルで、指定されたリソースのみ更新される。少なくとも 1 つは指定が必要。
+
+```bash
+# cpu-flavor の CPU とメモリを更新
+cjobctl cluster set-quota --flavor cpu-flavor --cpu 256 --memory 1000Gi
+
+# gpu-flavor の GPU を更新
+cjobctl cluster set-quota --flavor gpu-flavor --gpu 4
+```
+
+指定値は `node_resources` テーブルの allocatable 合計と比較してバリデーションされる。allocatable を超過する場合はエラーとなるが、`--force` で上書き可能。
 
 ### 5.5 K8s 状態確認
 

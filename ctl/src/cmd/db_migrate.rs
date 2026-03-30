@@ -22,6 +22,7 @@ pub async fn migrate(client: &Client) -> Result<()> {
             gpu                 INTEGER NOT NULL DEFAULT 0, \
             updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW() \
         ); \
+        ALTER TABLE node_resources ADD COLUMN IF NOT EXISTS flavor TEXT NOT NULL DEFAULT 'cpu'; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS time_limit_seconds INTEGER NOT NULL DEFAULT 86400; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS completions INTEGER; \

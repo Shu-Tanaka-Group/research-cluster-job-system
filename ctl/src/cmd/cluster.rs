@@ -96,41 +96,64 @@ fn cluster_queue_api(k8s_client: &kube::Client) -> Api<DynamicObject> {
     Api::all_with(k8s_client.clone(), &ar)
 }
 
-struct QuotaValues {
-    cpu: Option<String>,
-    memory: Option<String>,
-    gpu: Option<String>,
+struct FlavorResourceQuota {
+    name: String,
+    nominal_quota: String,
+    lending_limit: Option<String>,
 }
 
-fn extract_quota(cq: &DynamicObject) -> QuotaValues {
-    let mut vals = QuotaValues {
-        cpu: None,
-        memory: None,
-        gpu: None,
-    };
+struct FlavorQuota {
+    name: String,
+    resources: Vec<FlavorResourceQuota>,
+}
+
+fn extract_flavor_quotas(cq: &DynamicObject) -> Vec<FlavorQuota> {
+    let mut flavors = Vec::new();
 
     if let Some(groups) = cq.data["spec"]["resourceGroups"].as_array() {
         for group in groups {
-            if let Some(flavors) = group["flavors"].as_array() {
-                for flavor in flavors {
-                    if let Some(resources) = flavor["resources"].as_array() {
-                        for res in resources {
-                            let name = res["name"].as_str().unwrap_or("");
-                            let quota = res["nominalQuota"].as_str().unwrap_or("").to_string();
-                            match name {
-                                "cpu" => vals.cpu = Some(quota),
-                                "memory" => vals.memory = Some(quota),
-                                "nvidia.com/gpu" => vals.gpu = Some(quota),
-                                _ => {}
-                            }
+            if let Some(flavor_list) = group["flavors"].as_array() {
+                for flavor in flavor_list {
+                    let flavor_name = flavor["name"].as_str().unwrap_or("unknown").to_string();
+                    let mut resources = Vec::new();
+
+                    if let Some(res_list) = flavor["resources"].as_array() {
+                        for res in res_list {
+                            let name = res["name"].as_str().unwrap_or("").to_string();
+                            let nominal = res["nominalQuota"]
+                                .as_str()
+                                .unwrap_or("(not set)")
+                                .to_string();
+                            let lending = res["lendingLimit"]
+                                .as_str()
+                                .map(|s| s.to_string());
+                            resources.push(FlavorResourceQuota {
+                                name,
+                                nominal_quota: nominal,
+                                lending_limit: lending,
+                            });
                         }
                     }
+
+                    flavors.push(FlavorQuota {
+                        name: flavor_name,
+                        resources,
+                    });
                 }
             }
         }
     }
 
-    vals
+    flavors
+}
+
+fn resource_display_name(name: &str) -> &str {
+    match name {
+        "cpu" => "CPU",
+        "memory" => "Memory",
+        "nvidia.com/gpu" => "GPU",
+        _ => name,
+    }
 }
 
 pub async fn show_quota(k8s_client: &kube::Client) -> Result<()> {
@@ -140,21 +163,30 @@ pub async fn show_quota(k8s_client: &kube::Client) -> Result<()> {
         .await
         .context("Failed to get ClusterQueue")?;
 
-    let vals = extract_quota(&cq);
+    let flavors = extract_flavor_quotas(&cq);
 
     println!("=== ClusterQueue nominalQuota ({}) ===", CLUSTER_QUEUE_NAME);
-    println!(
-        "CPU:    {}",
-        vals.cpu.as_deref().unwrap_or("(not set)")
-    );
-    println!(
-        "Memory: {}",
-        vals.memory.as_deref().unwrap_or("(not set)")
-    );
-    println!(
-        "GPU:    {}",
-        vals.gpu.as_deref().unwrap_or("(not set)")
-    );
+
+    for flavor in &flavors {
+        println!();
+        println!("[{}]", flavor.name);
+        for res in &flavor.resources {
+            let label = resource_display_name(&res.name);
+            match &res.lending_limit {
+                Some(limit) => println!(
+                    "  {:<7} {:<8} (lendingLimit: {})",
+                    format!("{}:", label),
+                    res.nominal_quota,
+                    limit,
+                ),
+                None => println!(
+                    "  {:<7} {}",
+                    format!("{}:", label),
+                    res.nominal_quota,
+                ),
+            }
+        }
+    }
 
     Ok(())
 }
@@ -212,6 +244,7 @@ fn confirm(prompt: &str) -> bool {
 pub async fn set_quota(
     db_client: &Client,
     k8s_client: &kube::Client,
+    flavor: &str,
     cpu: Option<u32>,
     memory: Option<&str>,
     gpu: Option<u32>,
@@ -226,8 +259,31 @@ pub async fn set_quota(
         validate_memory_format(mem)?;
     }
 
-    // Fetch allocatable totals from DB for validation
-    let totals = ClusterTotals::from_db(db_client).await;
+    // Verify flavor exists in ClusterQueue before proceeding
+    let api = cluster_queue_api(k8s_client);
+    let cq = api
+        .get(CLUSTER_QUEUE_NAME)
+        .await
+        .context("Failed to get ClusterQueue")?;
+
+    let flavor_quotas = extract_flavor_quotas(&cq);
+    let current_flavor = flavor_quotas
+        .iter()
+        .find(|f| f.name == flavor)
+        .with_context(|| {
+            let available: Vec<&str> = flavor_quotas.iter().map(|f| f.name.as_str()).collect();
+            format!(
+                "Flavor '{}' not found in ClusterQueue. Available flavors: {}",
+                flavor,
+                available.join(", "),
+            )
+        })?;
+
+    // Map Kueue flavor name to DB flavor value (e.g. "cpu-flavor" → "cpu")
+    let db_flavor = flavor.strip_suffix("-flavor").unwrap_or(flavor);
+
+    // Fetch allocatable totals for the corresponding node flavor
+    let totals = ClusterTotals::from_db_by_flavor(db_client, db_flavor).await;
     let alloc_cpu_cores = totals.cpu_millicores / 1000;
     let alloc_mem_mib = totals.memory_mib;
     let alloc_gpu = totals.gpus;
@@ -239,13 +295,13 @@ pub async fn set_quota(
         if (c as i64) > alloc_cpu_cores {
             exceeds = true;
             eprintln!(
-                "Error: CPU {} exceeds cluster allocatable total ({} cores)",
-                c, alloc_cpu_cores,
+                "Error: CPU {} exceeds '{}' node allocatable total ({} cores)",
+                c, db_flavor, alloc_cpu_cores,
             );
         } else if (c as i64) < alloc_cpu_cores / 10 {
             eprintln!(
-                "Warning: CPU {} is very small compared to cluster allocatable total ({} cores)",
-                c, alloc_cpu_cores,
+                "Warning: CPU {} is very small compared to '{}' node allocatable total ({} cores)",
+                c, db_flavor, alloc_cpu_cores,
             );
         }
     }
@@ -256,14 +312,14 @@ pub async fn set_quota(
             if (mem_mib as i64) > alloc_mem_mib {
                 exceeds = true;
                 eprintln!(
-                    "Error: Memory {} exceeds cluster allocatable total ({:.1} GiB)",
-                    mem,
+                    "Error: Memory {} exceeds '{}' node allocatable total ({:.1} GiB)",
+                    mem, db_flavor,
                     alloc_mem_mib as f64 / 1024.0,
                 );
             } else if (mem_mib as i64) < alloc_mem_mib / 10 {
                 eprintln!(
-                    "Warning: Memory {} is very small compared to cluster allocatable total ({:.1} GiB)",
-                    mem,
+                    "Warning: Memory {} is very small compared to '{}' node allocatable total ({:.1} GiB)",
+                    mem, db_flavor,
                     alloc_mem_mib as f64 / 1024.0,
                 );
             }
@@ -275,13 +331,13 @@ pub async fn set_quota(
         if (g as i64) > alloc_gpu {
             exceeds = true;
             eprintln!(
-                "Error: GPU {} exceeds cluster allocatable total ({})",
-                g, alloc_gpu,
+                "Error: GPU {} exceeds '{}' node allocatable total ({})",
+                g, db_flavor, alloc_gpu,
             );
         } else if alloc_gpu > 0 && (g as i64) < alloc_gpu / 10 {
             eprintln!(
-                "Warning: GPU {} is very small compared to cluster allocatable total ({})",
-                g, alloc_gpu,
+                "Warning: GPU {} is very small compared to '{}' node allocatable total ({})",
+                g, db_flavor, alloc_gpu,
             );
         }
     }
@@ -290,47 +346,46 @@ pub async fn set_quota(
         bail!("Specified values exceed cluster allocatable totals. Use --force to override.");
     }
 
-    // Fetch current ClusterQueue
-    let api = cluster_queue_api(k8s_client);
-    let cq = api
-        .get(CLUSTER_QUEUE_NAME)
-        .await
-        .context("Failed to get ClusterQueue")?;
-
-    let current = extract_quota(&cq);
-
     // Show current → new (only for specified resources)
-    println!("=== ClusterQueue nominalQuota change ===");
+    println!(
+        "=== ClusterQueue nominalQuota change [{}] ===",
+        flavor,
+    );
+
+    let current_cpu = current_flavor
+        .resources
+        .iter()
+        .find(|r| r.name == "cpu")
+        .map(|r| r.nominal_quota.as_str())
+        .unwrap_or("(not set)");
+    let current_memory = current_flavor
+        .resources
+        .iter()
+        .find(|r| r.name == "memory")
+        .map(|r| r.nominal_quota.as_str())
+        .unwrap_or("(not set)");
+    let current_gpu = current_flavor
+        .resources
+        .iter()
+        .find(|r| r.name == "nvidia.com/gpu")
+        .map(|r| r.nominal_quota.as_str());
+
     match cpu {
-        Some(c) => println!(
-            "CPU:    {} → {}",
-            current.cpu.as_deref().unwrap_or("(not set)"),
-            c,
-        ),
-        None => println!(
-            "CPU:    {} (unchanged)",
-            current.cpu.as_deref().unwrap_or("(not set)"),
-        ),
+        Some(c) => println!("CPU:    {} → {}", current_cpu, c),
+        None => println!("CPU:    {} (unchanged)", current_cpu),
     }
     match memory {
-        Some(m) => println!(
-            "Memory: {} → {}",
-            current.memory.as_deref().unwrap_or("(not set)"),
-            m,
-        ),
-        None => println!(
-            "Memory: {} (unchanged)",
-            current.memory.as_deref().unwrap_or("(not set)"),
-        ),
+        Some(m) => println!("Memory: {} → {}", current_memory, m),
+        None => println!("Memory: {} (unchanged)", current_memory),
     }
     match gpu {
         Some(g) => println!(
             "GPU:    {} → {}",
-            current.gpu.as_deref().unwrap_or("(not set)"),
+            current_gpu.unwrap_or("(not set)"),
             g,
         ),
         None => {
-            if let Some(ref cur_gpu) = current.gpu {
+            if let Some(cur_gpu) = current_gpu {
                 println!("GPU:    {} (unchanged)", cur_gpu);
             }
         }
@@ -353,13 +408,18 @@ pub async fn set_quota(
         .as_array_mut()
         .context("ClusterQueue has no resourceGroups")?;
 
-    // We expect a single resourceGroup with a single flavor
+    // Find the target flavor by name within resourceGroups
     let flavor_resources = groups
-        .get_mut(0)
-        .and_then(|g| g["flavors"].as_array_mut())
-        .and_then(|f| f.get_mut(0))
+        .iter_mut()
+        .flat_map(|g| {
+            g["flavors"]
+                .as_array_mut()
+                .into_iter()
+                .flat_map(|fs| fs.iter_mut())
+        })
+        .find(|f| f["name"].as_str() == Some(flavor))
         .and_then(|f| f["resources"].as_array_mut())
-        .context("Unexpected ClusterQueue structure")?;
+        .context("Failed to locate flavor resources in ClusterQueue")?;
 
     // Update only specified resources
     for res in flavor_resources.iter_mut() {
@@ -376,9 +436,7 @@ pub async fn set_quota(
             }
             Some("nvidia.com/gpu") => {
                 if let Some(g) = gpu {
-                    if g == 0 {
-                        // Mark for removal (handled below)
-                    } else {
+                    if g > 0 {
                         res["nominalQuota"] = Value::String(g.to_string());
                     }
                 }
@@ -429,7 +487,10 @@ pub async fn set_quota(
         .await
         .context("Failed to update ClusterQueue")?;
 
-    println!("ClusterQueue '{}' updated successfully.", CLUSTER_QUEUE_NAME);
+    println!(
+        "ClusterQueue '{}' flavor '{}' updated successfully.",
+        CLUSTER_QUEUE_NAME, flavor,
+    );
 
     Ok(())
 }

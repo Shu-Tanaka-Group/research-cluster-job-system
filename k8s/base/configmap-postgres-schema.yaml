@@ -66,6 +66,7 @@ data:
         cpu_millicores      INTEGER NOT NULL,
         memory_mib          INTEGER NOT NULL,
         gpu                 INTEGER NOT NULL DEFAULT 0,
+        flavor              TEXT NOT NULL DEFAULT 'cpu',
         updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
