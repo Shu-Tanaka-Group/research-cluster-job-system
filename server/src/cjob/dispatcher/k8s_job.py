@@ -51,13 +51,15 @@ def _parse_taint(taint_str: str) -> k8s_client.V1Toleration | None:
     )
 
 
-def _build_resource_requirements(job) -> k8s_client.V1ResourceRequirements:
+def _build_resource_requirements(job, settings: Settings) -> k8s_client.V1ResourceRequirements:
     requests = {"cpu": job.cpu, "memory": job.memory}
     limits = {"cpu": job.cpu, "memory": job.memory}
     if job.gpu > 0:
+        flavor_def = settings.get_flavor_definition(job.flavor)
+        gpu_resource = flavor_def.gpu_resource_name if flavor_def else "nvidia.com/gpu"
         gpu_str = str(job.gpu)
-        requests["nvidia.com/gpu"] = gpu_str
-        limits["nvidia.com/gpu"] = gpu_str
+        requests[gpu_resource] = gpu_str
+        limits[gpu_resource] = gpu_str
     return k8s_client.V1ResourceRequirements(requests=requests, limits=limits)
 
 
@@ -125,7 +127,7 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
                 mount_path=settings.WORKSPACE_MOUNT_PATH,
             )
         ],
-        resources=_build_resource_requirements(job),
+        resources=_build_resource_requirements(job, settings),
     )
 
     toleration = _parse_taint(settings.JOB_NODE_TAINT)

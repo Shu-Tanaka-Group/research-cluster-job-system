@@ -89,8 +89,12 @@ class TestBuildK8sJob:
         assert container.resources.limits == {"cpu": "4", "memory": "8Gi"}
 
     def test_gpu_resource_in_manifest(self):
-        job = _make_job(gpu=2)
-        settings = _make_settings()
+        import json
+        job = _make_job(gpu=2, flavor="gpu")
+        settings = _make_settings(RESOURCE_FLAVORS=json.dumps([
+            {"name": "cpu", "label_selector": "cluster-job=true"},
+            {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"},
+        ]))
         manifest = build_k8s_job(job, settings)
 
         container = manifest.spec.template.spec.containers[0]
@@ -99,6 +103,20 @@ class TestBuildK8sJob:
         # CPU and memory should still be present
         assert container.resources.requests["cpu"] == "2"
         assert container.resources.requests["memory"] == "4Gi"
+
+    def test_amd_gpu_resource_name(self):
+        """AMD GPU flavor should use amd.com/gpu resource name."""
+        import json
+        job = _make_job(gpu=1, flavor="gpu-amd")
+        settings = _make_settings(RESOURCE_FLAVORS=json.dumps([
+            {"name": "gpu-amd", "label_selector": "cluster-gpu-amd=true", "gpu_resource_name": "amd.com/gpu"},
+        ]))
+        manifest = build_k8s_job(job, settings)
+
+        container = manifest.spec.template.spec.containers[0]
+        assert container.resources.requests["amd.com/gpu"] == "1"
+        assert container.resources.limits["amd.com/gpu"] == "1"
+        assert "nvidia.com/gpu" not in container.resources.requests
 
     def test_no_gpu_resource_when_zero(self):
         job = _make_job(gpu=0)
