@@ -33,6 +33,7 @@
 | [architecture/watcher.md](architecture/watcher.md) | Watcher / Reconciler 設計 |
 | [architecture/cjobctl.md](architecture/cjobctl.md) | 管理 CLI（cjobctl）設計 |
 | [architecture/implementation.md](architecture/implementation.md) | 技術スタック・実装方針・手順・スコープ・将来拡張 |
+| [architecture/monitoring.md](architecture/monitoring.md) | モニタリング設計・Grafana ダッシュボード |
 
 関連ドキュメント:
 
