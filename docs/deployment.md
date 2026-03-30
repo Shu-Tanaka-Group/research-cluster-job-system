@@ -1175,12 +1175,24 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana_read
 
 ### 17.3 Grafana データソースの追加
 
-Grafana に以下の 2 つのデータソースを登録する（Prometheus が未登録の場合は追加する）。
+Grafana に PostgreSQL データソースを追加する（Prometheus が未登録の場合はそちらも追加する）。
 
-| データソース | Type | Host | Database | User |
-|---|---|---|---|---|
-| Prometheus | Prometheus | （環境に応じて設定） | - | - |
-| CJob DB | PostgreSQL | `postgres.cjob-system.svc.cluster.local:5432` | `cjob` | `grafana_reader` |
+1. Grafana UI で `Connections` > `Data sources` を開く
+2. `Add data source` をクリックし、`PostgreSQL` を選択する
+3. 以下の値を入力する：
+
+| 項目 | 値 |
+|---|---|
+| Name | `CJob DB` |
+| Host URL | `postgres.cjob-system.svc.cluster.local:5432` |
+| Database name | `cjob` |
+| Username | `grafana_reader` |
+| Password | §17.2 で設定したパスワード |
+| TLS/SSL Mode | `disable`（クラスタ内通信のため） |
+
+4. `Save & test` をクリックし、`Database Connection OK` と表示されることを確認する
+
+**注意:** Grafana が `cjob-system` namespace 外で動作している場合でも、クラスタ内 DNS（`<service>.<namespace>.svc.cluster.local`）で到達可能であれば上記の Host URL を使用できる。クラスタ外の Grafana から接続する場合は、NodePort や Ingress 等で PostgreSQL に到達可能な経路を設定すること。
 
 ### 17.4 ダッシュボードのインポート
 
