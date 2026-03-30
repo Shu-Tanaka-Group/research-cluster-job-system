@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sync VERSION file to pyproject.toml and Cargo.toml.
+# Sync VERSION file to pyproject.toml, Cargo.toml, and kustomization.yaml.
 # Idempotent: does nothing if versions already match.
 
 set -euo pipefail
@@ -67,7 +67,19 @@ if [ -f "$CARGO_CTL" ]; then
     fi
 fi
 
+# Update k8s/overlay-example/kustomization.yaml (newTag fields)
+KUSTOMIZATION="$REPO_ROOT/k8s/overlay-example/kustomization.yaml"
+if [ -f "$KUSTOMIZATION" ]; then
+    current=$(grep -m1 'newTag:' "$KUSTOMIZATION" | sed 's/.*newTag: *"\(.*\)"/\1/')
+    if [ "$current" != "$VERSION" ]; then
+        sed -i.bak "s/newTag: \".*\"/newTag: \"$VERSION\"/g" "$KUSTOMIZATION"
+        rm -f "$KUSTOMIZATION.bak"
+        echo "Updated $KUSTOMIZATION: $current -> $VERSION"
+        changed=1
+    fi
+fi
+
 if [ "$changed" -eq 1 ]; then
     # Stage the updated files so they're included in the commit
-    git add "$PYPROJECT" "$CARGO_CLI" "$CARGO_CTL" 2>/dev/null || true
+    git add "$PYPROJECT" "$CARGO_CLI" "$CARGO_CTL" "$KUSTOMIZATION" 2>/dev/null || true
 fi
