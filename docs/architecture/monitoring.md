@@ -106,6 +106,7 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 |---|---|---|---|
 | GPU 予約量の推移 | Time series | Prometheus | gpu-flavor の GPU 予約量 vs クォータ上限 |
 | GPU ノード CPU 予約量 | Time series | Prometheus | gpu-flavor の CPU 予約量 vs クォータ上限 |
+| GPU ノード メモリ予約量 | Time series | Prometheus | gpu-flavor のメモリ予約量 vs クォータ上限（GiB 表示） |
 
 #### Row 5: 待ち時間の分析
 

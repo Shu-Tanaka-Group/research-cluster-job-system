@@ -538,7 +538,7 @@
           }
         ]
       },
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 20 },
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 20 },
       "id": 9,
       "options": {
         "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" },
@@ -593,7 +593,7 @@
           }
         ]
       },
-      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 20 },
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 20 },
       "id": 10,
       "options": {
         "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" },
@@ -612,6 +612,61 @@
         }
       ],
       "title": "GPU ノード CPU 予約量",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "description": "GPU ノード上のメモリ予約量（ジョブが要求している合計）とクォータ上限（GiB）。実際の消費量とは異なります。",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "GiB",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "stacking": { "group": "A", "mode": "none" }
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "クォータ上限" },
+            "properties": [
+              { "id": "custom.lineStyle", "value": { "dash": [10, 10], "fill": "dash" } },
+              { "id": "custom.fillOpacity", "value": 0 },
+              { "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 20 },
+      "id": 19,
+      "options": {
+        "legend": { "calcs": ["lastNotNull"], "displayMode": "list", "placement": "bottom" },
+        "tooltip": { "mode": "multi", "sort": "none" }
+      },
+      "targets": [
+        {
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "legendFormat": "予約中",
+          "refId": "A"
+        },
+        {
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "legendFormat": "クォータ上限",
+          "refId": "B"
+        }
+      ],
+      "title": "GPU ノード メモリ予約量",
       "type": "timeseries"
     },
     {
