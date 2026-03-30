@@ -83,7 +83,7 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 |---|---|---|---|---|
 | CPU 使用率 | Gauge | Prometheus | cpu-flavor の CPU 使用率（usage / quota） | green < 60%, yellow < 85%, red >= 85% |
 | GPU 使用率 | Gauge | Prometheus | gpu-flavor の GPU 使用率（usage / quota） | green < 50%, yellow < 75%, red >= 75% |
-| 待機中ジョブ数 | Stat | Prometheus | Kueue pending workloads | green < 5, yellow < 20, red >= 20 |
+| 待機中ジョブ数 | Stat | PostgreSQL | DB 上の待機中ジョブ数（QUEUED + DISPATCHING + DISPATCHED） | green < 5, yellow < 20, red >= 20 |
 | 推定待ち時間 (P50) | Stat | Prometheus | admission wait time の中央値（直近 1 時間） | green < 60s, yellow < 300s, red >= 300s |
 
 #### Row 2: キューの状態
@@ -156,9 +156,6 @@ kueue_cluster_queue_nominal_quota{cluster_queue="cjob-cluster-queue", flavor="cp
 kueue_cluster_queue_resource_usage{cluster_queue="cjob-cluster-queue", flavor="gpu-flavor", resource="nvidia.com/gpu"}
 /
 kueue_cluster_queue_nominal_quota{cluster_queue="cjob-cluster-queue", flavor="gpu-flavor", resource="nvidia.com/gpu"}
-
-# 待機中ワークロード数
-kueue_pending_workloads{cluster_queue="cjob-cluster-queue"}
 
 # 待ち時間 P50（直近 1 時間）
 histogram_quantile(0.5, rate(kueue_admission_wait_time_seconds_bucket{cluster_queue="cjob-cluster-queue"}[1h]))

@@ -180,8 +180,8 @@
       "type": "gauge"
     },
     {
-      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "Kueue で待機中のワークロード数。0 なら投入したジョブはすぐ実行開始されます。",
+      "datasource": { "type": "grafana-postgresql-datasource", "uid": "${DS_CJOB_DB}" },
+      "description": "DB 上で待機中のジョブ数（QUEUED + DISPATCHING + DISPATCHED）。0 なら投入したジョブはすぐ実行開始されます。",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -216,8 +216,9 @@
       },
       "targets": [
         {
-          "expr": "kueue_pending_workloads{cluster_queue=\"cjob-cluster-queue\"}",
-          "legendFormat": "待機中",
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"待機中\" FROM jobs WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');",
           "refId": "A"
         }
       ],
