@@ -18,7 +18,11 @@ data:
   GAP_FILLING_ENABLED: "true"
   GAP_FILLING_STALL_THRESHOLD_SEC: "300"
   FAIR_SHARE_WINDOW_DAYS: "7"
-  RESOURCE_FLAVORS: '[{"name": "cpu", "label_selector": "cluster-job=true"}, {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"}]'
+  RESOURCE_FLAVORS: |
+    [
+      {"name": "cpu", "label_selector": "cluster-job=true"},
+      {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"}
+    ]
   DEFAULT_FLAVOR: cpu
   NODE_RESOURCE_SYNC_INTERVAL_SEC: "300"
   MAX_QUEUED_JOBS_PER_NAMESPACE: "500"
