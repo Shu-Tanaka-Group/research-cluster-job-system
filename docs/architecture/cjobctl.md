@@ -77,11 +77,11 @@ namespace = "cjob-system"   # 省略時デフォルト
 
 | コマンド | 使用可能なソートフィールド | デフォルト |
 |---|---|---|
-| `jobs list` | `NAMESPACE`, `CREATED`, `FINISHED` | `NAMESPACE`（namespace, job_id の複合順） |
+| `jobs list` | `NAMESPACE`, `CREATED`, `DISPATCHED`, `STARTED`, `FINISHED` | `NAMESPACE`（namespace, job_id の複合順） |
 | `jobs stalled` | `NAMESPACE`, `CREATED` | `CREATED`（dispatched_at 昇順） |
 | `jobs remaining` | `NAMESPACE`, `CREATED` | `REMAINING`（remaining_sec 昇順） |
 
-`--sort FINISHED` を `stalled` / `remaining` で指定した場合はエラーとする（該当カラムが存在しないため）。
+`--sort FINISHED`、`--sort DISPATCHED`、`--sort STARTED` を `stalled` / `remaining` で指定した場合はエラーとする（該当カラムが存在しないため）。
 
 #### `-o wide` オプション
 
@@ -89,10 +89,16 @@ namespace = "cjob-system"   # 省略時デフォルト
 
 `-o wide`（`--output wide`）を指定すると、上記に加えて以下のカラムが追加される:
 
+- **DISPATCHED**: ジョブの dispatch 時刻（DB の `dispatched_at` カラム、NULL の場合は `-` 表示）
+- **STARTED**: ジョブの開始時刻（DB の `started_at` カラム、NULL の場合は `-` 表示）
 - **CPU**: 指定 CPU リソース量（DB の `cpu` カラム）
 - **MEMORY**: 指定メモリリソース量（DB の `memory` カラム）
 - **GPU**: 指定 GPU 数（DB の `gpu` カラム、0 の場合は `-` 表示）
 - **NODE**: ジョブ実行ノード名（DB の `node_name` カラム、NULL の場合は `-` 表示）
+
+`-o wide` での時間列の表示順: CREATED → DISPATCHED → STARTED → FINISHED
+
+`DISPATCHED`・`STARTED` は NULL を含む可能性があるため、`--sort` の NULL 処理は `FINISHED` と同様（`--reverse` 未指定時は `NULLS LAST`、指定時は `NULLS FIRST`）とする。
 
 ノード名は Watcher が RUNNING 遷移時に Pod の `spec.nodeName` から取得し DB に記録する。一瞬で完了するジョブ（RUNNING を経由せず直接 SUCCEEDED/FAILED に遷移）の場合は、完了遷移時にフォールバックとして Pod から取得を試みる。QUEUED / DISPATCHED 等の未実行ジョブは `-` 表示となる。
 
