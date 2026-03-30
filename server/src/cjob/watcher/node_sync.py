@@ -15,38 +15,40 @@ def sync_node_resources(session: Session, settings: Settings):
     """Fetch node allocatable resources from K8s API and sync to DB."""
     core_v1 = k8s_client.CoreV1Api()
 
-    try:
-        nodes = core_v1.list_node(label_selector=settings.NODE_LABEL_SELECTOR)
-    except ApiException as e:
-        logger.error("Failed to list nodes (selector=%s): %s", settings.NODE_LABEL_SELECTOR, e)
-        return
+    tagged_items: list[tuple] = []
+    seen_names: set[str] = set()
+    successful_queries = 0
 
-    # Tag each node with its flavor based on which selector matched it
-    tagged_items: list[tuple] = [(node, "cpu") for node in nodes.items]
-    seen_names = {n.metadata.name for n in nodes.items}
-
-    # Fetch GPU nodes if GPU_NODE_LABEL_SELECTOR is set
-    if settings.GPU_NODE_LABEL_SELECTOR:
+    for flavor_def in settings.flavors:
         try:
-            gpu_nodes = core_v1.list_node(label_selector=settings.GPU_NODE_LABEL_SELECTOR)
-            for node in gpu_nodes.items:
-                if node.metadata.name not in seen_names:
-                    tagged_items.append((node, "gpu"))
-                    seen_names.add(node.metadata.name)
+            nodes = core_v1.list_node(label_selector=flavor_def.label_selector)
         except ApiException as e:
             logger.error(
-                "Failed to list GPU nodes (selector=%s): %s",
-                settings.GPU_NODE_LABEL_SELECTOR, e,
+                "Failed to list nodes for flavor '%s' (selector=%s): %s",
+                flavor_def.name, flavor_def.label_selector, e,
             )
+            continue
+
+        successful_queries += 1
+        for node in nodes.items:
+            if node.metadata.name not in seen_names:
+                tagged_items.append((node, flavor_def))
+                seen_names.add(node.metadata.name)
+
+    if successful_queries == 0 and settings.flavors:
+        # All flavor queries failed; preserve existing DB data
+        logger.warning("All flavor node queries failed; skipping sync")
+        return
 
     current_nodes: set[str] = set()
 
-    for node, flavor in tagged_items:
+    for node, flavor_def in tagged_items:
         name = node.metadata.name
         alloc = node.status.allocatable or {}
         cpu = parse_cpu_millicores(alloc.get("cpu", "0"))
         mem = parse_memory_mib(alloc.get("memory", "0"))
-        gpu = int(alloc.get("nvidia.com/gpu", "0"))
+        gpu_resource = flavor_def.gpu_resource_name
+        gpu = int(alloc.get(gpu_resource, "0")) if gpu_resource else 0
         current_nodes.add(name)
 
         session.execute(
@@ -58,7 +60,7 @@ def sync_node_resources(session: Session, settings: Settings):
                 "cpu_millicores = :cpu, memory_mib = :mem, gpu = :gpu, "
                 "flavor = :flavor, updated_at = NOW()"
             ),
-            {"name": name, "cpu": cpu, "mem": mem, "gpu": gpu, "flavor": flavor},
+            {"name": name, "cpu": cpu, "mem": mem, "gpu": gpu, "flavor": flavor_def.name},
         )
 
     # Delete nodes that no longer exist in K8s
@@ -74,11 +76,10 @@ def sync_node_resources(session: Session, settings: Settings):
         session.execute(text("DELETE FROM node_resources"))
 
     session.commit()
-    selectors = settings.NODE_LABEL_SELECTOR
-    if settings.GPU_NODE_LABEL_SELECTOR:
-        selectors += f", {settings.GPU_NODE_LABEL_SELECTOR}"
+    selectors = ", ".join(f"{f.name}({f.label_selector})" for f in settings.flavors)
     logger.info(
-        "Synced node resources: %d node(s) from selector(s) '%s'",
+        "Synced node resources: %d node(s) from %d flavor(s) [%s]",
         len(current_nodes),
+        len(settings.flavors),
         selectors,
     )
