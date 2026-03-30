@@ -192,7 +192,7 @@ env:
 
 | カテゴリ | パッケージ / 設定 | 理由 |
 |---|---|---|
-| ベース OS | Ubuntu 24.04 | 安定性・パッケージの豊富さ |
+| ベース OS | 任意（例: Ubuntu 24.04） | `/bin/bash` が利用可能であること |
 | Python | python3.12 python3.12-venv python3-pip | 仮想環境のベース |
 | ビルドツール | gcc g++ make | C 拡張ライブラリのビルド |
 | 科学計算系ライブラリ | libopenblas-dev liblapack-dev | numpy 等の依存 |

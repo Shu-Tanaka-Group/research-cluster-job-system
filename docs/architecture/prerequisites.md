@@ -23,7 +23,7 @@
 - `cjob` CLI は Rust で実装したシングルバイナリとして GitHub Releases で配布する
 - ユーザーは CLI バイナリを各自のホームディレクトリ（例: `/home/jovyan/.local/bin/`）に配置する
 - CLI は image には含めない
-- ベース OS：Ubuntu 24.04
+- ベース OS は任意（`/bin/bash` が利用可能であること。例: Ubuntu 24.04）
 - PVC 名はユーザー名と一致している
 - 実行 shell は `/bin/bash -lc` を基本とする
 - 作業ディレクトリは `${WORKSPACE_MOUNT_PATH}` 配下に限定する
