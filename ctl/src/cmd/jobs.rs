@@ -52,7 +52,7 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
     };
 
     let select_cols = if wide {
-        "namespace, job_id, completions, status, command, created_at, dispatched_at, started_at, finished_at, cpu, memory, gpu, node_name"
+        "namespace, job_id, completions, status, command, created_at, dispatched_at, started_at, finished_at, flavor, cpu, memory, gpu, node_name"
     } else {
         "namespace, job_id, completions, status, command, created_at, finished_at"
     };
@@ -75,9 +75,9 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
 
     if wide {
         println!(
-            "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
+            "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<20} {:<20} {:<14} {:<6} {:<8} {:<4} {}",
             "NAMESPACE", "JOB_ID", "TYPE", "STATUS", "COMMAND", "CREATED", "DISPATCHED", "STARTED", "FINISHED",
-            "CPU", "MEMORY", "GPU", "NODE"
+            "FLAVOR", "CPU", "MEMORY", "GPU", "NODE"
         );
     } else {
         println!(
@@ -111,18 +111,19 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
             let dispatched_at: Option<chrono::DateTime<chrono::Utc>> = row.get(6);
             let started_at: Option<chrono::DateTime<chrono::Utc>> = row.get(7);
             let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(8);
-            let cpu: &str = row.get(9);
-            let memory: &str = row.get(10);
-            let gpu: i32 = row.get(11);
-            let node_name: Option<&str> = row.get(12);
+            let flv: &str = row.get(9);
+            let cpu: &str = row.get(10);
+            let memory: &str = row.get(11);
+            let gpu: i32 = row.get(12);
+            let node_name: Option<&str> = row.get(13);
             let gpu_display = if gpu > 0 { gpu.to_string() } else { "-".to_string() };
             let node_display = node_name.unwrap_or("-");
 
             println!(
-                "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
+                "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<20} {:<20} {:<14} {:<6} {:<8} {:<4} {}",
                 ns, job_id, job_type, status, cmd_display, created,
                 fmt_ts(dispatched_at), fmt_ts(started_at), fmt_ts(finished_at),
-                cpu, memory, gpu_display, node_display
+                flv, cpu, memory, gpu_display, node_display
             );
         } else {
             let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(6);
