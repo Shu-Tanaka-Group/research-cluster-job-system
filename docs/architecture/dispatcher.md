@@ -263,6 +263,8 @@ WHERE status = 'DISPATCHED'
 
 閾値が短すぎると Kueue の通常処理中のジョブも滞留扱いになる。閾値が長すぎると対策の発動が遅れる。5 分はクラスタの通常動作を考慮した保守的な値である。
 
+**前提:** 本検知はノードのリソース不足（Kueue の ClusterQueue レベル）による滞留を想定している。namespace の ResourceQuota 枠不足による滞留は検知対象外である。ResourceQuota は dispatch_budget および ClusterQueue nominalQuota より緩く設定する運用を前提としており、通常は ResourceQuota より先にこれらの制限が効く（[resources.md](../architecture/resources.md) §1 参照）。
+
 #### 2.4.3 リソース空き推定
 
 滞留ジョブが検知された場合、同一 namespace の RUNNING ジョブから「リソースが空くまでの推定残り時間」を計算する。
