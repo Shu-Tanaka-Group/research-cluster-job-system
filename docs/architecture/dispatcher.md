@@ -414,10 +414,6 @@ spec:
 
 `backoffLimitPerIndex: 0` により、1 回失敗したタスクは再試行せず即座に `failedIndexes` に追加される。
 
-### 3.2.1 GPU リソースの設定
-
-`job.gpu > 0` の場合、`build_k8s_job` は `RESOURCE_FLAVORS` 設定から `job.flavor` に一致する flavor 定義を検索し、その `gpu_resource_name`（例: `nvidia.com/gpu`、`amd.com/gpu`）をコンテナの `resources.requests` と `resources.limits` に追加する。`job.gpu == 0` の場合は従来通り CPU / メモリのみを設定する。Kueue が GPU リソースの要求を検知し、対応する ResourceFlavor の `nodeLabels` に基づいてノードにスケジュールする。Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。
-
 ### 3.3 コマンドラッパー
 
 sweep ジョブのコマンドラッパーは `CJOB_INDEX` の export とインデックス付きログディレクトリを使用する。
@@ -443,3 +439,20 @@ exit $EXIT_CODE
 ### 3.4 隙間充填との関係
 
 隙間充填ロジックは既存のまま動作する。sweep ジョブの `time_limit_seconds` はsweep 全体の実行時間上限であり、隙間充填の推定に使用される。
+
+## 4. ResourceFlavor に基づくジョブスケジューリング
+
+ジョブの flavor に基づくノード振り分けは、通常ジョブ・sweep ジョブ共通で以下の流れで行われる。
+
+1. ユーザーが `--flavor` で flavor を指定する（省略時は `DEFAULT_FLAVOR`）
+2. Submit API が `jobs.flavor` に記録する
+3. Dispatcher が `build_k8s_job` で K8s Job を作成し、Kueue の LocalQueue に投入する
+4. Kueue が ClusterQueue 内の flavor リストからジョブのリソース要求を満たせる flavor を選択し、その `nodeLabels` に基づいてノードにスケジュールする
+
+Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。ノードの振り分けは Kueue の ResourceFlavor が担う。
+
+### 4.1 GPU リソースの設定
+
+`job.gpu > 0` の場合、`build_k8s_job` は `RESOURCE_FLAVORS` 設定から `job.flavor` に一致する flavor 定義を検索し、その `gpu_resource_name`（例: `nvidia.com/gpu`、`amd.com/gpu`）をコンテナの `resources.requests` と `resources.limits` に追加する。`job.gpu == 0` の場合は CPU / メモリのみを設定する。
+
+ResourceFlavor の定義と設定値については [resources.md](resources.md) §ResourceFlavor、[kueue.md](kueue.md) §1 を参照。
