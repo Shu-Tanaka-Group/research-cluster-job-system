@@ -9,7 +9,7 @@ Dispatcher は PostgreSQL を定期的にスキャンし、以下の基準で di
 1. **budget に余裕のある namespace のみ対象とする**（DISPATCHING + DISPATCHED + RUNNING < dispatch_limit）
 2. **対象 namespace の QUEUED ジョブを `created_at` 昇順で取得する**
 3. **1サイクルあたりの取得数を `DISPATCH_BATCH_SIZE`（デフォルト 50）で固定する**
-4. **namespace 間を公平にラウンドロビンする**（各 namespace から1件ずつ交互に取得）
+4. **namespace 間を公平にラウンドロビンする**（各 namespace から `DISPATCH_ROUND_SIZE` 件ずつ交互に取得）
 5. **累計リソース消費量の dominant share が小さい namespace を優先する**（DRF による公平性）
 
 この方式により：
