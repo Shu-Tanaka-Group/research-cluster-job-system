@@ -244,10 +244,10 @@ kubectl label node <node-name> cluster-job=true
 kubectl taint node <node-name> role=computing:NoSchedule
 ```
 
-ラベル `cluster-job=true` は ConfigMap `cjob-config` の `NODE_LABEL_SELECTOR` で指定された値と一致している必要がある。値を変更している場合は、ConfigMap の設定に合わせること。
+ラベル `cluster-job=true` は ConfigMap `cjob-config` の `RESOURCE_FLAVORS` で定義された該当 flavor の `label_selector` と一致している必要がある。値を変更している場合は、ConfigMap の設定に合わせること。
 
 ```bash
-# 現在の設定を確認（NODE_LABEL_SELECTOR, GPU_NODE_LABEL_SELECTOR, JOB_NODE_TAINT）
+# 現在の設定を確認（RESOURCE_FLAVORS, JOB_NODE_TAINT）
 cjobctl config show
 ```
 
@@ -255,26 +255,26 @@ cjobctl config show
 
 | 参照元 | 用途 |
 |---|---|
-| Kueue cpu-flavor（`nodeLabels`） | CPU Job Pod をラベル付きノードにのみスケジュールする |
-| Watcher（`NODE_LABEL_SELECTOR`） | ラベル付きノードの allocatable リソースを DB に同期する |
+| Kueue ResourceFlavor（`nodeLabels`） | Job Pod をラベル付きノードにのみスケジュールする |
+| Watcher（`RESOURCE_FLAVORS` の `label_selector`） | ラベル付きノードの allocatable リソースを DB に同期する |
 
 taint はジョブ以外の Pod が計算ノードにスケジュールされることを防ぐ。ConfigMap `JOB_NODE_TAINT`・Kueue ResourceFlavor の `nodeTaints`・ノードの Taint の 3 箇所は同じ値に統一する必要がある。`JOB_NODE_TAINT` が空文字列の場合は taint を付与しない。
 
 ### 7.1.1 GPU ノードのラベル・taint の付与
 
-GPU ノードには CPU ノードとは異なるラベル `cluster-gpu-job=true` を付与する。taint は CPU ノードと同じ値を使用する。
+GPU ノードには CPU ノードとは異なるラベル（例: `cluster-gpu-job=true`）を付与する。taint は CPU ノードと同じ値を使用する。
 
 ```bash
 kubectl label node <gpu-node-name> cluster-gpu-job=true
 kubectl taint node <gpu-node-name> role=computing:NoSchedule
 ```
 
-ラベル `cluster-gpu-job=true` は ConfigMap `cjob-config` の `GPU_NODE_LABEL_SELECTOR` で指定された値と一致している必要がある。
+ラベルは ConfigMap `cjob-config` の `RESOURCE_FLAVORS` で定義された該当 GPU flavor の `label_selector` と一致している必要がある。
 
 | 参照元 | 用途 |
 |---|---|
-| Kueue gpu-flavor（`nodeLabels`） | GPU Job Pod をラベル付きノードにのみスケジュールする |
-| Watcher（`GPU_NODE_LABEL_SELECTOR`） | GPU ノードの allocatable リソースを DB に同期する |
+| Kueue ResourceFlavor（`nodeLabels`） | GPU Job Pod をラベル付きノードにのみスケジュールする |
+| Watcher（`RESOURCE_FLAVORS` の `label_selector`） | GPU ノードの allocatable リソースを DB に同期する |
 
 ### 7.2 リソース情報の反映確認
 
@@ -293,14 +293,14 @@ cjobctl cluster resources
 # 現在の quota を確認
 cjobctl cluster show-quota
 
-# 新しい総量に合わせて更新
-cjobctl cluster set-quota --cpu <new-total> --memory <new-total>
+# 新しい総量に合わせて更新（flavor を指定する）
+cjobctl cluster set-quota --flavor cpu --cpu <new-total> --memory <new-total>
 ```
 
 Watcher の同期が完了する前に quota を設定したい場合は `--force` を使用する。
 
 ```bash
-cjobctl cluster set-quota --cpu <new-total> --memory <new-total> --force
+cjobctl cluster set-quota --flavor cpu --cpu <new-total> --memory <new-total> --force
 ```
 
 ## 8. CLI バイナリの管理

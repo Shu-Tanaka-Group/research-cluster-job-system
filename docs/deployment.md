@@ -161,13 +161,17 @@ data:
   GAP_FILLING_ENABLED: "true"
   GAP_FILLING_STALL_THRESHOLD_SEC: "300"
   FAIR_SHARE_WINDOW_DAYS: "7"
-  NODE_LABEL_SELECTOR: "cluster-job=true"
-  GPU_NODE_LABEL_SELECTOR: "cluster-gpu-job=true"
+  RESOURCE_FLAVORS: |
+    [
+      {"name": "cpu", "label_selector": "cluster-job=true"},
+      {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"}
+    ]
+  DEFAULT_FLAVOR: cpu
   NODE_RESOURCE_SYNC_INTERVAL_SEC: "300"
   MAX_QUEUED_JOBS_PER_NAMESPACE: "500"
+  MAX_SWEEP_COMPLETIONS: "1000"
   DEFAULT_TIME_LIMIT_SECONDS: "86400"
   MAX_TIME_LIMIT_SECONDS: "604800"
-  MAX_SWEEP_COMPLETIONS: "1000"
   KUEUE_LOCAL_QUEUE_NAME: default
   USER_NAMESPACE_LABEL: cjob.io/user-namespace=true   # NetworkPolicy・cjobctl が参照。サーバーコンポーネントの env には注入不要
   WORKSPACE_MOUNT_PATH: /home/jovyan
@@ -963,16 +967,16 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
-            - name: NODE_LABEL_SELECTOR
+            - name: RESOURCE_FLAVORS
               valueFrom:
                 configMapKeyRef:
                   name: cjob-config
-                  key: NODE_LABEL_SELECTOR
-            - name: GPU_NODE_LABEL_SELECTOR
+                  key: RESOURCE_FLAVORS
+            - name: DEFAULT_FLAVOR
               valueFrom:
                 configMapKeyRef:
                   name: cjob-config
-                  key: GPU_NODE_LABEL_SELECTOR
+                  key: DEFAULT_FLAVOR
             - name: NODE_RESOURCE_SYNC_INTERVAL_SEC
               valueFrom:
                 configMapKeyRef:
