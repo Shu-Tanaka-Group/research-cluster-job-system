@@ -86,6 +86,7 @@ pub fn print_job_detail(job: &JobDetailResponse) {
     println!("status:        {}", job.status);
     println!("command:       {}", job.command);
     println!("cwd:           {}", job.cwd);
+    println!("flavor:        {}", job.flavor);
     println!("cpu:           {}", job.cpu);
     println!("memory:        {}", job.memory);
     println!("gpu:           {}", job.gpu);
@@ -167,6 +168,7 @@ mod tests {
             cpu: "1".to_string(),
             memory: "1Gi".to_string(),
             gpu: 0,
+            flavor: "cpu".to_string(),
             time_limit_seconds,
             k8s_job_name: None,
             log_dir: None,
@@ -239,6 +241,7 @@ mod tests {
             cpu: "2".to_string(),
             memory: "4Gi".to_string(),
             gpu: 0,
+            flavor: "cpu".to_string(),
             time_limit_seconds: 21600,
             k8s_job_name: Some("cjob-test-3".to_string()),
             log_dir: Some("/home/jovyan/.cjob/logs/3".to_string()),

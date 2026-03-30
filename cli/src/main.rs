@@ -35,6 +35,10 @@ enum Commands {
         #[arg(long, default_value = "0")]
         gpu: u32,
 
+        /// ResourceFlavor 名（例: "cpu", "gpu-a100"）
+        #[arg(long)]
+        flavor: Option<String>,
+
         /// 実行時間の上限（例: 3600, 1h, 6h, 1d, 3d）
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
@@ -64,6 +68,10 @@ enum Commands {
         /// GPU 数（例: 1）
         #[arg(long, default_value = "0")]
         gpu: u32,
+
+        /// ResourceFlavor 名（例: "cpu", "gpu-a100"）
+        #[arg(long)]
+        flavor: Option<String>,
 
         /// コマンド（-- の後に指定）
         #[arg(trailing_var_arg = true, required = true)]
@@ -161,8 +169,9 @@ async fn main() -> Result<()> {
             cpu,
             memory,
             gpu,
+            flavor,
             time_limit,
-        } => cmd_add(&api_client, command, cpu, memory, gpu, time_limit).await,
+        } => cmd_add(&api_client, command, cpu, memory, gpu, flavor, time_limit).await,
         Commands::Sweep {
             count,
             parallel,
@@ -170,8 +179,9 @@ async fn main() -> Result<()> {
             cpu,
             memory,
             gpu,
+            flavor,
             command,
-        } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, gpu, time_limit).await,
+        } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, gpu, flavor, time_limit).await,
         Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status.map(|s| s.to_uppercase()), limit, reverse, all).await,
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
@@ -236,6 +246,7 @@ async fn cmd_add(
     cpu: String,
     memory: String,
     gpu: u32,
+    flavor: Option<String>,
     time_limit: Option<String>,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?
@@ -269,6 +280,7 @@ async fn cmd_add(
             cpu,
             memory,
             gpu,
+            flavor,
         },
         time_limit_seconds,
     };
@@ -286,6 +298,7 @@ async fn cmd_sweep(
     cpu: String,
     memory: String,
     gpu: u32,
+    flavor: Option<String>,
     time_limit: Option<String>,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?
@@ -325,6 +338,7 @@ async fn cmd_sweep(
             cpu,
             memory,
             gpu,
+            flavor,
         },
         completions: count,
         parallelism: parallel,

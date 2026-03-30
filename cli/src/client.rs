@@ -31,6 +31,8 @@ pub struct ResourceSpec {
     pub cpu: String,
     pub memory: String,
     pub gpu: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flavor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +73,7 @@ pub struct JobDetailResponse {
     pub cpu: String,
     pub memory: String,
     pub gpu: u32,
+    pub flavor: String,
     pub time_limit_seconds: u32,
     pub k8s_job_name: Option<String>,
     pub log_dir: Option<String>,
