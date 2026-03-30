@@ -451,6 +451,9 @@ exit $EXIT_CODE
 
 Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。ノードの振り分けは Kueue の ResourceFlavor が担う。
 
+> [!NOTE]
+> 現在 CPU flavor は1つのみであるため、CPU ジョブの flavor 振り分けは Kueue の自動選択に委ねている。CPU flavor が複数になった場合、Kueue はリスト上位の flavor を優先するため、ユーザーが指定した flavor に確実にスケジュールするには `build_k8s_job` で flavor の `label_selector` を `nodeSelector` として K8s Job に追加する必要がある。`FlavorDefinition` に `label_selector` フィールドは既に存在する（`config.py`）ため、変更は小規模で済む。
+
 ### 4.1 GPU リソースの設定
 
 `job.gpu > 0` の場合、`build_k8s_job` は `RESOURCE_FLAVORS` 設定から `job.flavor` に一致する flavor 定義を検索し、その `gpu_resource_name`（例: `nvidia.com/gpu`、`amd.com/gpu`）をコンテナの `resources.requests` と `resources.limits` に追加する。`job.gpu == 0` の場合は CPU / メモリのみを設定する。
