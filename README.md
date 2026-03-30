@@ -248,12 +248,12 @@ stateDiagram-v2
     QUEUED --> DISPATCHING : Dispatcher がジョブを選択
     QUEUED --> CANCELLED : cjob cancel
 
-    DISPATCHING --> DISPATCHED : K8s Job 作成成功
+    DISPATCHING --> DISPATCHED : Job 作成成功
     DISPATCHING --> QUEUED : 一時障害で再試行
     DISPATCHING --> FAILED : 永続エラー / 最大再試行超過
     DISPATCHING --> CANCELLED : cjob cancel
 
-    DISPATCHED --> RUNNING : Pod が実行開始
+    DISPATCHED --> RUNNING : Job が実行開始
     DISPATCHED --> CANCELLED : cjob cancel
 
     RUNNING --> SUCCEEDED : 正常完了
@@ -264,19 +264,19 @@ stateDiagram-v2
     FAILED --> DELETING : cjob reset
     CANCELLED --> DELETING : cjob reset
 
-    DELETING --> [*] : K8s Job 削除完了後に DB レコード削除
+    DELETING --> [*] : Job 削除完了後に DB レコード削除
 ```
 
 > [!NOTE]
 > `cjob delete` は完了済みジョブを即座に削除します。
-> `cjob reset` は全ジョブを DELETING 状態に移行し、K8s 上のリソースを安全に削除した後にジョブを削除します。ジョブ ID カウンターも 1 にリセットされます。
+> `cjob reset` は全ジョブを DELETING 状態に移行し、クラスタ上のリソースを安全に削除した後にジョブを削除します。ジョブ ID カウンターも 1 にリセットされます。
 
 | ステータス      | 説明                                         |
 | --------------- | -------------------------------------------- |
 | **QUEUED**      | 投入済み、Dispatcher の選択待ち              |
-| **DISPATCHING** | Dispatcher が K8s Job を作成中               |
-| **DISPATCHED**  | K8s Job 作成済み、Kueue のリソース割当て待ち |
-| **RUNNING**     | Pod 実行中                                   |
+| **DISPATCHING** | Dispatcher が Job を作成中                   |
+| **DISPATCHED**  | Job 作成済み、実行リソース割当て待ち         |
+| **RUNNING**     | Job 実行中                                   |
 | **SUCCEEDED**   | 正常完了                                     |
 | **FAILED**      | 失敗（エラー / 時間超過 / 再試行上限）       |
 | **CANCELLED**   | ユーザーがキャンセル                         |
