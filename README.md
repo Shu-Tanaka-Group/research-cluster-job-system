@@ -248,12 +248,12 @@ stateDiagram-v2
     QUEUED --> DISPATCHING : Dispatcher がジョブを選択
     QUEUED --> CANCELLED : cjob cancel
 
-    DISPATCHING --> DISPATCHED : Job 作成成功
+    DISPATCHING --> DISPATCHED : ジョブ作成成功
     DISPATCHING --> QUEUED : 一時障害で再試行
     DISPATCHING --> FAILED : 永続エラー / 最大再試行超過
     DISPATCHING --> CANCELLED : cjob cancel
 
-    DISPATCHED --> RUNNING : Job が実行開始
+    DISPATCHED --> RUNNING : ジョブが実行開始
     DISPATCHED --> CANCELLED : cjob cancel
 
     RUNNING --> SUCCEEDED : 正常完了
@@ -264,7 +264,7 @@ stateDiagram-v2
     FAILED --> DELETING : cjob reset
     CANCELLED --> DELETING : cjob reset
 
-    DELETING --> [*] : Job 削除完了後に DB レコード削除
+    DELETING --> [*] : ジョブ削除完了後に DB レコード削除
 ```
 
 > [!NOTE]
@@ -274,9 +274,9 @@ stateDiagram-v2
 | ステータス      | 説明                                         |
 | --------------- | -------------------------------------------- |
 | **QUEUED**      | 投入済み、Dispatcher の選択待ち              |
-| **DISPATCHING** | Dispatcher が Job を作成中                   |
-| **DISPATCHED**  | Job 作成済み、実行リソース割当て待ち         |
-| **RUNNING**     | Job 実行中                                   |
+| **DISPATCHING** | Dispatcher がジョブを作成中                  |
+| **DISPATCHED**  | ジョブ作成済み、実行リソース割当て待ち       |
+| **RUNNING**     | ジョブ実行中                                 |
 | **SUCCEEDED**   | 正常完了                                     |
 | **FAILED**      | 失敗（エラー / 時間超過 / 再試行上限）       |
 | **CANCELLED**   | ユーザーがキャンセル                         |
