@@ -9,7 +9,7 @@ ResourceQuota はリソースを均等分配するためではなく、バグ等
 
 設定根拠：
 - CPU / memory：クラスタ総量より少し大きめに設定し、Kueue の admission 制御に任せる。Job Pod（最大 dispatch_limit 分）に加えてユーザーが使用している他の計算リソース（ジョブ投入用Podやデータ解析用Podなど）の分も余裕として含める
-- Job 数：dispatch_limit(32) と `ttlSecondsAfterFinished`(1800秒=30分) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大32) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう余裕を持たせて設定 → 50。sweep 機能（1 Job で数百〜数千タスクを実行可能）があるため、Job 数の上限を抑えても実質的な計算能力は制限されない
+- Job 数：dispatch_limit(32) と `ttlSecondsAfterFinished`(300秒=5分) を考慮して設定する。SUCCEEDED/FAILED の K8s Job は Watcher が明示的に削除せず TTL 経過まで残るため、実行中ジョブ(最大32) と TTL ウィンドウ内の完了済みジョブの合計が ResourceQuota を超えないよう余裕を持たせて設定 → 50。TTL を短縮したことで通常運用では quota に到達する可能性は極めて低い。sweep 機能（1 Job で数百〜数千タスクを実行可能）があるため、Job 数の上限を抑えても実質的な計算能力は制限されない
 - GPU：GPU ノードの総 GPU 数に合わせて設定する。`"0"` に設定するとそのユーザーは GPU ジョブを実行できない。GPU を使わないユーザーには `"0"` を設定するか、GPU 関連の項目を省略する
 
 ```yaml
@@ -52,7 +52,7 @@ Dispatcher がスキャン → dispatch_budget チェック（DISPATCH_BUDGET_PE
 K8s Job を作成 → count/jobs.batch チェック（50件上限）
 ```
 
-`count/jobs.batch` を 50 に設定する理由：dispatch_budget の上限（32件）で動作していても、SUCCEEDED/FAILED になった K8s Job が TTL（30分）が切れるまで K8s 上に残り続けるため、実行中 + TTL 待ち完了済みジョブの合計を吸収できるよう設定している。TTL を 1,800秒（30分）に短縮したことで、長時間〜中程度のジョブでは TTL 待ちの蓄積が少なく、50 で十分な余裕がある。短時間ジョブが大量に回転して一時的に quota に達した場合は TTL 経過で自然に回復し、Dispatcher の retry により自動復旧する。
+`count/jobs.batch` を 50 に設定する理由：dispatch_budget の上限（32件）で動作していても、SUCCEEDED/FAILED になった K8s Job が TTL（5分）が切れるまで K8s 上に残り続けるため、実行中 + TTL 待ち完了済みジョブの合計を吸収できるよう設定している。TTL 300秒（5分）では長時間〜中程度のジョブで TTL 待ちの蓄積がほとんど発生せず、50 に対して大幅な余裕がある。短時間ジョブが大量に回転して一時的に quota に達した場合は TTL 経過で自然に回復し、Dispatcher の retry により自動復旧する。
 
 ### CPU・メモリに関する制限
 

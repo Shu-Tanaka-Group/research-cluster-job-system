@@ -152,7 +152,7 @@ metadata:
     cjob.io/namespace: user-alice  # namespace（Dispatcher が動的に設定）
 spec:
   activeDeadlineSeconds: 86400      # DB の time_limit_seconds をそのまま設定（Dispatcher が動的に設定）
-  ttlSecondsAfterFinished: 1800     # 完了後 30分で Job / Pod を削除
+  ttlSecondsAfterFinished: 300      # 完了後 5分で Job / Pod を削除
   template:
     spec:
       restartPolicy: Never

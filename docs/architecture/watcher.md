@@ -66,6 +66,10 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 7. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
 8. DB 上で DISPATCHED / RUNNING だが、対応する K8s Job が K8s 上に存在しないジョブを FAILED に遷移させる（`last_error` に `"K8s Job not found (TTL expired or manually deleted)"` を設定し、`finished_at` を現在時刻に設定する）。これにより `ttlSecondsAfterFinished` による K8s Job の自動削除や、手動削除によって DB と K8s の状態が乖離した場合に自動修復される
 
+**`ttlSecondsAfterFinished` とスキャンサイクル間隔の関係:**
+
+`ttlSecondsAfterFinished` は Watcher のスキャンサイクル間隔（現在は `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` を共有）より十分に長く設定する必要がある。TTL が短すぎると、Watcher の一時的な停止（再起動・障害等）中に完了した K8s Job が TTL で削除され、ステップ 8 により正常完了したジョブが FAILED として記録される。現在の設定（TTL 300秒 vs サイクル間隔 10秒）では Watcher の再起動（通常 1〜2 分）に対しても十分な余裕がある。TTL またはサイクル間隔を変更する場合は、この関係を維持すること
+
 ## 4. sweep ジョブの監視
 
 ### 4.1 インデックス追跡

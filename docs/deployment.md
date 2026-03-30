@@ -172,7 +172,7 @@ data:
   USER_NAMESPACE_LABEL: cjob.io/user-namespace=true   # NetworkPolicy・cjobctl が参照。サーバーコンポーネントの env には注入不要
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
-  TTL_SECONDS_AFTER_FINISHED: "1800"
+  TTL_SECONDS_AFTER_FINISHED: "300"
   JOB_NODE_TAINT: "role=computing:NoSchedule"
 ```
 
