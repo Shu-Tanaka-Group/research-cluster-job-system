@@ -15,6 +15,7 @@
 - `cjob usage`
 - `cjob reset`
 - `cjob logs`（`--follow` / `--index` オプション含む）
+- `cjob flavor`
 - `cjob update`
 
 ### 1.2 submit 機能
