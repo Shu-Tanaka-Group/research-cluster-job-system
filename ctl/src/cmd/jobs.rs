@@ -6,6 +6,8 @@ use tokio_postgres::Client;
 enum SortField {
     Namespace,
     Created,
+    Dispatched,
+    Started,
     Finished,
 }
 
@@ -13,6 +15,8 @@ fn parse_sort_field(s: &str, allowed: &[SortField]) -> Result<SortField> {
     let field = match s.to_uppercase().as_str() {
         "NAMESPACE" => SortField::Namespace,
         "CREATED" => SortField::Created,
+        "DISPATCHED" => SortField::Dispatched,
+        "STARTED" => SortField::Started,
         "FINISHED" => SortField::Finished,
         _ => bail!(
             "Unknown sort field '{}'. Valid values: {}",
@@ -31,13 +35,15 @@ fn parse_sort_field(s: &str, allowed: &[SortField]) -> Result<SortField> {
 }
 
 pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>, sort: Option<&str>, reverse: bool, wide: bool) -> Result<()> {
-    let allowed = [SortField::Namespace, SortField::Created, SortField::Finished];
+    let allowed = [SortField::Namespace, SortField::Created, SortField::Dispatched, SortField::Started, SortField::Finished];
     let sort_field = sort.map(|s| parse_sort_field(s, &allowed)).transpose()?;
 
     let dir = if reverse { "DESC" } else { "ASC" };
     let nulls = if reverse { "NULLS FIRST" } else { "NULLS LAST" };
     let order_clause = match sort_field {
         Some(SortField::Created) => format!("ORDER BY created_at {dir}"),
+        Some(SortField::Dispatched) => format!("ORDER BY dispatched_at {dir} {nulls}"),
+        Some(SortField::Started) => format!("ORDER BY started_at {dir} {nulls}"),
         Some(SortField::Finished) => format!("ORDER BY finished_at {dir} {nulls}"),
         Some(SortField::Namespace) | None => {
             let secondary_dir = if reverse { "DESC" } else { "ASC" };
@@ -46,9 +52,9 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
     };
 
     let select_cols = if wide {
-        "namespace, job_id, completions, status, command, created_at, started_at, finished_at, cpu, memory, gpu, node_name"
+        "namespace, job_id, completions, status, command, created_at, dispatched_at, started_at, finished_at, cpu, memory, gpu, node_name"
     } else {
-        "namespace, job_id, completions, status, command, created_at, started_at, finished_at"
+        "namespace, job_id, completions, status, command, created_at, finished_at"
     };
 
     let query = format!(
@@ -69,8 +75,8 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
 
     if wide {
         println!(
-            "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
-            "NAMESPACE", "JOB_ID", "TYPE", "STATUS", "COMMAND", "CREATED", "FINISHED",
+            "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
+            "NAMESPACE", "JOB_ID", "TYPE", "STATUS", "COMMAND", "CREATED", "DISPATCHED", "STARTED", "FINISHED",
             "CPU", "MEMORY", "GPU", "NODE"
         );
     } else {
@@ -79,6 +85,12 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
             "NAMESPACE", "JOB_ID", "TYPE", "STATUS", "COMMAND", "CREATED", "FINISHED"
         );
     }
+
+    let fmt_ts = |t: Option<chrono::DateTime<chrono::Utc>>| -> String {
+        t.map(|t| t.format("%Y-%m-%dT%H:%M").to_string())
+            .unwrap_or_else(|| "-".to_string())
+    };
+
     for row in &rows {
         let ns: &str = row.get(0);
         let job_id: i32 = row.get(1);
@@ -86,7 +98,6 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
         let status: &str = row.get(3);
         let command: &str = row.get(4);
         let created_at: chrono::DateTime<chrono::Utc> = row.get(5);
-        let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(7);
 
         let job_type = if completions.is_some() { "sweep" } else { "job" };
         let cmd_display = if command.len() > 40 {
@@ -95,27 +106,30 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
             command.to_string()
         };
         let created = created_at.format("%Y-%m-%dT%H:%M").to_string();
-        let finished = finished_at
-            .map(|t| t.format("%Y-%m-%dT%H:%M").to_string())
-            .unwrap_or_else(|| "-".to_string());
 
         if wide {
-            let cpu: &str = row.get(8);
-            let memory: &str = row.get(9);
-            let gpu: i32 = row.get(10);
-            let node_name: Option<&str> = row.get(11);
+            let dispatched_at: Option<chrono::DateTime<chrono::Utc>> = row.get(6);
+            let started_at: Option<chrono::DateTime<chrono::Utc>> = row.get(7);
+            let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(8);
+            let cpu: &str = row.get(9);
+            let memory: &str = row.get(10);
+            let gpu: i32 = row.get(11);
+            let node_name: Option<&str> = row.get(12);
             let gpu_display = if gpu > 0 { gpu.to_string() } else { "-".to_string() };
             let node_display = node_name.unwrap_or("-");
 
             println!(
-                "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
-                ns, job_id, job_type, status, cmd_display, created, finished,
+                "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<20} {:<20} {:<6} {:<8} {:<4} {}",
+                ns, job_id, job_type, status, cmd_display, created,
+                fmt_ts(dispatched_at), fmt_ts(started_at), fmt_ts(finished_at),
                 cpu, memory, gpu_display, node_display
             );
         } else {
+            let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(6);
+
             println!(
                 "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {}",
-                ns, job_id, job_type, status, cmd_display, created, finished
+                ns, job_id, job_type, status, cmd_display, created, fmt_ts(finished_at)
             );
         }
     }
@@ -427,6 +441,18 @@ mod tests {
     }
 
     #[test]
+    fn parse_sort_field_valid_dispatched() {
+        let allowed = [SortField::Namespace, SortField::Created, SortField::Dispatched, SortField::Started, SortField::Finished];
+        assert_eq!(parse_sort_field("DISPATCHED", &allowed).unwrap(), SortField::Dispatched);
+    }
+
+    #[test]
+    fn parse_sort_field_valid_started() {
+        let allowed = [SortField::Namespace, SortField::Created, SortField::Dispatched, SortField::Started, SortField::Finished];
+        assert_eq!(parse_sort_field("STARTED", &allowed).unwrap(), SortField::Started);
+    }
+
+    #[test]
     fn parse_sort_field_valid_finished() {
         let allowed = [SortField::Namespace, SortField::Created, SortField::Finished];
         assert_eq!(parse_sort_field("FINISHED", &allowed).unwrap(), SortField::Finished);
@@ -450,6 +476,20 @@ mod tests {
     fn parse_sort_field_finished_not_allowed() {
         let allowed = [SortField::Namespace, SortField::Created];
         let err = parse_sort_field("FINISHED", &allowed).unwrap_err();
+        assert!(err.to_string().contains("not available"));
+    }
+
+    #[test]
+    fn parse_sort_field_dispatched_not_allowed_for_stalled() {
+        let allowed = [SortField::Namespace, SortField::Created];
+        let err = parse_sort_field("DISPATCHED", &allowed).unwrap_err();
+        assert!(err.to_string().contains("not available"));
+    }
+
+    #[test]
+    fn parse_sort_field_started_not_allowed_for_stalled() {
+        let allowed = [SortField::Namespace, SortField::Created];
+        let err = parse_sort_field("STARTED", &allowed).unwrap_err();
         assert!(err.to_string().contains("not available"));
     }
 }
