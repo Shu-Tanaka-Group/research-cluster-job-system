@@ -11,6 +11,8 @@ from .schemas import (
     CancelResponse,
     DailyUsage,
     DeleteResponse,
+    FlavorInfo,
+    FlavorListResponse,
     JobDetailResponse,
     JobListResponse,
     JobSubmitRequest,
@@ -531,4 +533,36 @@ def get_usage(session: Session, namespace: str) -> UsageResponse:
         total_cpu_millicores_seconds=total_cpu,
         total_memory_mib_seconds=total_mem,
         total_gpu_seconds=total_gpu,
+    )
+
+
+def list_flavors(session: Session) -> FlavorListResponse:
+    settings = get_settings()
+
+    # Fetch per-flavor max resources from node_resources
+    result = session.execute(
+        text(
+            "SELECT flavor, MAX(cpu_millicores) AS max_cpu, "
+            "       MAX(memory_mib) AS max_memory, "
+            "       MAX(gpu) AS max_gpu "
+            "FROM node_resources "
+            "GROUP BY flavor"
+        )
+    )
+    db_maxes = {row["flavor"]: row for row in result.mappings()}
+
+    flavors = []
+    for flavor_def in settings.flavors:
+        db_row = db_maxes.get(flavor_def.name)
+        flavors.append(FlavorInfo(
+            name=flavor_def.name,
+            has_gpu=flavor_def.gpu_resource_name is not None,
+            max_cpu_millicores=db_row["max_cpu"] if db_row else None,
+            max_memory_mib=db_row["max_memory"] if db_row else None,
+            max_gpu=db_row["max_gpu"] if db_row else None,
+        ))
+
+    return FlavorListResponse(
+        flavors=flavors,
+        default_flavor=settings.DEFAULT_FLAVOR,
     )

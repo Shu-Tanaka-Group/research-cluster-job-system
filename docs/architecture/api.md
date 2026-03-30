@@ -444,9 +444,43 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 
 `daily` は `usage_date` 昇順でソートされる。ウィンドウ内に使用実績がない場合は `daily` が空配列、各 total が 0 となる。
 
-## 10. GET /v1/cli/version
+## 10. GET /v1/flavors
+
+利用可能な ResourceFlavor の一覧とリソース上限を返す。認証不要。
+
+### response
+
+```json
+{
+  "flavors": [
+    {
+      "name": "cpu",
+      "has_gpu": false,
+      "max_cpu_millicores": 128000,
+      "max_memory_mib": 515481,
+      "max_gpu": 0
+    },
+    {
+      "name": "gpu",
+      "has_gpu": true,
+      "max_cpu_millicores": 128000,
+      "max_memory_mib": 515686,
+      "max_gpu": 4
+    }
+  ],
+  "default_flavor": "cpu"
+}
+```
+
+`max_cpu_millicores` / `max_memory_mib` / `max_gpu` は `node_resources` テーブルの flavor 別 MAX 値。Watcher 未起動でノード情報がない flavor は `null` となる。
+
+`default_flavor` は ConfigMap `DEFAULT_FLAVOR` の値。
+
+## 11. GET /v1/cli/version
 
 PVC 上に配置された CLI バイナリの最新バージョンを返す。認証不要。
+
+> 注記: 本セクション以降のエンドポイント番号は §10（flavors）の追加により、従来から +1 されている。
 
 Submit API は PVC（`cli-binary`）の `latest` ファイルを読み取り、最新バージョン文字列を返す。
 
@@ -466,7 +500,7 @@ PVC に `latest` ファイルが存在しない場合（バイナリ未配置）
 { "detail": "CLI binary not found" }
 ```
 
-## 11. GET /v1/cli/versions
+## 12. GET /v1/cli/versions
 
 PVC 上に配置された CLI バイナリの全バージョン一覧を返す。認証不要。
 
@@ -489,7 +523,7 @@ PVC に `latest` ファイルが存在しない場合は 404 を返す。
 { "detail": "CLI binary not found" }
 ```
 
-## 12. GET /v1/cli/download
+## 13. GET /v1/cli/download
 
 PVC 上に配置された CLI バイナリを返す。認証不要。
 

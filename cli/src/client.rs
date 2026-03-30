@@ -148,6 +148,21 @@ pub struct UsageResponse {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct FlavorInfo {
+    pub name: String,
+    pub has_gpu: bool,
+    pub max_cpu_millicores: Option<i64>,
+    pub max_memory_mib: Option<i64>,
+    pub max_gpu: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FlavorListResponse {
+    pub flavors: Vec<FlavorInfo>,
+    pub default_flavor: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct CliVersionResponse {
     pub version: String,
 }
@@ -330,6 +345,17 @@ impl CjobClient {
             .http
             .post(format!("{}/v1/reset", self.base_url))
             .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn get_flavors(&self) -> Result<FlavorListResponse> {
+        let resp = self
+            .http
+            .get(format!("{}/v1/flavors", self.base_url))
             .send()
             .await
             .context("API への接続に失敗しました")?;

@@ -22,6 +22,8 @@ cjob logs --follow <job-id>
 cjob logs <job-id> --index <n>           # sweep: 特定インデックスのログ表示
 cjob logs --follow <job-id> --index <n>  # sweep: 特定インデックスのログ追跡
 cjob usage
+cjob flavor list                         # 利用可能な flavor 一覧
+cjob flavor info <name>                  # 指定 flavor のリソース上限
 cjob update
 ```
 
@@ -542,4 +544,41 @@ $ cjob update --list --pre
 $ cjob update --version 1.3.1-beta.1
 更新しますか？ 1.2.0 → 1.3.1-beta.1 [y/N] y
 更新が完了しました。(1.3.1-beta.1)
+```
+
+## 14. `cjob flavor` の動作
+
+`GET /v1/flavors` を呼び出し、利用可能な ResourceFlavor の一覧とリソース上限を表示する。認証不要のエンドポイントを使用するため、ServiceAccount JWT がなくても実行できる。
+
+### `cjob flavor list`
+
+利用可能な flavor の一覧を表示する。デフォルト flavor は `*` でマークする。
+
+```
+$ cjob flavor list
+NAME             GPU    DEFAULT
+cpu              -        *
+gpu              yes
+```
+
+### `cjob flavor info <name>`
+
+指定した flavor のリソース上限（ノード最大値）を表示する。1 ジョブが要求できるリソースの上限を確認できる。
+
+```
+$ cjob flavor info gpu
+name:   gpu
+GPU:    対応
+
+1 ジョブあたりのリソース上限（ノード最大値）:
+  CPU:    128 コア (128000m)
+  メモリ: 503.6 GiB (515686 MiB)
+  GPU:    4
+```
+
+存在しない flavor を指定した場合はエラーを表示する。
+
+```
+$ cjob flavor info xxx
+Error: flavor 'xxx' は存在しません。利用可能な flavor: cpu, gpu
 ```

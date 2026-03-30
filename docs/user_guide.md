@@ -122,11 +122,26 @@ cjob add --flavor gpu --gpu 1 -- python train.py --epochs 100
 
 ### 3.2 利用可能な種類の確認
 
-利用できるノードの種類はクラスタの構成によって異なります。存在しない種類を指定するとエラーメッセージに利用可能な種類の一覧が表示されます。
+`cjob flavor list` で利用できるノードの種類を確認できます。`*` が付いている種類がデフォルト（`--flavor` を省略した場合に使われる種類）です。
 
 ```
-$ cjob add --flavor xxx -- echo hello
-Error: 指定された flavor 'xxx' は存在しません。利用可能な flavor: cpu, gpu
+$ cjob flavor list
+NAME             GPU    DEFAULT
+cpu              -        *
+gpu              yes
+```
+
+各種類のリソース上限（1 ジョブで使える最大の CPU コア数やメモリ量）を確認するには `cjob flavor info` を使います。
+
+```
+$ cjob flavor info gpu
+name:   gpu
+GPU:    対応
+
+1 ジョブあたりのリソース上限（ノード最大値）:
+  CPU:    128 コア (128000m)
+  メモリ: 503.6 GiB (515686 MiB)
+  GPU:    4
 ```
 
 ### 3.3 sweep での使い方

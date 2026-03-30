@@ -131,6 +131,11 @@ enum Commands {
         #[arg(long)]
         index: Option<u32>,
     },
+    /// 計算リソースの種類を表示する
+    Flavor {
+        #[command(subcommand)]
+        action: FlavorCommands,
+    },
     /// CLI を最新バージョンに更新する
     Update {
         /// プレリリース版を含める
@@ -151,6 +156,17 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum FlavorCommands {
+    /// 利用可能な種類の一覧を表示する
+    List,
+    /// 指定した種類のリソース上限を表示する
+    Info {
+        /// 種類の名前（例: cpu, gpu）
+        name: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -158,6 +174,14 @@ async fn main() -> Result<()> {
     if let Commands::Update { pre, yes, list, version } = cli.command {
         let api_client = client::CjobClient::new_without_auth()?;
         return cmd_update(&api_client, pre, yes, list, version).await;
+    }
+
+    if let Commands::Flavor { action } = cli.command {
+        let api_client = client::CjobClient::new_without_auth()?;
+        return match action {
+            FlavorCommands::List => cmd_flavor_list(&api_client).await,
+            FlavorCommands::Info { name } => cmd_flavor_info(&api_client, &name).await,
+        };
     }
 
     let token = auth::read_token()?;
@@ -190,6 +214,7 @@ async fn main() -> Result<()> {
         Commands::Reset => cmd_reset(&api_client).await,
         Commands::Logs { job_id, follow, index } => logs::show_logs(job_id, follow, index, &api_client).await,
         Commands::Update { .. } => unreachable!(),
+        Commands::Flavor { .. } => unreachable!(),
     }
 }
 
@@ -647,6 +672,56 @@ async fn cmd_update_list(
             println!("{}", v);
         } else {
             println!("{} ({})", v, markers.join(", "));
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_flavor_list(client: &client::CjobClient) -> Result<()> {
+    let resp = client.get_flavors().await?;
+
+    println!("{:<16} {:<6} {}", "NAME", "GPU", "DEFAULT");
+    for f in &resp.flavors {
+        let gpu = if f.has_gpu { "yes" } else { "-" };
+        let default_marker = if f.name == resp.default_flavor { "  *" } else { "" };
+        println!("{:<16} {:<6} {}", f.name, gpu, default_marker);
+    }
+    Ok(())
+}
+
+async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> {
+    let resp = client.get_flavors().await?;
+
+    let flavor = resp.flavors.iter().find(|f| f.name == name);
+    let flavor = match flavor {
+        Some(f) => f,
+        None => {
+            let available: Vec<&str> = resp.flavors.iter().map(|f| f.name.as_str()).collect();
+            anyhow::bail!(
+                "flavor '{}' は存在しません。利用可能な flavor: {}",
+                name,
+                available.join(", ")
+            );
+        }
+    };
+
+    println!("name:   {}", flavor.name);
+    println!("GPU:    {}", if flavor.has_gpu { "対応" } else { "非対応" });
+
+    match (flavor.max_cpu_millicores, flavor.max_memory_mib, flavor.max_gpu) {
+        (Some(cpu), Some(mem), Some(gpu)) => {
+            println!();
+            println!("1 ジョブあたりのリソース上限（ノード最大値）:");
+            println!("  CPU:    {} コア ({}m)", cpu / 1000, cpu);
+            println!("  メモリ: {:.1} GiB ({} MiB)", mem as f64 / 1024.0, mem);
+            if flavor.has_gpu {
+                println!("  GPU:    {}", gpu);
+            }
+        }
+        _ => {
+            println!();
+            println!("（ノード情報がまだ取得されていません）");
         }
     }
 
