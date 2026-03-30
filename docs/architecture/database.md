@@ -192,22 +192,26 @@ CREATE TABLE node_resources (
     cpu_millicores      INTEGER NOT NULL,    -- allocatable CPU（ミリコア）
     memory_mib          INTEGER NOT NULL,    -- allocatable memory（MiB）
     gpu                 INTEGER NOT NULL DEFAULT 0,  -- allocatable GPU（nvidia.com/gpu）
+    flavor              TEXT NOT NULL DEFAULT 'cpu', -- ResourceFlavor 区分（'cpu' or 'gpu'）
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
+`flavor` 列は Watcher がノードの取得元セレクタに基づいて設定する。`NODE_LABEL_SELECTOR` 由来のノードは `'cpu'`、`GPU_NODE_LABEL_SELECTOR` 由来のノードは `'gpu'` となる。`DEFAULT 'cpu'` により、GPU セレクタ未設定の環境や既存データとの後方互換性を確保する。
+
 ### 6.1 同期処理
 
-Watcher が `NODE_LABEL_SELECTOR`（デフォルト `cluster-job=true`）に一致するノードの `status.allocatable` を取得し、ノードごとに UPSERT する。DB に存在するが K8s から消えたノード（撤去・ラベル除去）は DELETE する。
+Watcher が `NODE_LABEL_SELECTOR`（デフォルト `cluster-job=true`）および `GPU_NODE_LABEL_SELECTOR`（デフォルト `cluster-gpu-job=true`）に一致するノードの `status.allocatable` を取得し、ノードごとに UPSERT する。DB に存在するが K8s から消えたノード（撤去・ラベル除去）は DELETE する。
 
 ```sql
 -- UPSERT（ノードごと）
-INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, updated_at)
-VALUES (:name, :cpu, :mem, :gpu, NOW())
+INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor, updated_at)
+VALUES (:name, :cpu, :mem, :gpu, :flavor, NOW())
 ON CONFLICT (node_name) DO UPDATE SET
     cpu_millicores = :cpu,
     memory_mib = :mem,
     gpu = :gpu,
+    flavor = :flavor,
     updated_at = NOW();
 
 -- K8s から消えたノードの削除
@@ -232,6 +236,16 @@ SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu,
        COALESCE(SUM(memory_mib), 0) AS total_memory,
        COALESCE(SUM(gpu), 0) AS total_gpu
 FROM node_resources;
+```
+
+**cjobctl（flavor 別 allocatable 合計）**: `set-quota` のバリデーションで、指定 flavor に対応するノード群の allocatable 合計を取得する。
+
+```sql
+SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu,
+       COALESCE(SUM(memory_mib), 0) AS total_memory,
+       COALESCE(SUM(gpu), 0) AS total_gpu
+FROM node_resources
+WHERE flavor = :flavor;
 ```
 
 ### 6.3 設計判断
