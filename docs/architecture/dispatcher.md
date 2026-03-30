@@ -446,7 +446,7 @@ exit $EXIT_CODE
 
 1. ユーザーが `--flavor` で flavor を指定する（省略時は `DEFAULT_FLAVOR`）
 2. Submit API が `jobs.flavor` に記録する
-3. Dispatcher が `build_k8s_job` で K8s Job を作成し、Kueue の LocalQueue に投入する
+3. Dispatcher が `jobs.flavor` を参照して K8s Job を作成し、Kueue の LocalQueue に投入する。GPU ジョブの場合は対応する `gpu_resource_name` をリソース要求に追加する（§4.1 参照）。CPU ジョブの場合は CPU とメモリのみを設定し、flavor の選択は Kueue に委ねる
 4. Kueue が ClusterQueue 内の flavor リストからジョブのリソース要求を満たせる flavor を選択し、その `nodeLabels` に基づいてノードにスケジュールする
 
 Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。ノードの振り分けは Kueue の ResourceFlavor が担う。
