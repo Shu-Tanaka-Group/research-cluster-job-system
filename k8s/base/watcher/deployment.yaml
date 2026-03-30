@@ -48,16 +48,16 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DISPATCH_BUDGET_CHECK_INTERVAL_SEC
-            - name: NODE_LABEL_SELECTOR
+            - name: RESOURCE_FLAVORS
               valueFrom:
                 configMapKeyRef:
                   name: cjob-config
-                  key: NODE_LABEL_SELECTOR
-            - name: GPU_NODE_LABEL_SELECTOR
+                  key: RESOURCE_FLAVORS
+            - name: DEFAULT_FLAVOR
               valueFrom:
                 configMapKeyRef:
                   name: cjob-config
-                  key: GPU_NODE_LABEL_SELECTOR
+                  key: DEFAULT_FLAVOR
             - name: NODE_RESOURCE_SYNC_INTERVAL_SEC
               valueFrom:
                 configMapKeyRef:

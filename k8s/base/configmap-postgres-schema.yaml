@@ -16,6 +16,7 @@ data:
         cpu           TEXT NOT NULL,
         memory        TEXT NOT NULL,
         gpu           INTEGER NOT NULL DEFAULT 0,
+        flavor        TEXT NOT NULL DEFAULT 'cpu',
         time_limit_seconds INTEGER NOT NULL,
         status        TEXT NOT NULL,
         retry_count   INTEGER NOT NULL DEFAULT 0,

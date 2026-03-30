@@ -84,13 +84,33 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 
 日別リソース消費量の詳細は [database.md](database.md) §5、namespace の weight は [database.md](database.md) §4、DRF によるスケジューリングの詳細は [dispatcher.md](dispatcher.md) §1.1・§1.2 を参照。
 
-### ノードリソース同期に関する設定
+### ResourceFlavor 定義に関する設定
 
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
 |---|---|---|---|---|---|
-| `NODE_LABEL_SELECTOR` | ConfigMap | `cluster-job=true` | Watcher | 全体 | CPU ノードのリソース取得時の label selector。Kueue cpu-flavor の `nodeLabels` と一致させる |
-| `GPU_NODE_LABEL_SELECTOR` | ConfigMap | `cluster-gpu-job=true` | Watcher | 全体 | GPU ノードのリソース取得時の label selector。Kueue gpu-flavor の `nodeLabels` と一致させる。空文字列の場合は GPU ノードの同期をスキップする |
+| `RESOURCE_FLAVORS` | ConfigMap | JSON 配列 | Watcher / Submit API | 全体 | ResourceFlavor の定義リスト。各要素は `name`（flavor 名）、`label_selector`（K8s ノード取得用ラベルセレクタ）、`gpu_resource_name`（GPU リソース名、省略可）を持つ。Watcher がノード同期時に使用し、Submit API が flavor バリデーションに使用する |
+| `DEFAULT_FLAVOR` | ConfigMap | `cpu` | Submit API | 全体 | ユーザーが `--flavor` を省略した場合に使用されるデフォルトの flavor 名。`RESOURCE_FLAVORS` 内のいずれかの flavor 名と一致している必要がある |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | ConfigMap | 300 (5分) | Watcher | 全体 | ノードリソース同期間隔（秒）。Watcher のメインループの N サイクルに 1 回実行する |
+
+#### `RESOURCE_FLAVORS` の設定例
+
+```json
+[
+  {"name": "cpu", "label_selector": "cluster-job=true"},
+  {"name": "gpu-a100", "label_selector": "cluster-gpu-a100=true", "gpu_resource_name": "nvidia.com/gpu"},
+  {"name": "gpu-h100", "label_selector": "cluster-gpu-h100=true", "gpu_resource_name": "nvidia.com/gpu"}
+]
+```
+
+各フィールドの意味:
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `name` | 必須 | flavor 名。Kueue ResourceFlavor 名・DB の `jobs.flavor` / `node_resources.flavor` と一致させる |
+| `label_selector` | 必須 | K8s ノードの label selector。Kueue ResourceFlavor の `nodeLabels` と一致させる |
+| `gpu_resource_name` | 任意 | GPU リソースの K8s リソース名（例: `nvidia.com/gpu`、`amd.com/gpu`）。省略時はその flavor を GPU なし flavor として扱い、`gpu > 0` のジョブ投入を拒否する |
+
+flavor の `name` は Kueue ResourceFlavor の `metadata.name` と一致させる。これにより `cjobctl cluster set-quota --flavor <name>` で指定する名前と DB の flavor 値が統一され、変換処理が不要になる。
 
 ノードリソース同期の詳細は [watcher.md](watcher.md) §1.1、DB テーブル定義は [database.md](database.md) §6 を参照。
 

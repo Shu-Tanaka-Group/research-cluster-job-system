@@ -11,6 +11,9 @@ from .schemas import (
     CancelResponse,
     DailyUsage,
     DeleteResponse,
+    FlavorInfo,
+    FlavorListResponse,
+    FlavorNodeInfo,
     JobDetailResponse,
     JobListResponse,
     JobSubmitRequest,
@@ -49,11 +52,21 @@ def allocate_job_id(session: Session, namespace: str) -> int:
 def _validate_common(
     session: Session, namespace: str, resources: ResourceSpec,
     time_limit_seconds: int | None,
-) -> int:
-    """Shared validation for submit_job and submit_sweep. Returns resolved time_limit."""
+) -> tuple[int, str]:
+    """Shared validation for submit_job and submit_sweep. Returns (resolved_time_limit, resolved_flavor)."""
     from fastapi import HTTPException
 
     settings = get_settings()
+
+    # Resolve flavor
+    flavor = resources.flavor or settings.DEFAULT_FLAVOR
+    flavor_def = settings.get_flavor_definition(flavor)
+    if flavor_def is None:
+        available = ", ".join(f.name for f in settings.flavors)
+        raise HTTPException(
+            status_code=400,
+            detail=f"指定された flavor '{flavor}' は存在しません。利用可能な flavor: {available}",
+        )
 
     # Check for DELETING jobs (reset in progress)
     deleting_count = (
@@ -81,14 +94,16 @@ def _validate_common(
             detail=f"投入可能なジョブ数の上限（{settings.MAX_QUEUED_JOBS_PER_NAMESPACE}件）に達しています",
         )
 
-    # Check resource exceeds max node allocatable
+    # Check resource exceeds max node allocatable (per-flavor)
     max_resources = session.execute(
         text(
             "SELECT MAX(cpu_millicores) AS max_cpu, "
             "       MAX(memory_mib) AS max_memory, "
             "       MAX(gpu) AS max_gpu "
-            "FROM node_resources"
-        )
+            "FROM node_resources "
+            "WHERE flavor = :flavor"
+        ),
+        {"flavor": flavor},
     ).mappings().first()
 
     if max_resources and max_resources["max_cpu"] is not None:
@@ -98,28 +113,33 @@ def _validate_common(
         if req_cpu > max_resources["max_cpu"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"要求 CPU ({resources.cpu}) がクラスタ内の最大ノード "
+                detail=f"要求 CPU ({resources.cpu}) が flavor '{flavor}' 内の最大ノード "
                        f"({max_resources['max_cpu']}m) を超えています",
             )
         if req_mem > max_resources["max_memory"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"要求メモリ ({resources.memory}) がクラスタ内の最大ノード "
+                detail=f"要求メモリ ({resources.memory}) が flavor '{flavor}' 内の最大ノード "
                        f"({max_resources['max_memory']}Mi) を超えています",
             )
 
     # Check GPU resource
     if resources.gpu > 0:
+        if flavor_def.gpu_resource_name is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"flavor '{flavor}' は GPU をサポートしていません",
+            )
         max_gpu = max_resources["max_gpu"] if max_resources and max_resources["max_gpu"] is not None else 0
         if max_gpu == 0:
             raise HTTPException(
                 status_code=400,
-                detail="GPU ノードがクラスタに登録されていません",
+                detail=f"flavor '{flavor}' に GPU ノードが登録されていません",
             )
         if resources.gpu > max_gpu:
             raise HTTPException(
                 status_code=400,
-                detail=f"要求 GPU ({resources.gpu}) がクラスタ内の最大ノード "
+                detail=f"要求 GPU ({resources.gpu}) が flavor '{flavor}' 内の最大ノード "
                        f"({max_gpu}) を超えています",
             )
 
@@ -136,14 +156,14 @@ def _validate_common(
             detail="time_limit_seconds は 1 以上で指定してください",
         )
 
-    return time_limit
+    return time_limit, flavor
 
 
 def submit_job(
     session: Session, namespace: str, username: str, req: JobSubmitRequest
 ) -> JobSubmitResponse:
     settings = get_settings()
-    time_limit = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
+    time_limit, flavor = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
 
     # Allocate job_id
     job_id = allocate_job_id(session, namespace)
@@ -163,6 +183,7 @@ def submit_job(
         cpu=req.resources.cpu,
         memory=req.resources.memory,
         gpu=req.resources.gpu,
+        flavor=flavor,
         time_limit_seconds=time_limit,
         status="QUEUED",
         log_dir=log_dir,
@@ -188,7 +209,7 @@ def submit_sweep(
     from fastapi import HTTPException
 
     settings = get_settings()
-    time_limit = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
+    time_limit, flavor = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
 
     # Sweep-specific validation
     if req.completions < 1 or req.completions > settings.MAX_SWEEP_COMPLETIONS:
@@ -203,43 +224,45 @@ def submit_sweep(
             detail="parallelism は 1 以上 completions 以下で指定してください",
         )
 
-    # Check parallelism * per_pod_resource <= cluster total
-    cluster_totals = session.execute(
+    # Check parallelism * per_pod_resource <= flavor total
+    flavor_totals = session.execute(
         text(
             "SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu, "
             "       COALESCE(SUM(memory_mib), 0) AS total_memory, "
             "       COALESCE(SUM(gpu), 0) AS total_gpu "
-            "FROM node_resources"
-        )
+            "FROM node_resources "
+            "WHERE flavor = :flavor"
+        ),
+        {"flavor": flavor},
     ).mappings().first()
 
-    if cluster_totals and cluster_totals["total_cpu"] > 0:
+    if flavor_totals and flavor_totals["total_cpu"] > 0:
         req_cpu = parse_cpu_millicores(req.resources.cpu)
         req_mem = parse_memory_mib(req.resources.memory)
         total_cpu = req_cpu * req.parallelism
         total_mem = req_mem * req.parallelism
 
-        if total_cpu > cluster_totals["total_cpu"]:
+        if total_cpu > flavor_totals["total_cpu"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"parallelism × 要求 CPU ({total_cpu}m) がクラスタ全体の CPU "
-                       f"({cluster_totals['total_cpu']}m) を超えています",
+                detail=f"parallelism × 要求 CPU ({total_cpu}m) が flavor '{flavor}' の CPU 合計 "
+                       f"({flavor_totals['total_cpu']}m) を超えています",
             )
-        if total_mem > cluster_totals["total_memory"]:
+        if total_mem > flavor_totals["total_memory"]:
             raise HTTPException(
                 status_code=400,
-                detail=f"parallelism × 要求メモリ ({total_mem}Mi) がクラスタ全体のメモリ "
-                       f"({cluster_totals['total_memory']}Mi) を超えています",
+                detail=f"parallelism × 要求メモリ ({total_mem}Mi) が flavor '{flavor}' のメモリ合計 "
+                       f"({flavor_totals['total_memory']}Mi) を超えています",
             )
 
-    if req.resources.gpu > 0 and cluster_totals:
+    if req.resources.gpu > 0 and flavor_totals:
         total_gpu = req.resources.gpu * req.parallelism
-        cluster_gpu = cluster_totals["total_gpu"]
-        if cluster_gpu == 0 or total_gpu > cluster_gpu:
+        flavor_gpu = flavor_totals["total_gpu"]
+        if flavor_gpu == 0 or total_gpu > flavor_gpu:
             raise HTTPException(
                 status_code=400,
-                detail=f"parallelism × 要求 GPU ({total_gpu}) がクラスタ全体の GPU "
-                       f"({cluster_gpu}) を超えています",
+                detail=f"parallelism × 要求 GPU ({total_gpu}) が flavor '{flavor}' の GPU 合計 "
+                       f"({flavor_gpu}) を超えています",
             )
 
     # Allocate job_id
@@ -260,6 +283,7 @@ def submit_sweep(
         cpu=req.resources.cpu,
         memory=req.resources.memory,
         gpu=req.resources.gpu,
+        flavor=flavor,
         time_limit_seconds=time_limit,
         status="QUEUED",
         log_dir=log_dir,
@@ -341,6 +365,7 @@ def get_job(
         cpu=job.cpu,
         memory=job.memory,
         gpu=job.gpu,
+        flavor=job.flavor,
         time_limit_seconds=job.time_limit_seconds,
         k8s_job_name=job.k8s_job_name,
         log_dir=job.log_dir,
@@ -509,4 +534,40 @@ def get_usage(session: Session, namespace: str) -> UsageResponse:
         total_cpu_millicores_seconds=total_cpu,
         total_memory_mib_seconds=total_mem,
         total_gpu_seconds=total_gpu,
+    )
+
+
+def list_flavors(session: Session) -> FlavorListResponse:
+    settings = get_settings()
+
+    # Fetch all nodes grouped by flavor
+    result = session.execute(
+        text(
+            "SELECT node_name, cpu_millicores, memory_mib, gpu, flavor "
+            "FROM node_resources "
+            "ORDER BY flavor, node_name"
+        )
+    )
+    nodes_by_flavor: dict[str, list[FlavorNodeInfo]] = {}
+    for row in result.mappings():
+        nodes_by_flavor.setdefault(row["flavor"], []).append(
+            FlavorNodeInfo(
+                node_name=row["node_name"],
+                cpu_millicores=row["cpu_millicores"],
+                memory_mib=row["memory_mib"],
+                gpu=row["gpu"],
+            )
+        )
+
+    flavors = []
+    for flavor_def in settings.flavors:
+        flavors.append(FlavorInfo(
+            name=flavor_def.name,
+            has_gpu=flavor_def.gpu_resource_name is not None,
+            nodes=nodes_by_flavor.get(flavor_def.name, []),
+        ))
+
+    return FlavorListResponse(
+        flavors=flavors,
+        default_flavor=settings.DEFAULT_FLAVOR,
     )

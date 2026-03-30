@@ -414,7 +414,7 @@ spec:
 
 ### 3.2.1 GPU リソースの設定
 
-`job.gpu > 0` の場合、`build_k8s_job` はコンテナの `resources.requests` と `resources.limits` に `nvidia.com/gpu` を追加する。`job.gpu == 0` の場合は従来通り CPU / メモリのみを設定する。Kueue が GPU リソースの要求を検知し、`gpu-flavor` の `nodeLabels` に基づいて GPU ノードにスケジュールする。Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。
+`job.gpu > 0` の場合、`build_k8s_job` は `RESOURCE_FLAVORS` 設定から `job.flavor` に一致する flavor 定義を検索し、その `gpu_resource_name`（例: `nvidia.com/gpu`、`amd.com/gpu`）をコンテナの `resources.requests` と `resources.limits` に追加する。`job.gpu == 0` の場合は従来通り CPU / メモリのみを設定する。Kueue が GPU リソースの要求を検知し、対応する ResourceFlavor の `nodeLabels` に基づいてノードにスケジュールする。Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。
 
 ### 3.3 コマンドラッパー
 

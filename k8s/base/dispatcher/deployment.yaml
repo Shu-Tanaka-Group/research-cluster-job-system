@@ -88,6 +88,16 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: FAIR_SHARE_WINDOW_DAYS
+            - name: RESOURCE_FLAVORS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RESOURCE_FLAVORS
+            - name: DEFAULT_FLAVOR
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DEFAULT_FLAVOR
             - name: KUEUE_LOCAL_QUEUE_NAME
               valueFrom:
                 configMapKeyRef:

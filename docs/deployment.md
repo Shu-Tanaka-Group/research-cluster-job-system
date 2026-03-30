@@ -1108,17 +1108,13 @@ kubectl apply -f kueue/cluster-queue.yaml
 
 ## 16. 計算ノードの準備
 
-### 16.1 CPU ノード
-
-ジョブを実行するノードに `cluster-job=true` ラベルと Taint を付与する。Taint の値は ConfigMap `cjob-config` の `JOB_NODE_TAINT` で設定する（デフォルト: `role=computing:NoSchedule`）。
-
-| 設定 | 参照先 | 用途 |
-|---|---|---|
-| `cluster-job=true` ラベル | Kueue cpu-flavor の `nodeLabels` | Kueue が CPU Job Pod をスケジュールするノードの選定 |
-| `cluster-job=true` ラベル | ConfigMap `NODE_LABEL_SELECTOR` | Watcher が CPU ノードの allocatable リソースを取得する対象の選定 |
-| `JOB_NODE_TAINT` の値 | Kueue ResourceFlavor の `nodeTaints` / Job Pod の `tolerations` | 一般の Pod が計算ノードにスケジュールされることを防止 |
+計算ノードには flavor ごとに一意のラベルを付与する。各ラベルは Kueue ResourceFlavor の `nodeLabels` および ConfigMap `RESOURCE_FLAVORS` の `label_selector` と一致させる。Taint の値は ConfigMap `cjob-config` の `JOB_NODE_TAINT` で設定する（デフォルト: `role=computing:NoSchedule`）。
 
 **重要:** ConfigMap `JOB_NODE_TAINT`・Kueue ResourceFlavor の `nodeTaints`・ノードの Taint の 3 箇所は同じ値に統一する必要がある。不一致の場合、Job Pod がスケジュールされない。
+
+**Taint を使わない運用（共用ノード）:** 専用ノードを持たない環境では `JOB_NODE_TAINT` を空文字列に設定し、Kueue ResourceFlavor の `nodeTaints` を省略し、ノードへの Taint 付与を行わない。
+
+### 16.1 CPU ノード
 
 ```bash
 # CPU 計算ノードにラベルと Taint を付与する
@@ -1127,20 +1123,11 @@ kubectl taint node <node-name> role=computing:NoSchedule
 
 # 確認
 kubectl get nodes -l cluster-job=true
-kubectl describe node <node-name> | grep -A5 Taints
 ```
-
-**Taint を使わない運用（共用ノード）:** 専用ノードを持たない環境では `JOB_NODE_TAINT` を空文字列に設定し、Kueue ResourceFlavor の `nodeTaints` を省略し、ノードへの Taint 付与を行わない。
 
 ### 16.2 GPU ノード
 
-GPU ノードには CPU ノードとは異なるラベル `cluster-gpu-job=true` を付与する。Taint は CPU ノードと同じ `role=computing:NoSchedule` を使用する。
-
-| 設定 | 参照先 | 用途 |
-|---|---|---|
-| `cluster-gpu-job=true` ラベル | Kueue gpu-flavor の `nodeLabels` | Kueue が GPU Job Pod をスケジュールするノードの選定 |
-| `cluster-gpu-job=true` ラベル | ConfigMap `GPU_NODE_LABEL_SELECTOR` | Watcher が GPU ノードの allocatable リソースを取得する対象の選定 |
-| `JOB_NODE_TAINT` の値 | Kueue ResourceFlavor の `nodeTaints` / Job Pod の `tolerations` | 一般の Pod が計算ノードにスケジュールされることを防止 |
+GPU ノードには CPU ノードとは異なるラベル（例: `cluster-gpu-job=true`）を付与する。Taint は CPU ノードと同じ値を使用する。
 
 ```bash
 # GPU ノードにラベルと Taint を付与する
@@ -1149,12 +1136,82 @@ kubectl taint node <gpu-node-name> role=computing:NoSchedule
 
 # 確認
 kubectl get nodes -l cluster-gpu-job=true
-kubectl describe node <gpu-node-name> | grep -A5 Taints
 ```
 
-GPU ノードの振り分けは Kueue の ResourceFlavor `nodeLabels` が担う。Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。`nvidia.com/gpu` リソースを要求するジョブは Kueue が自動的に `gpu-flavor` にマッチさせる。
+ノードの振り分けは Kueue の ResourceFlavor `nodeLabels` が担う。Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。
 
 計算ノードを追加・撤去した場合、Watcher が `node_resources` テーブルを自動的に同期するため、Dispatcher や Submit API の設定変更は不要である。
+
+### 16.3 新しい ResourceFlavor の追加手順
+
+異なる CPU アーキテクチャや異なる GPU モデルのノードを追加する場合、以下の手順で新しい flavor を作成する。
+
+#### 1. ノードにラベルと Taint を付与する
+
+```bash
+kubectl label node <node-name> <label-key>=true    # 例: cluster-gpu-h100=true
+kubectl taint node <node-name> role=computing:NoSchedule
+```
+
+#### 2. Kueue ResourceFlavor を作成する
+
+```yaml
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: <flavor名>         # 例: gpu-h100（DB の flavor 値と一致させる）
+spec:
+  nodeLabels:
+    <label-key>: "true"    # ステップ 1 で付与したラベルと一致させる
+  nodeTaints:
+    - key: "role"
+      value: "computing"
+      effect: "NoSchedule"
+  tolerations:
+    - key: "role"
+      operator: "Equal"
+      value: "computing"
+      effect: "NoSchedule"
+```
+
+#### 3. ClusterQueue に flavor を追加する
+
+```bash
+kubectl edit clusterqueue cjob-cluster-queue
+```
+
+`spec.resourceGroups[0].flavors` に新しい flavor のエントリを追加する。GPU リソースを持たない flavor は `nvidia.com/gpu` の nominalQuota を `"0"` に設定する。他の flavor のリソースを保護する場合は `lendingLimit: "0"` を設定する。
+
+#### 4. ConfigMap `RESOURCE_FLAVORS` に定義を追加する
+
+```bash
+kubectl edit configmap cjob-config -n cjob-system
+```
+
+`RESOURCE_FLAVORS` の JSON 配列に新しい flavor 定義を追加する。GPU を持つ flavor は `gpu_resource_name` を指定する。
+
+```json
+{"name": "gpu-h100", "label_selector": "cluster-gpu-h100=true", "gpu_resource_name": "nvidia.com/gpu"}
+```
+
+#### 5. コンポーネントを再起動する
+
+```bash
+kubectl rollout restart deployment submit-api dispatcher watcher -n cjob-system
+```
+
+#### 6. 動作確認
+
+```bash
+# ノード同期の確認（次回の同期サイクルで反映される）
+cjobctl cluster resources
+
+# nominalQuota の確認
+cjobctl cluster show-quota
+
+# ジョブ投入の確認
+cjob add --flavor <flavor名> -- echo hello
+```
 
 ---
 

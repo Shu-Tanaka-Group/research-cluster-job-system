@@ -31,7 +31,8 @@ pub async fn migrate(client: &Client) -> Result<()> {
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS failed_indexes TEXT; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS succeeded_count INTEGER; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS failed_count INTEGER; \
-        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS node_name TEXT;";
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS node_name TEXT; \
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS flavor TEXT NOT NULL DEFAULT 'cpu';";
 
     client
         .batch_execute(ddl)

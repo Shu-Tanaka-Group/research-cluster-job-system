@@ -31,6 +31,8 @@ pub struct ResourceSpec {
     pub cpu: String,
     pub memory: String,
     pub gpu: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flavor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +73,7 @@ pub struct JobDetailResponse {
     pub cpu: String,
     pub memory: String,
     pub gpu: u32,
+    pub flavor: String,
     pub time_limit_seconds: u32,
     pub k8s_job_name: Option<String>,
     pub log_dir: Option<String>,
@@ -142,6 +145,27 @@ pub struct UsageResponse {
     pub total_cpu_millicores_seconds: i64,
     pub total_memory_mib_seconds: i64,
     pub total_gpu_seconds: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FlavorNodeInfo {
+    pub node_name: String,
+    pub cpu_millicores: i64,
+    pub memory_mib: i64,
+    pub gpu: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FlavorInfo {
+    pub name: String,
+    pub has_gpu: bool,
+    pub nodes: Vec<FlavorNodeInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FlavorListResponse {
+    pub flavors: Vec<FlavorInfo>,
+    pub default_flavor: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -327,6 +351,17 @@ impl CjobClient {
             .http
             .post(format!("{}/v1/reset", self.base_url))
             .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn get_flavors(&self) -> Result<FlavorListResponse> {
+        let resp = self
+            .http
+            .get(format!("{}/v1/flavors", self.base_url))
             .send()
             .await
             .context("API への接続に失敗しました")?;

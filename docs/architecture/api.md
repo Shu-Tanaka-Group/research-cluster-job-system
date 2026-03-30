@@ -38,11 +38,14 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
   "resources": {
     "cpu": "2",
     "memory": "4Gi",
-    "gpu": 0
+    "gpu": 0,
+    "flavor": "cpu"
   },
   "time_limit_seconds": 3600
 }
 ```
+
+`resources.flavor` は省略可能。省略時はサーバ側デフォルト（ConfigMap: `DEFAULT_FLAVOR`、デフォルト `cpu`）を使用する。
 
 ### response
 
@@ -55,26 +58,36 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 
 ### バリデーション
 
-要求リソース（CPU / メモリ）がクラスタ内の最大ノードの allocatable を超える場合は 400 を返す。
+`resources.flavor` が `RESOURCE_FLAVORS` に存在しない場合は 400 を返す。
+
+```json
+{ "detail": "指定された flavor 'xxx' は存在しません。利用可能な flavor: cpu, gpu-a100" }
+```
+
+要求リソース（CPU / メモリ）が指定 flavor 内の最大ノードの allocatable を超える場合は 400 を返す。
 単一ノードに収まらないジョブは原理的に実行不可能であり、DISPATCHED 状態のまま無期限に滞留することを防ぐ。
-`node_resources` テーブルが空の場合（Watcher 未起動等）はこのバリデーションをスキップする。
+指定 flavor のノードが `node_resources` テーブルに存在しない場合（Watcher 未起動等）はこのバリデーションをスキップする。
 
 ```json
-{ "detail": "要求 CPU (128) がクラスタ内の最大ノード (64000m) を超えています" }
+{ "detail": "要求 CPU (128) が flavor 'cpu' 内の最大ノード (64000m) を超えています" }
 ```
 
 ```json
-{ "detail": "要求メモリ (2Ti) がクラスタ内の最大ノード (262144Mi) を超えています" }
+{ "detail": "要求メモリ (2Ti) が flavor 'cpu' 内の最大ノード (262144Mi) を超えています" }
 ```
 
-`resources.gpu > 0` の場合、GPU ノードが登録されていなければ 400 を返す。要求 GPU がクラスタ内の最大ノードの GPU 数を超える場合も 400 を返す。
+`resources.gpu > 0` の場合、指定 flavor の `gpu_resource_name` が未設定（GPU なし flavor）なら 400 を返す。GPU ノードが登録されていなければ 400 を返す。要求 GPU が flavor 内の最大ノードの GPU 数を超える場合も 400 を返す。
 
 ```json
-{ "detail": "GPU ノードがクラスタに登録されていません" }
+{ "detail": "flavor 'cpu' は GPU をサポートしていません" }
 ```
 
 ```json
-{ "detail": "要求 GPU (8) がクラスタ内の最大ノード (4) を超えています" }
+{ "detail": "flavor 'gpu-a100' に GPU ノードが登録されていません" }
+```
+
+```json
+{ "detail": "要求 GPU (8) が flavor 'gpu-a100' 内の最大ノード (4) を超えています" }
 ```
 
 `time_limit_seconds` は省略可能。省略時はサーバ側デフォルト（ConfigMap: `DEFAULT_TIME_LIMIT_SECONDS`、デフォルト 86400 = 24時間）を使用する。
@@ -122,7 +135,8 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
   "resources": {
     "cpu": "2",
     "memory": "4Gi",
-    "gpu": 0
+    "gpu": 0,
+    "flavor": "cpu"
   },
   "completions": 100,
   "parallelism": 10,
@@ -147,7 +161,7 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 - `completions` が `MAX_SWEEP_COMPLETIONS`（デフォルト 1000）を超える → 400
 - `parallelism` が 1 未満 → 400
 - `parallelism` が `completions` を超える → 400
-- `parallelism × Pod リソース` がクラスタ全体の allocatable 合計を超える → 400
+- `parallelism × Pod リソース` が指定 flavor の allocatable 合計を超える → 400
 
 ```json
 { "detail": "completions は 1 以上 1000 以下で指定してください" }
@@ -158,11 +172,11 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 ```
 
 ```json
-{ "detail": "parallelism × 要求 CPU (20000m) がクラスタ全体の CPU (256000m) を超えています" }
+{ "detail": "parallelism × 要求 CPU (20000m) が flavor 'cpu' の CPU 合計 (256000m) を超えています" }
 ```
 
 ```json
-{ "detail": "parallelism × 要求 GPU (8) がクラスタ全体の GPU (4) を超えています" }
+{ "detail": "parallelism × 要求 GPU (8) が flavor 'gpu-a100' の GPU 合計 (4) を超えています" }
 ```
 
 ## 3. GET /v1/jobs
@@ -228,6 +242,7 @@ GET /v1/jobs?limit=50&order=desc
   "cpu": "2",
   "memory": "4Gi",
   "gpu": 0,
+  "flavor": "cpu",
   "time_limit_seconds": 86400,
   "k8s_job_name": "cjob-alice-1",
   "log_dir": "/home/jovyan/.cjob/logs/1",
@@ -429,7 +444,40 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 
 `daily` は `usage_date` 昇順でソートされる。ウィンドウ内に使用実績がない場合は `daily` が空配列、各 total が 0 となる。
 
-## 10. GET /v1/cli/version
+## 10. GET /v1/flavors
+
+利用可能な ResourceFlavor の一覧とリソース上限を返す。認証不要。
+
+### response
+
+```json
+{
+  "flavors": [
+    {
+      "name": "cpu",
+      "has_gpu": false,
+      "nodes": [
+        {"node_name": "worker07", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0},
+        {"node_name": "worker08", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0}
+      ]
+    },
+    {
+      "name": "gpu",
+      "has_gpu": true,
+      "nodes": [
+        {"node_name": "gworker02", "cpu_millicores": 128000, "memory_mib": 515686, "gpu": 4}
+      ]
+    }
+  ],
+  "default_flavor": "cpu"
+}
+```
+
+各 flavor の `nodes` には `node_resources` テーブルからその flavor に属するノードの一覧が含まれる。Watcher 未起動でノード情報がない flavor は `nodes` が空配列となる。
+
+`default_flavor` は ConfigMap `DEFAULT_FLAVOR` の値。
+
+## 11. GET /v1/cli/version
 
 PVC 上に配置された CLI バイナリの最新バージョンを返す。認証不要。
 
@@ -451,7 +499,7 @@ PVC に `latest` ファイルが存在しない場合（バイナリ未配置）
 { "detail": "CLI binary not found" }
 ```
 
-## 11. GET /v1/cli/versions
+## 12. GET /v1/cli/versions
 
 PVC 上に配置された CLI バイナリの全バージョン一覧を返す。認証不要。
 
@@ -474,7 +522,7 @@ PVC に `latest` ファイルが存在しない場合は 404 を返す。
 { "detail": "CLI binary not found" }
 ```
 
-## 12. GET /v1/cli/download
+## 13. GET /v1/cli/download
 
 PVC 上に配置された CLI バイナリを返す。認証不要。
 

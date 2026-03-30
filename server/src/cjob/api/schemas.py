@@ -7,6 +7,7 @@ class ResourceSpec(BaseModel):
     cpu: str = "1"
     memory: str = "1Gi"
     gpu: int = 0
+    flavor: str | None = None
 
 
 class JobSubmitRequest(BaseModel):
@@ -61,6 +62,7 @@ class JobDetailResponse(BaseModel):
     cpu: str
     memory: str
     gpu: int
+    flavor: str
     time_limit_seconds: int
     k8s_job_name: str | None
     log_dir: str | None
@@ -125,6 +127,24 @@ class ResetResponse(BaseModel):
 class ResetErrorResponse(BaseModel):
     message: str
     blocking_job_ids: list[int] | None = None
+
+
+class FlavorNodeInfo(BaseModel):
+    node_name: str
+    cpu_millicores: int
+    memory_mib: int
+    gpu: int
+
+
+class FlavorInfo(BaseModel):
+    name: str
+    has_gpu: bool
+    nodes: list[FlavorNodeInfo]
+
+
+class FlavorListResponse(BaseModel):
+    flavors: list[FlavorInfo]
+    default_flavor: str
 
 
 class CliVersionResponse(BaseModel):

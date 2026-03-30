@@ -16,6 +16,7 @@ from .schemas import (
     CliVersionsResponse,
     DeleteRequest,
     DeleteResponse,
+    FlavorListResponse,
     JobDetailResponse,
     JobListResponse,
     JobSubmitRequest,
@@ -31,6 +32,7 @@ from .services import (
     delete_jobs,
     get_job,
     get_usage,
+    list_flavors,
     list_jobs,
     reset,
     submit_job,
@@ -87,6 +89,13 @@ def download_cli_binary(version: str | None = Query(default=None)):
         media_type="application/octet-stream",
         filename="cjob",
     )
+
+
+@router.get("/flavors", response_model=FlavorListResponse)
+def get_flavors(
+    session: Session = Depends(get_session),
+):
+    return list_flavors(session)
 
 
 @router.post("/sweep", response_model=JobSubmitResponse, status_code=201)

@@ -35,6 +35,10 @@ enum Commands {
         #[arg(long, default_value = "0")]
         gpu: u32,
 
+        /// ResourceFlavor 名（例: "cpu", "gpu-a100"）
+        #[arg(long)]
+        flavor: Option<String>,
+
         /// 実行時間の上限（例: 3600, 1h, 6h, 1d, 3d）
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
@@ -64,6 +68,10 @@ enum Commands {
         /// GPU 数（例: 1）
         #[arg(long, default_value = "0")]
         gpu: u32,
+
+        /// ResourceFlavor 名（例: "cpu", "gpu-a100"）
+        #[arg(long)]
+        flavor: Option<String>,
 
         /// コマンド（-- の後に指定）
         #[arg(trailing_var_arg = true, required = true)]
@@ -123,6 +131,11 @@ enum Commands {
         #[arg(long)]
         index: Option<u32>,
     },
+    /// 計算リソースの種類を表示する
+    Flavor {
+        #[command(subcommand)]
+        action: FlavorCommands,
+    },
     /// CLI を最新バージョンに更新する
     Update {
         /// プレリリース版を含める
@@ -143,6 +156,17 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum FlavorCommands {
+    /// 利用可能な種類の一覧を表示する
+    List,
+    /// 指定した種類のリソース上限を表示する
+    Info {
+        /// 種類の名前（例: cpu, gpu）
+        name: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -150,6 +174,14 @@ async fn main() -> Result<()> {
     if let Commands::Update { pre, yes, list, version } = cli.command {
         let api_client = client::CjobClient::new_without_auth()?;
         return cmd_update(&api_client, pre, yes, list, version).await;
+    }
+
+    if let Commands::Flavor { action } = cli.command {
+        let api_client = client::CjobClient::new_without_auth()?;
+        return match action {
+            FlavorCommands::List => cmd_flavor_list(&api_client).await,
+            FlavorCommands::Info { name } => cmd_flavor_info(&api_client, &name).await,
+        };
     }
 
     let token = auth::read_token()?;
@@ -161,8 +193,9 @@ async fn main() -> Result<()> {
             cpu,
             memory,
             gpu,
+            flavor,
             time_limit,
-        } => cmd_add(&api_client, command, cpu, memory, gpu, time_limit).await,
+        } => cmd_add(&api_client, command, cpu, memory, gpu, flavor, time_limit).await,
         Commands::Sweep {
             count,
             parallel,
@@ -170,8 +203,9 @@ async fn main() -> Result<()> {
             cpu,
             memory,
             gpu,
+            flavor,
             command,
-        } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, gpu, time_limit).await,
+        } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, gpu, flavor, time_limit).await,
         Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status.map(|s| s.to_uppercase()), limit, reverse, all).await,
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
@@ -180,6 +214,7 @@ async fn main() -> Result<()> {
         Commands::Reset => cmd_reset(&api_client).await,
         Commands::Logs { job_id, follow, index } => logs::show_logs(job_id, follow, index, &api_client).await,
         Commands::Update { .. } => unreachable!(),
+        Commands::Flavor { .. } => unreachable!(),
     }
 }
 
@@ -236,6 +271,7 @@ async fn cmd_add(
     cpu: String,
     memory: String,
     gpu: u32,
+    flavor: Option<String>,
     time_limit: Option<String>,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?
@@ -269,6 +305,7 @@ async fn cmd_add(
             cpu,
             memory,
             gpu,
+            flavor,
         },
         time_limit_seconds,
     };
@@ -286,6 +323,7 @@ async fn cmd_sweep(
     cpu: String,
     memory: String,
     gpu: u32,
+    flavor: Option<String>,
     time_limit: Option<String>,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?
@@ -325,6 +363,7 @@ async fn cmd_sweep(
             cpu,
             memory,
             gpu,
+            flavor,
         },
         completions: count,
         parallelism: parallel,
@@ -633,6 +672,70 @@ async fn cmd_update_list(
             println!("{}", v);
         } else {
             println!("{} ({})", v, markers.join(", "));
+        }
+    }
+
+    Ok(())
+}
+
+async fn cmd_flavor_list(client: &client::CjobClient) -> Result<()> {
+    let resp = client.get_flavors().await?;
+
+    println!("{:<16} {:<6} {:<8} {}", "NAME", "GPU", "NODES", "DEFAULT");
+    for f in &resp.flavors {
+        let gpu = if f.has_gpu { "yes" } else { "-" };
+        let default_marker = if f.name == resp.default_flavor { "  *" } else { "" };
+        println!("{:<16} {:<6} {:<8} {}", f.name, gpu, f.nodes.len(), default_marker);
+    }
+    Ok(())
+}
+
+async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> {
+    let resp = client.get_flavors().await?;
+
+    let flavor = resp.flavors.iter().find(|f| f.name == name);
+    let flavor = match flavor {
+        Some(f) => f,
+        None => {
+            let available: Vec<&str> = resp.flavors.iter().map(|f| f.name.as_str()).collect();
+            anyhow::bail!(
+                "flavor '{}' は存在しません。利用可能な flavor: {}",
+                name,
+                available.join(", ")
+            );
+        }
+    };
+
+    println!("name:   {}", flavor.name);
+    println!("GPU:    {}", if flavor.has_gpu { "対応" } else { "非対応" });
+
+    if flavor.nodes.is_empty() {
+        println!();
+        println!("（ノード情報がまだ取得されていません）");
+        return Ok(());
+    }
+
+    println!();
+    if flavor.has_gpu {
+        println!("{:<24} {:>12} {:>14} {:>6}", "NODE", "CPU (cores)", "Memory (GiB)", "GPU");
+        for n in &flavor.nodes {
+            println!(
+                "{:<24} {:>12} {:>14.1} {:>6}",
+                n.node_name,
+                n.cpu_millicores / 1000,
+                n.memory_mib as f64 / 1024.0,
+                n.gpu,
+            );
+        }
+    } else {
+        println!("{:<24} {:>12} {:>14}", "NODE", "CPU (cores)", "Memory (GiB)");
+        for n in &flavor.nodes {
+            println!(
+                "{:<24} {:>12} {:>14.1}",
+                n.node_name,
+                n.cpu_millicores / 1000,
+                n.memory_mib as f64 / 1024.0,
+            );
         }
     }
 

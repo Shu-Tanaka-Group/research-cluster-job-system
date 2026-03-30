@@ -11,8 +11,8 @@ const CLUSTER_QUEUE_NAME: &str = "cjob-cluster-queue";
 pub async fn resources(client: &Client) -> Result<()> {
     let rows = client
         .query(
-            "SELECT node_name, cpu_millicores, memory_mib, gpu, updated_at \
-             FROM node_resources ORDER BY node_name",
+            "SELECT node_name, cpu_millicores, memory_mib, gpu, flavor, updated_at \
+             FROM node_resources ORDER BY flavor, node_name",
             &[],
         )
         .await?;
@@ -24,18 +24,20 @@ pub async fn resources(client: &Client) -> Result<()> {
 
     println!("=== Node Resources ===");
     println!(
-        "{:<24} {:>12} {:>14} {:>6} {:>22}",
-        "NODE", "CPU (cores)", "Memory (GiB)", "GPU", "Updated"
+        "{:<24} {:<14} {:>12} {:>14} {:>6} {:>22}",
+        "NODE", "FLAVOR", "CPU (cores)", "Memory (GiB)", "GPU", "Updated"
     );
     for row in &rows {
         let name: &str = row.get(0);
         let cpu: i32 = row.get(1);
         let mem: i32 = row.get(2);
         let gpu: i32 = row.get(3);
-        let updated: chrono::DateTime<chrono::Utc> = row.get(4);
+        let flv: &str = row.get(4);
+        let updated: chrono::DateTime<chrono::Utc> = row.get(5);
         println!(
-            "{:<24} {:>12} {:>14.1} {:>6} {:>22}",
+            "{:<24} {:<14} {:>12} {:>14.1} {:>6} {:>22}",
             name,
+            flv,
             cpu as f64 / 1000.0,
             mem as f64 / 1024.0,
             gpu,
@@ -63,24 +65,53 @@ pub async fn resources(client: &Client) -> Result<()> {
     println!("Memory: {:.1} GiB ({} MiB)", total_mem as f64 / 1024.0, total_mem);
     println!("GPU:    {}", total_gpu);
 
-    // Max per node
-    let maxes = client
-        .query_one(
-            "SELECT MAX(cpu_millicores), MAX(memory_mib), MAX(gpu) \
-             FROM node_resources",
+    // Per-flavor totals and max per node
+    let flavor_rows = client
+        .query(
+            "SELECT flavor, \
+                    SUM(cpu_millicores)::BIGINT, SUM(memory_mib)::BIGINT, SUM(gpu)::BIGINT, \
+                    MAX(cpu_millicores), MAX(memory_mib), MAX(gpu) \
+             FROM node_resources GROUP BY flavor ORDER BY flavor",
             &[],
         )
         .await?;
-    let max_cpu: Option<i32> = maxes.get(0);
-    let max_mem: Option<i32> = maxes.get(1);
-    let max_gpu: Option<i32> = maxes.get(2);
 
-    if let (Some(mc), Some(mm), Some(mg)) = (max_cpu, max_mem, max_gpu) {
+    if !flavor_rows.is_empty() {
         println!();
-        println!("=== Max per Node (Submit API rejection threshold) ===");
-        println!("CPU:    {} cores ({}m)", mc / 1000, mc);
-        println!("Memory: {:.1} GiB ({} MiB)", mm as f64 / 1024.0, mm);
-        println!("GPU:    {}", mg);
+        println!("=== Per-Flavor Totals ===");
+        println!(
+            "{:<14} {:>12} {:>14} {:>6}",
+            "FLAVOR", "CPU (cores)", "Memory (GiB)", "GPU"
+        );
+        for row in &flavor_rows {
+            let flv: &str = row.get(0);
+            let cpu: i64 = row.get(1);
+            let mem: i64 = row.get(2);
+            let gpu: i64 = row.get(3);
+            println!(
+                "{:<14} {:>12} {:>14.1} {:>6}",
+                flv, cpu / 1000, mem as f64 / 1024.0, gpu,
+            );
+        }
+
+        println!();
+        println!("=== Per-Flavor Max per Node (Submit API rejection threshold) ===");
+        println!(
+            "{:<14} {:>12} {:>14} {:>6}",
+            "FLAVOR", "CPU (cores)", "Memory (GiB)", "GPU"
+        );
+        for row in &flavor_rows {
+            let flv: &str = row.get(0);
+            let mc: Option<i32> = row.get(4);
+            let mm: Option<i32> = row.get(5);
+            let mg: Option<i32> = row.get(6);
+            if let (Some(mc), Some(mm), Some(mg)) = (mc, mm, mg) {
+                println!(
+                    "{:<14} {:>12} {:>14.1} {:>6}",
+                    flv, mc / 1000, mm as f64 / 1024.0, mg,
+                );
+            }
+        }
     }
 
     Ok(())
@@ -279,11 +310,8 @@ pub async fn set_quota(
             )
         })?;
 
-    // Map Kueue flavor name to DB flavor value (e.g. "cpu-flavor" → "cpu")
-    let db_flavor = flavor.strip_suffix("-flavor").unwrap_or(flavor);
-
-    // Fetch allocatable totals for the corresponding node flavor
-    let totals = ClusterTotals::from_db_by_flavor(db_client, db_flavor).await;
+    // Fetch allocatable totals for the flavor (Kueue name = DB name)
+    let totals = ClusterTotals::from_db_by_flavor(db_client, flavor).await;
     let alloc_cpu_cores = totals.cpu_millicores / 1000;
     let alloc_mem_mib = totals.memory_mib;
     let alloc_gpu = totals.gpus;
@@ -296,12 +324,12 @@ pub async fn set_quota(
             exceeds = true;
             eprintln!(
                 "Error: CPU {} exceeds '{}' node allocatable total ({} cores)",
-                c, db_flavor, alloc_cpu_cores,
+                c, flavor, alloc_cpu_cores,
             );
         } else if (c as i64) < alloc_cpu_cores / 10 {
             eprintln!(
                 "Warning: CPU {} is very small compared to '{}' node allocatable total ({} cores)",
-                c, db_flavor, alloc_cpu_cores,
+                c, flavor, alloc_cpu_cores,
             );
         }
     }
@@ -313,13 +341,13 @@ pub async fn set_quota(
                 exceeds = true;
                 eprintln!(
                     "Error: Memory {} exceeds '{}' node allocatable total ({:.1} GiB)",
-                    mem, db_flavor,
+                    mem, flavor,
                     alloc_mem_mib as f64 / 1024.0,
                 );
             } else if (mem_mib as i64) < alloc_mem_mib / 10 {
                 eprintln!(
                     "Warning: Memory {} is very small compared to '{}' node allocatable total ({:.1} GiB)",
-                    mem, db_flavor,
+                    mem, flavor,
                     alloc_mem_mib as f64 / 1024.0,
                 );
             }
@@ -332,12 +360,12 @@ pub async fn set_quota(
             exceeds = true;
             eprintln!(
                 "Error: GPU {} exceeds '{}' node allocatable total ({})",
-                g, db_flavor, alloc_gpu,
+                g, flavor, alloc_gpu,
             );
         } else if alloc_gpu > 0 && (g as i64) < alloc_gpu / 10 {
             eprintln!(
                 "Warning: GPU {} is very small compared to '{}' node allocatable total ({})",
-                g, db_flavor, alloc_gpu,
+                g, flavor, alloc_gpu,
             );
         }
     }

@@ -3,8 +3,8 @@
 ## 1. 基本コマンド
 
 ```bash
-cjob add [--gpu <N>] [--time-limit <duration>] -- <command...>
-cjob sweep -n <count> --parallel <n> [--gpu <N>] [--time-limit <duration>] -- <command...>
+cjob add [--flavor <name>] [--gpu <N>] [--time-limit <duration>] -- <command...>
+cjob sweep -n <count> --parallel <n> [--flavor <name>] [--gpu <N>] [--time-limit <duration>] -- <command...>
 cjob list
 cjob status <job-id>
 cjob cancel <job-id>              # 単体指定
@@ -22,6 +22,8 @@ cjob logs --follow <job-id>
 cjob logs <job-id> --index <n>           # sweep: 特定インデックスのログ表示
 cjob logs --follow <job-id> --index <n>  # sweep: 特定インデックスのログ追跡
 cjob usage
+cjob flavor list                         # 利用可能な flavor 一覧
+cjob flavor info <name>                  # 指定 flavor のリソース上限
 cjob update
 ```
 
@@ -32,8 +34,8 @@ cjob update
 ```bash
 cjob add -- python main.py --alpha 0.1 --beta 16
 
-# GPU ジョブの投入
-cjob add --gpu 1 -- python train.py --epochs 100
+# GPU ジョブの投入（flavor を指定）
+cjob add --flavor gpu-a100 --gpu 1 -- python train.py --epochs 100
 ```
 
 ### 2.2 シェルスクリプトの実行
@@ -122,6 +124,7 @@ cjob delete --all
 | `--cpu <cpu>` | 任意 | CPU リソース。デフォルト "1" |
 | `--memory <memory>` | 任意 | メモリリソース。デフォルト "1Gi" |
 | `--gpu <N>` | 任意 | GPU 数。デフォルト 0（GPU なし） |
+| `--flavor <name>` | 任意 | ResourceFlavor 名（例: "cpu", "gpu-a100"）。省略時はサーバ側デフォルト |
 | `-- <command>` | 必須 | 各タスクで実行するコマンド |
 
 ### `_INDEX_` プレースホルダー
@@ -261,6 +264,7 @@ job_id:       2
 status:       RUNNING
 command:      python main.py --alpha 0.2 --beta 16
 cwd:          /home/jovyan/project-a/exp1
+flavor:       cpu
 cpu:          2
 memory:       4Gi
 gpu:          0
@@ -540,4 +544,51 @@ $ cjob update --list --pre
 $ cjob update --version 1.3.1-beta.1
 更新しますか？ 1.2.0 → 1.3.1-beta.1 [y/N] y
 更新が完了しました。(1.3.1-beta.1)
+```
+
+## 14. `cjob flavor` の動作
+
+`GET /v1/flavors` を呼び出し、利用可能な ResourceFlavor の一覧とリソース上限を表示する。認証不要のエンドポイントを使用するため、ServiceAccount JWT がなくても実行できる。
+
+### `cjob flavor list`
+
+利用可能な flavor の一覧を表示する。デフォルト flavor は `*` でマークする。
+
+```
+$ cjob flavor list
+NAME             GPU    NODES    DEFAULT
+cpu              -      2          *
+gpu              yes    1
+```
+
+### `cjob flavor info <name>`
+
+指定した flavor に属するノードの一覧とリソース情報を表示する。
+
+```
+$ cjob flavor info cpu
+name:   cpu
+GPU:    非対応
+
+NODE                     CPU (cores)   Memory (GiB)
+worker07                         128          503.4
+worker08                         128          503.4
+```
+
+GPU 対応 flavor の場合は GPU 列も表示する。
+
+```
+$ cjob flavor info gpu
+name:   gpu
+GPU:    対応
+
+NODE                     CPU (cores)   Memory (GiB)    GPU
+gworker02                        128          503.6      4
+```
+
+存在しない flavor を指定した場合はエラーを表示する。
+
+```
+$ cjob flavor info xxx
+Error: flavor 'xxx' は存在しません。利用可能な flavor: cpu, gpu
 ```
