@@ -1085,12 +1085,7 @@ metrics:
 kubectl rollout restart deployment kueue-controller-manager -n kueue-system
 ```
 
-有効化の確認：
-
-```bash
-kubectl port-forward -n kueue-system svc/kueue-controller-manager-metrics-service 8443:8443
-curl -sk https://localhost:8443/metrics | grep kueue_cluster_queue_resource_usage
-```
+有効化の確認は、Grafana の Explore 画面で `kueue_cluster_queue_resource_usage` を検索してメトリクスが表示されることで行う。
 
 ### 15.2 Kueue リソースの作成
 

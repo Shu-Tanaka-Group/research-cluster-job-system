@@ -29,13 +29,6 @@ metrics:
 kubectl rollout restart deployment kueue-controller-manager -n kueue-system
 ```
 
-有効化の確認：
-
-```bash
-kubectl port-forward -n kueue-system svc/kueue-controller-manager-metrics-service 8443:8443
-curl -sk https://localhost:8443/metrics | grep kueue_cluster_queue_resource_usage
-```
-
 ### 2.2 Grafana への PostgreSQL データソース追加
 
 CJob の PostgreSQL に読み取り専用ユーザーを作成し、Grafana のデータソースとして登録する。
