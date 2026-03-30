@@ -91,7 +91,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "CPU フレーバーの使用率。赤色の場合、CPU ジョブの待ち時間が長くなる可能性があります。",
+      "description": "CPU フレーバーの予約率（ジョブが要求しているリソースの合計 / クォータ上限）。実際の消費量とは異なります。赤色の場合、CPU ジョブの待ち時間が長くなる可能性があります。",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -127,16 +127,16 @@
       "targets": [
         {
           "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"cpu\"}\n/\nkueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"cpu\"}",
-          "legendFormat": "CPU 使用率",
+          "legendFormat": "CPU 予約率",
           "refId": "A"
         }
       ],
-      "title": "CPU 使用率",
+      "title": "CPU 予約率",
       "type": "gauge"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "GPU フレーバーの使用率。GPU は台数が限られているため、混雑しやすいです。",
+      "description": "GPU フレーバーの予約率（ジョブが要求しているリソースの合計 / クォータ上限）。実際の消費量とは異なります。GPU は台数が限られているため、混雑しやすいです。",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "thresholds" },
@@ -172,11 +172,11 @@
       "targets": [
         {
           "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"nvidia.com/gpu\"}\n/\nkueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"nvidia.com/gpu\"}",
-          "legendFormat": "GPU 使用率",
+          "legendFormat": "GPU 予約率",
           "refId": "A"
         }
       ],
-      "title": "GPU 使用率",
+      "title": "GPU 予約率",
       "type": "gauge"
     },
     {
@@ -388,7 +388,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "CPU コアの使用量とクォータ上限。上限に近いほど新規ジョブの待ち時間が長くなります。",
+      "description": "CPU コアの予約量（ジョブが要求している合計）とクォータ上限。上限に近いほど新規ジョブの待ち時間が長くなります。実際の消費量とは異なります。",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -429,7 +429,7 @@
       "targets": [
         {
           "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"cpu\"}",
-          "legendFormat": "使用中",
+          "legendFormat": "予約中",
           "refId": "A"
         },
         {
@@ -438,12 +438,12 @@
           "refId": "B"
         }
       ],
-      "title": "CPU 使用量の推移",
+      "title": "CPU 予約量の推移",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "メモリ使用量とクォータ上限（GiB）。",
+      "description": "メモリ予約量（ジョブが要求している合計）とクォータ上限（GiB）。実際の消費量とは異なります。",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -484,7 +484,7 @@
       "targets": [
         {
           "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-flavor\", resource=\"memory\"} / 1024 / 1024 / 1024",
-          "legendFormat": "使用中",
+          "legendFormat": "予約中",
           "refId": "A"
         },
         {
@@ -493,7 +493,7 @@
           "refId": "B"
         }
       ],
-      "title": "メモリ使用量の推移",
+      "title": "メモリ予約量の推移",
       "type": "timeseries"
     },
     {
@@ -505,7 +505,7 @@
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "GPU 使用量。上限に達している場合、GPU ジョブは待機状態になります。",
+      "description": "GPU 予約量（ジョブが要求している合計）。上限に達している場合、GPU ジョブは待機状態になります。実際の消費量とは異なります。",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -547,7 +547,7 @@
       "targets": [
         {
           "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"nvidia.com/gpu\"}",
-          "legendFormat": "使用中",
+          "legendFormat": "予約中",
           "refId": "A"
         },
         {
@@ -556,12 +556,12 @@
           "refId": "B"
         }
       ],
-      "title": "GPU 使用量の推移",
+      "title": "GPU 予約量の推移",
       "type": "timeseries"
     },
     {
       "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
-      "description": "GPU ノード上の CPU 使用量。GPU が空いていても CPU が不足すると GPU ジョブが待機する場合があります。",
+      "description": "GPU ノード上の CPU 予約量（ジョブが要求している合計）。GPU が空いていても CPU が不足すると GPU ジョブが待機する場合があります。実際の消費量とは異なります。",
       "fieldConfig": {
         "defaults": {
           "color": { "mode": "palette-classic" },
@@ -602,7 +602,7 @@
       "targets": [
         {
           "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-flavor\", resource=\"cpu\"}",
-          "legendFormat": "使用中",
+          "legendFormat": "予約中",
           "refId": "A"
         },
         {
@@ -611,7 +611,7 @@
           "refId": "B"
         }
       ],
-      "title": "GPU ノード CPU 使用量",
+      "title": "GPU ノード CPU 予約量",
       "type": "timeseries"
     },
     {

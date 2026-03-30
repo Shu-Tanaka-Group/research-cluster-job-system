@@ -81,8 +81,8 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 
 | Panel | Type | DataSource | 内容 | 閾値 |
 |---|---|---|---|---|
-| CPU 使用率 | Gauge | Prometheus | cpu-flavor の CPU 使用率（usage / quota） | green < 60%, yellow < 85%, red >= 85% |
-| GPU 使用率 | Gauge | Prometheus | gpu-flavor の GPU 使用率（usage / quota） | green < 50%, yellow < 75%, red >= 75% |
+| CPU 予約率 | Gauge | Prometheus | cpu-flavor の CPU 予約率（ジョブ要求合計 / クォータ上限） | green < 60%, yellow < 85%, red >= 85% |
+| GPU 予約率 | Gauge | Prometheus | gpu-flavor の GPU 予約率（ジョブ要求合計 / クォータ上限） | green < 50%, yellow < 75%, red >= 75% |
 | 待機中ジョブ数 | Stat | PostgreSQL | DB 上の待機中ジョブ数（QUEUED + DISPATCHING + DISPATCHED） | green < 5, yellow < 20, red >= 20 |
 | 推定待ち時間 (P50) | Stat | Prometheus | admission wait time の中央値（直近 1 時間） | green < 60s, yellow < 300s, red >= 300s |
 
@@ -97,15 +97,15 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
-| CPU 使用量の推移 | Time series | Prometheus | cpu-flavor の CPU 使用量 vs クォータ上限 |
-| メモリ使用量の推移 | Time series | Prometheus | cpu-flavor のメモリ使用量 vs クォータ上限（GiB 表示） |
+| CPU 予約量の推移 | Time series | Prometheus | cpu-flavor の CPU 予約量 vs クォータ上限 |
+| メモリ予約量の推移 | Time series | Prometheus | cpu-flavor のメモリ予約量 vs クォータ上限（GiB 表示） |
 
 #### Row 4: GPU リソースの詳細
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
-| GPU 使用量の推移 | Time series | Prometheus | gpu-flavor の GPU 使用量 vs クォータ上限 |
-| GPU ノード CPU 使用量 | Time series | Prometheus | gpu-flavor の CPU 使用量 vs クォータ上限 |
+| GPU 予約量の推移 | Time series | Prometheus | gpu-flavor の GPU 予約量 vs クォータ上限 |
+| GPU ノード CPU 予約量 | Time series | Prometheus | gpu-flavor の CPU 予約量 vs クォータ上限 |
 
 #### Row 5: 待ち時間の分析
 
