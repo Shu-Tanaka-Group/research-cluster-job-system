@@ -43,7 +43,7 @@
 
 🧩 **Gap Filling** — 滞留ジョブがあっても、空きリソースに収まる小さなジョブを自動で隙間充填
 
-🔒 **ユーザー分離** — namespace による完全な分離と ServiceAccount JWT 認証
+🔒 **安全なマルチユーザー環境** — namespace によるユーザー間の分離と ServiceAccount JWT 認証
 
 ## 使用例
 
