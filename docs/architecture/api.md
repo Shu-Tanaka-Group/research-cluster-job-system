@@ -480,8 +480,6 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 
 PVC 上に配置された CLI バイナリの最新バージョンを返す。認証不要。
 
-> 注記: 本セクション以降のエンドポイント番号は §10（flavors）の追加により、従来から +1 されている。
-
 Submit API は PVC（`cli-binary`）の `latest` ファイルを読み取り、最新バージョン文字列を返す。
 
 ### response
