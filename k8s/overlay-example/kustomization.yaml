@@ -30,13 +30,13 @@ resources:
 images:
   - name: cjob-submit-api
     newName: yusekiya/cjob-submit-api
-    newTag: "1.5.0"
+    newTag: "1.6.0"
   - name: cjob-dispatcher
     newName: yusekiya/cjob-dispatcher
-    newTag: "1.5.0"
+    newTag: "1.6.0"
   - name: cjob-watcher
     newName: yusekiya/cjob-watcher
-    newTag: "1.5.0"
+    newTag: "1.6.0"
 
 patches:
   # StorageClass の指定
