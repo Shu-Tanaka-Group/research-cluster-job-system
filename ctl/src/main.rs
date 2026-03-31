@@ -231,17 +231,17 @@ enum UserCommands {
         #[arg(long, conflicts_with = "enabled")]
         disabled: bool,
     },
-    /// Enable CJob for a namespace
+    /// Enable CJob for namespace(s)
     Enable {
-        /// Target namespace (e.g. user-alice)
-        #[arg(long)]
-        namespace: String,
+        /// Target namespace(s) (e.g. user-alice user-bob)
+        #[arg(long, required = true, num_args = 1..)]
+        namespace: Vec<String>,
     },
-    /// Disable CJob for a namespace
+    /// Disable CJob for namespace(s)
     Disable {
-        /// Target namespace (e.g. user-alice)
-        #[arg(long)]
-        namespace: String,
+        /// Target namespace(s) (e.g. user-alice user-bob)
+        #[arg(long, required = true, num_args = 1..)]
+        namespace: Vec<String>,
     },
 }
 

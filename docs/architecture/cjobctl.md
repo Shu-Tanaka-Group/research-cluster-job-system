@@ -344,8 +344,8 @@ Error: Cannot remove version 1.3.0: it is the current latest.
 | コマンド | 概要 | 対象 |
 |---|---|---|
 | `cjobctl user list [--enabled \| --disabled]` | ユーザー namespace 一覧 | K8s: Namespace |
-| `cjobctl user enable --namespace <ns>` | CJob を有効化 | K8s: Namespace |
-| `cjobctl user disable --namespace <ns>` | CJob を無効化 | K8s: Namespace |
+| `cjobctl user enable --namespace <ns>...` | CJob を有効化（複数指定可） | K8s: Namespace |
+| `cjobctl user disable --namespace <ns>...` | CJob を無効化（複数指定可） | K8s: Namespace |
 
 ユーザー namespace は `type=user` ラベルを持つ Namespace として識別する。各 namespace の `cjob.io/username` アノテーションからユーザー名を、`cjob.io/user-namespace` ラベルの値から有効/無効状態を取得する。
 
@@ -367,19 +367,27 @@ user-charlie       charlie        false
 
 #### `cjobctl user enable`
 
-指定 namespace に `cjob.io/user-namespace: "true"` ラベルを設定する。対象 namespace が `type=user` ラベルを持つことをバリデーションする。
+指定 namespace に `cjob.io/user-namespace: "true"` ラベルを設定する。複数 namespace を同時に指定可能。対象 namespace が `type=user` ラベルを持つことをバリデーションする。
 
 ```bash
 $ cjobctl user enable --namespace user-charlie
 Enabled CJob for namespace 'user-charlie'.
+
+$ cjobctl user enable --namespace user-alice user-bob
+Enabled CJob for namespace 'user-alice'.
+Enabled CJob for namespace 'user-bob'.
 ```
 
 #### `cjobctl user disable`
 
-指定 namespace の `cjob.io/user-namespace` ラベルの値を `"false"` に変更する。対象 namespace が `type=user` ラベルを持つことをバリデーションする。
+指定 namespace の `cjob.io/user-namespace` ラベルの値を `"false"` に変更する。複数 namespace を同時に指定可能。対象 namespace が `type=user` ラベルを持つことをバリデーションする。
 
 ```bash
 $ cjobctl user disable --namespace user-bob
+Disabled CJob for namespace 'user-bob'.
+
+$ cjobctl user disable --namespace user-alice user-bob
+Disabled CJob for namespace 'user-alice'.
 Disabled CJob for namespace 'user-bob'.
 ```
 

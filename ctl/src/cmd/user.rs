@@ -54,12 +54,18 @@ pub async fn list(k8s_client: &kube::Client, enabled: bool, disabled: bool) -> R
     Ok(())
 }
 
-pub async fn enable(k8s_client: &kube::Client, namespace: &str) -> Result<()> {
-    set_user_namespace_label(k8s_client, namespace, true).await
+pub async fn enable(k8s_client: &kube::Client, namespaces: &[String]) -> Result<()> {
+    for ns in namespaces {
+        set_user_namespace_label(k8s_client, ns, true).await?;
+    }
+    Ok(())
 }
 
-pub async fn disable(k8s_client: &kube::Client, namespace: &str) -> Result<()> {
-    set_user_namespace_label(k8s_client, namespace, false).await
+pub async fn disable(k8s_client: &kube::Client, namespaces: &[String]) -> Result<()> {
+    for ns in namespaces {
+        set_user_namespace_label(k8s_client, ns, false).await?;
+    }
+    Ok(())
 }
 
 async fn set_user_namespace_label(
