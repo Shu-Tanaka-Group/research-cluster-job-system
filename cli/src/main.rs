@@ -83,6 +83,14 @@ enum Commands {
         #[arg(long)]
         status: Option<String>,
 
+        /// time_limit の範囲でフィルタ（例: 6h:12h, :12h, 6h:）
+        #[arg(long = "time-limit")]
+        time_limit: Option<String>,
+
+        /// 出力形式（ids: ジョブIDをコンマ区切りで出力）
+        #[arg(long)]
+        format: Option<String>,
+
         /// 表示件数を制限
         #[arg(long)]
         limit: Option<u32>,
@@ -224,7 +232,13 @@ async fn main() -> Result<()> {
             flavor,
             command,
         } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, gpu, flavor, time_limit).await,
-        Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status.map(|s| s.to_uppercase()), limit, reverse, all).await,
+        Commands::List { status, time_limit, format, limit, reverse, all } => {
+            let (time_limit_ge, time_limit_lt) = match time_limit {
+                Some(ref s) => parse_time_limit_range(s)?,
+                None => (None, None),
+            };
+            cmd_list(&api_client, status.map(|s| s.to_uppercase()), time_limit_ge, time_limit_lt, format, limit, reverse, all).await
+        },
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
         Commands::Hold { job_ids, all } => cmd_hold(&api_client, job_ids, all).await,
@@ -283,6 +297,29 @@ fn parse_duration(s: &str) -> Result<u32> {
     })?;
     num.checked_mul(multiplier)
         .ok_or_else(|| anyhow::anyhow!("時間指定が大きすぎます: {}", s))
+}
+
+fn parse_time_limit_range(s: &str) -> Result<(Option<u32>, Option<u32>)> {
+    let Some((min_str, max_str)) = s.split_once(':') else {
+        anyhow::bail!(
+            "不正な範囲指定です: {}（例: 6h:12h, :12h, 6h:）",
+            s
+        );
+    };
+    let ge = if min_str.is_empty() {
+        None
+    } else {
+        Some(parse_duration(min_str)?)
+    };
+    let lt = if max_str.is_empty() {
+        None
+    } else {
+        Some(parse_duration(max_str)?)
+    };
+    if ge.is_none() && lt.is_none() {
+        anyhow::bail!("不正な範囲指定です: {}（例: 6h:12h, :12h, 6h:）", s);
+    }
+    Ok((ge, lt))
 }
 
 async fn cmd_add(
@@ -403,12 +440,20 @@ const DEFAULT_LIST_LIMIT: u32 = 50;
 async fn cmd_list(
     client: &client::CjobClient,
     status: Option<String>,
+    time_limit_ge: Option<u32>,
+    time_limit_lt: Option<u32>,
+    format: Option<String>,
     limit: Option<u32>,
     reverse: bool,
     all: bool,
 ) -> Result<()> {
     if let Some(0) = limit {
         anyhow::bail!("--limit には 1 以上の値を指定してください");
+    }
+    if let Some(ref f) = format {
+        if f != "ids" {
+            anyhow::bail!("--format には ids を指定してください");
+        }
     }
 
     let effective_limit = if all {
@@ -419,16 +464,21 @@ async fn cmd_list(
     let order = if reverse { "desc" } else { "asc" };
 
     let resp = client
-        .list_jobs(status.as_deref(), effective_limit, Some(order))
+        .list_jobs(status.as_deref(), time_limit_ge, time_limit_lt, effective_limit, Some(order))
         .await?;
-    display::print_job_table(&resp.jobs);
 
-    if let Some(lim) = effective_limit {
-        if resp.total_count > lim {
-            eprintln!(
-                "（{}件中最新の{}件を表示。全件表示するには --all を使用してください）",
-                resp.total_count, lim
-            );
+    if format.as_deref() == Some("ids") {
+        display::print_job_ids(&resp.jobs);
+    } else {
+        display::print_job_table(&resp.jobs);
+
+        if let Some(lim) = effective_limit {
+            if resp.total_count > lim {
+                eprintln!(
+                    "（{}件中最新の{}件を表示。全件表示するには --all を使用してください）",
+                    resp.total_count, lim
+                );
+            }
         }
     }
 
@@ -589,7 +639,7 @@ async fn cmd_delete(
 
 async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
     // Check current job status
-    let list_resp = client.list_jobs(None, None, None).await?;
+    let list_resp = client.list_jobs(None, None, None, None, None).await?;
 
     // Check for DELETING jobs
     let has_deleting = list_resp.jobs.iter().any(|j| j.status == "DELETING");
@@ -1001,5 +1051,51 @@ mod tests {
             build_command_string(&args),
             "echo \"index=$CJOB_INDEX\""
         );
+    }
+
+    // ── parse_time_limit_range ──
+
+    #[test]
+    fn test_parse_time_limit_range_both() {
+        let (ge, lt) = parse_time_limit_range("6h:12h").unwrap();
+        assert_eq!(ge, Some(21600));
+        assert_eq!(lt, Some(43200));
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_ge_only() {
+        let (ge, lt) = parse_time_limit_range("6h:").unwrap();
+        assert_eq!(ge, Some(21600));
+        assert_eq!(lt, None);
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_lt_only() {
+        let (ge, lt) = parse_time_limit_range(":12h").unwrap();
+        assert_eq!(ge, None);
+        assert_eq!(lt, Some(43200));
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_seconds() {
+        let (ge, lt) = parse_time_limit_range("3600:86400").unwrap();
+        assert_eq!(ge, Some(3600));
+        assert_eq!(lt, Some(86400));
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_no_colon() {
+        assert!(parse_time_limit_range("6h").is_err());
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_empty_both() {
+        assert!(parse_time_limit_range(":").is_err());
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_invalid_duration() {
+        assert!(parse_time_limit_range("abc:12h").is_err());
+        assert!(parse_time_limit_range("6h:xyz").is_err());
     }
 }
