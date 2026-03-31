@@ -261,16 +261,15 @@ ORDER BY
 -- 実行中ジョブ数
 SELECT COUNT(*) AS "実行中" FROM jobs WHERE status = 'RUNNING';
 
--- Flavor 別キュー使用状況（flavor ごとに実行中→待機中の順）
-SELECT metric, value FROM (
-  SELECT flavor, 1 AS sort_key, flavor || ' 実行中' AS metric,
-    COUNT(*) FILTER (WHERE status = 'RUNNING') AS value
-  FROM jobs GROUP BY flavor
-  UNION ALL
-  SELECT flavor, 2, flavor || ' 待機中',
-    COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED'))
-  FROM jobs GROUP BY flavor
-) sub ORDER BY flavor, sort_key;
+-- Flavor 別キュー使用状況（flavor ごとに独立クエリ、refId 順で表示）
+-- refId A:
+SELECT COUNT(*) AS "cpu 実行中" FROM jobs WHERE flavor = 'cpu' AND status = 'RUNNING';
+-- refId B:
+SELECT COUNT(*) AS "cpu 待機中" FROM jobs WHERE flavor = 'cpu' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');
+-- refId C:
+SELECT COUNT(*) AS "gpu 実行中" FROM jobs WHERE flavor = 'gpu' AND status = 'RUNNING';
+-- refId D:
+SELECT COUNT(*) AS "gpu 待機中" FROM jobs WHERE flavor = 'gpu' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');
 
 -- 成功率（直近 24 時間）
 SELECT

@@ -602,7 +602,7 @@
         "maxVizHeight": 300,
         "minVizHeight": 16,
         "minVizWidth": 8,
-        "namePlacement": "auto",
+        "namePlacement": "left",
         "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
@@ -619,8 +619,26 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT metric, value FROM (\n  SELECT flavor, 1 AS sort_key, flavor || ' 実行中' AS metric,\n    COUNT(*) FILTER (WHERE status = 'RUNNING') AS value\n  FROM jobs GROUP BY flavor\n  UNION ALL\n  SELECT flavor, 2, flavor || ' 待機中',\n    COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED'))\n  FROM jobs GROUP BY flavor\n) sub ORDER BY flavor, sort_key;",
+          "rawSql": "SELECT COUNT(*) AS \"cpu 実行中\" FROM jobs WHERE flavor = 'cpu' AND status = 'RUNNING';",
           "refId": "A"
+        },
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"cpu 待機中\" FROM jobs WHERE flavor = 'cpu' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');",
+          "refId": "B"
+        },
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"gpu 実行中\" FROM jobs WHERE flavor = 'gpu' AND status = 'RUNNING';",
+          "refId": "C"
+        },
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"gpu 待機中\" FROM jobs WHERE flavor = 'gpu' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');",
+          "refId": "D"
         }
       ],
       "title": "Flavor 別キュー使用状況",
