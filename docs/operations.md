@@ -15,6 +15,9 @@
 | `ctl/src/cmd/cli/list.rs` | `cjobctl cli list` |
 | `ctl/src/cmd/cli/remove.rs` | `cjobctl cli remove` |
 | `ctl/src/cmd/cli/set_latest.rs` | `cjobctl cli set-latest` |
+| `ctl/src/cmd/config/show.rs` | `cjobctl config show` |
+| `ctl/src/cmd/config/set.rs` | `cjobctl config set` |
+| `ctl/src/cmd/config/dump.rs` | `cjobctl config dump` |
 | `ctl/src/cmd/user.rs` | `cjobctl user` サブコマンド全般 |
 | `ctl/src/cmd/system/stop.rs` | `cjobctl system stop` |
 | `ctl/src/cmd/system/start.rs` | `cjobctl system start` |
@@ -162,11 +165,26 @@ cjobctl system logs watcher --tail 100
 cjobctl system logs submit-api
 ```
 
-### 2.3 ConfigMap の確認
+### 2.3 ConfigMap の確認・変更
 
 ```bash
+# 現在の設定値を一覧表示
 cjobctl config show
+
+# 設定値の変更
+cjobctl config set DISPATCH_BATCH_SIZE 100
+
+# JSON 値の変更（ファイルから読み込み）
+cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+
+# 現在の ConfigMap を YAML でバックアップ
+cjobctl config dump > cjob-config-backup.yaml
+
+# バックアップから復元
+kubectl apply -f cjob-config-backup.yaml
 ```
+
+`config set` は変更前に確認プロンプト (`[y/N]`) を表示する。`--yes` でスキップ可能。更新後は影響を受けるコンポーネントの再起動コマンドが表示されるので、それに従って `cjobctl system restart` を実行すること。
 
 ## 3. namespace の weight 管理
 
@@ -470,7 +488,7 @@ cjobctl system status
 
 ### 9.4 コンポーネントの rolling restart
 
-コンポーネントのイメージ更新や設定変更を反映する場合に使用する。
+コンポーネントのイメージ更新や設定変更（`cjobctl config set` 後）を反映する場合に使用する。
 
 ```bash
 # 単一コンポーネントの再起動
