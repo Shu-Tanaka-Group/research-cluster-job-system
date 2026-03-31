@@ -14,11 +14,13 @@ from .schemas import (
     FlavorInfo,
     FlavorListResponse,
     FlavorNodeInfo,
+    HoldResponse,
     JobDetailResponse,
     JobListResponse,
     JobSubmitRequest,
     JobSubmitResponse,
     JobSummary,
+    ReleaseResponse,
     ResourceSpec,
     SkippedItem,
     SweepSubmitRequest,
@@ -28,11 +30,13 @@ from .schemas import (
 logger = logging.getLogger(__name__)
 
 TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED"}
-ACTIVE_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING"}
-CANCELLABLE_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING"}
+ACTIVE_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING", "HELD"}
+CANCELLABLE_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING", "HELD"}
 DELETABLE_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED"}
+HOLDABLE_STATUSES = {"QUEUED"}
+RELEASABLE_STATUSES = {"HELD"}
 # Statuses counted toward MAX_QUEUED_JOBS_PER_NAMESPACE
-COUNTED_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING", "CANCELLED"}
+COUNTED_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING", "CANCELLED", "HELD"}
 
 
 def allocate_job_id(session: Session, namespace: str) -> int:
@@ -420,6 +424,106 @@ def cancel_bulk(
     return CancelResponse(cancelled=cancelled, skipped=skipped, not_found=not_found)
 
 
+def hold_single(
+    session: Session, namespace: str, job_id: int
+) -> dict:
+    job = session.get(Job, (namespace, job_id))
+    if job is None:
+        return {"not_found": True}
+
+    if job.status in HOLDABLE_STATUSES:
+        job.status = "HELD"
+        session.add(
+            JobEvent(namespace=namespace, job_id=job_id, event_type="HELD")
+        )
+        session.flush()
+        return {"job_id": job_id, "status": "HELD"}
+
+    return {"job_id": job_id, "status": job.status, "skipped": True}
+
+
+def hold_bulk(
+    session: Session, namespace: str, job_ids: list[int] | None
+) -> HoldResponse:
+    held = []
+    skipped = []
+    not_found = []
+
+    if job_ids is None:
+        jobs = (
+            session.query(Job)
+            .filter(Job.namespace == namespace, Job.status.in_(HOLDABLE_STATUSES))
+            .all()
+        )
+        for job in jobs:
+            result = hold_single(session, namespace, job.job_id)
+            if result.get("skipped"):
+                skipped.append(job.job_id)
+            else:
+                held.append(job.job_id)
+    else:
+        for jid in job_ids:
+            result = hold_single(session, namespace, jid)
+            if result.get("not_found"):
+                not_found.append(jid)
+            elif result.get("skipped"):
+                skipped.append(jid)
+            else:
+                held.append(jid)
+
+    return HoldResponse(held=held, skipped=skipped, not_found=not_found)
+
+
+def release_single(
+    session: Session, namespace: str, job_id: int
+) -> dict:
+    job = session.get(Job, (namespace, job_id))
+    if job is None:
+        return {"not_found": True}
+
+    if job.status in RELEASABLE_STATUSES:
+        job.status = "QUEUED"
+        session.add(
+            JobEvent(namespace=namespace, job_id=job_id, event_type="RELEASED")
+        )
+        session.flush()
+        return {"job_id": job_id, "status": "QUEUED"}
+
+    return {"job_id": job_id, "status": job.status, "skipped": True}
+
+
+def release_bulk(
+    session: Session, namespace: str, job_ids: list[int] | None
+) -> ReleaseResponse:
+    released = []
+    skipped = []
+    not_found = []
+
+    if job_ids is None:
+        jobs = (
+            session.query(Job)
+            .filter(Job.namespace == namespace, Job.status.in_(RELEASABLE_STATUSES))
+            .all()
+        )
+        for job in jobs:
+            result = release_single(session, namespace, job.job_id)
+            if result.get("skipped"):
+                skipped.append(job.job_id)
+            else:
+                released.append(job.job_id)
+    else:
+        for jid in job_ids:
+            result = release_single(session, namespace, jid)
+            if result.get("not_found"):
+                not_found.append(jid)
+            elif result.get("skipped"):
+                skipped.append(jid)
+            else:
+                released.append(jid)
+
+    return ReleaseResponse(released=released, skipped=skipped, not_found=not_found)
+
+
 def delete_jobs(
     session: Session, namespace: str, job_ids: list[int] | None
 ) -> DeleteResponse:
@@ -455,6 +559,8 @@ def delete_jobs(
                 log_dirs.append(log_dir)
         elif status == "DELETING":
             skipped.append(SkippedItem(job_id=jid, reason="deleting"))
+        elif status == "HELD":
+            skipped.append(SkippedItem(job_id=jid, reason="held"))
         elif status in ACTIVE_STATUSES:
             skipped.append(SkippedItem(job_id=jid, reason="running"))
 

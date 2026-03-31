@@ -10,7 +10,11 @@ from cjob.api.services import (
     delete_jobs,
     get_job,
     get_usage,
+    hold_bulk,
+    hold_single,
     list_jobs,
+    release_bulk,
+    release_single,
     reset,
     submit_job,
     submit_sweep,
@@ -406,6 +410,102 @@ class TestCancel:
         assert resp.skipped == [2]
         assert resp.not_found == [999]
 
+    def test_cancel_held(self, db_session):
+        _insert_job(db_session, 1, status="HELD")
+        result = cancel_single(db_session, NS, 1)
+        assert result["status"] == "CANCELLED"
+
+
+# ── hold_single / hold_bulk ──
+
+
+class TestHold:
+    def test_hold_queued(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED")
+        result = hold_single(db_session, NS, 1)
+        assert result["status"] == "HELD"
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "HELD"
+
+    def test_hold_running_skipped(self, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+        result = hold_single(db_session, NS, 1)
+        assert result.get("skipped") is True
+
+    def test_hold_held_skipped(self, db_session):
+        _insert_job(db_session, 1, status="HELD")
+        result = hold_single(db_session, NS, 1)
+        assert result.get("skipped") is True
+
+    def test_hold_not_found(self, db_session):
+        result = hold_single(db_session, NS, 999)
+        assert result.get("not_found") is True
+
+    def test_hold_bulk(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED")
+        _insert_job(db_session, 2, status="RUNNING")
+        resp = hold_bulk(db_session, NS, [1, 2, 999])
+        assert resp.held == [1]
+        assert resp.skipped == [2]
+        assert resp.not_found == [999]
+
+    def test_hold_bulk_all(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED")
+        _insert_job(db_session, 2, status="QUEUED")
+        _insert_job(db_session, 3, status="RUNNING")
+        resp = hold_bulk(db_session, NS, None)
+        assert sorted(resp.held) == [1, 2]
+        assert resp.skipped == []
+        assert resp.not_found == []
+
+    def test_hold_bulk_all_empty(self, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+        resp = hold_bulk(db_session, NS, None)
+        assert resp.held == []
+
+
+# ── release_single / release_bulk ──
+
+
+class TestRelease:
+    def test_release_held(self, db_session):
+        _insert_job(db_session, 1, status="HELD")
+        result = release_single(db_session, NS, 1)
+        assert result["status"] == "QUEUED"
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "QUEUED"
+
+    def test_release_queued_skipped(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED")
+        result = release_single(db_session, NS, 1)
+        assert result.get("skipped") is True
+
+    def test_release_not_found(self, db_session):
+        result = release_single(db_session, NS, 999)
+        assert result.get("not_found") is True
+
+    def test_release_bulk(self, db_session):
+        _insert_job(db_session, 1, status="HELD")
+        _insert_job(db_session, 2, status="QUEUED")
+        resp = release_bulk(db_session, NS, [1, 2, 999])
+        assert resp.released == [1]
+        assert resp.skipped == [2]
+        assert resp.not_found == [999]
+
+    def test_release_bulk_all(self, db_session):
+        _insert_job(db_session, 1, status="HELD")
+        _insert_job(db_session, 2, status="HELD")
+        _insert_job(db_session, 3, status="QUEUED")
+        resp = release_bulk(db_session, NS, None)
+        assert sorted(resp.released) == [1, 2]
+        assert resp.skipped == []
+        assert resp.not_found == []
+
+    def test_release_bulk_all_empty(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED")
+        resp = release_bulk(db_session, NS, None)
+        assert resp.released == []
+
 
 # ── delete_jobs ──
 
@@ -429,6 +529,13 @@ class TestDeleteJobs:
         resp = delete_jobs(db_session, NS, [1])
         assert len(resp.skipped) == 1
         assert resp.skipped[0].reason == "deleting"
+        assert resp.log_dirs == []
+
+    def test_delete_held_skipped(self, db_session):
+        _insert_job(db_session, 1, status="HELD")
+        resp = delete_jobs(db_session, NS, [1])
+        assert len(resp.skipped) == 1
+        assert resp.skipped[0].reason == "held"
         assert resp.log_dirs == []
 
     def test_delete_not_found(self, db_session):
@@ -461,6 +568,13 @@ class TestReset:
 
     def test_reset_blocked_by_active(self, db_session):
         _insert_job(db_session, 1, status="RUNNING")
+        _insert_job(db_session, 2, status="SUCCEEDED")
+        code, body = reset(db_session, NS)
+        assert code == 409
+        assert 1 in body["blocking_job_ids"]
+
+    def test_reset_blocked_by_held(self, db_session):
+        _insert_job(db_session, 1, status="HELD")
         _insert_job(db_session, 2, status="SUCCEEDED")
         code, body = reset(db_session, NS)
         assert code == 409
