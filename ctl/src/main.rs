@@ -65,6 +65,11 @@ enum Commands {
         #[command(subcommand)]
         command: CliCommands,
     },
+    /// Manage user namespaces
+    User {
+        #[command(subcommand)]
+        command: UserCommands,
+    },
 }
 
 #[derive(Subcommand)]
@@ -213,6 +218,31 @@ enum ClusterCommands {
 enum DbCommands {
     /// Run idempotent schema migration
     Migrate,
+}
+
+#[derive(Subcommand)]
+enum UserCommands {
+    /// List user namespaces
+    List {
+        /// Show only CJob-enabled namespaces
+        #[arg(long, conflicts_with = "disabled")]
+        enabled: bool,
+        /// Show only CJob-disabled namespaces
+        #[arg(long, conflicts_with = "enabled")]
+        disabled: bool,
+    },
+    /// Enable CJob for namespace(s)
+    Enable {
+        /// Target namespace(s) (e.g. user-alice user-bob)
+        #[arg(long, required = true, num_args = 1..)]
+        namespace: Vec<String>,
+    },
+    /// Disable CJob for namespace(s)
+    Disable {
+        /// Target namespace(s) (e.g. user-alice user-bob)
+        #[arg(long, required = true, num_args = 1..)]
+        namespace: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -397,6 +427,20 @@ async fn main() -> Result<()> {
                 }
                 CliCommands::SetLatest { version } => {
                     cmd::cli_set_latest::run(config.system_namespace(), &version).await
+                }
+            }
+        }
+        Commands::User { command } => {
+            let k8s_client = k8s::client().await?;
+            match command {
+                UserCommands::List { enabled, disabled } => {
+                    cmd::user::list(&k8s_client, enabled, disabled).await
+                }
+                UserCommands::Enable { namespace } => {
+                    cmd::user::enable(&k8s_client, &namespace).await
+                }
+                UserCommands::Disable { namespace } => {
+                    cmd::user::disable(&k8s_client, &namespace).await
                 }
             }
         }
