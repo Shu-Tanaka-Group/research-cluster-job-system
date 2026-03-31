@@ -339,7 +339,51 @@ Error: Cannot remove version 1.3.0: it is the current latest.
 5. 各バージョンの `rm -rf /cli-binary/<version>` で削除する
 6. 一時 Pod を削除する
 
-### 5.7 DB スキーマ管理
+### 5.7 ユーザー管理
+
+| コマンド | 概要 | 対象 |
+|---|---|---|
+| `cjobctl user list [--enabled \| --disabled]` | ユーザー namespace 一覧 | K8s: Namespace |
+| `cjobctl user enable --namespace <ns>` | CJob を有効化 | K8s: Namespace |
+| `cjobctl user disable --namespace <ns>` | CJob を無効化 | K8s: Namespace |
+
+ユーザー namespace は `type=user` ラベルを持つ Namespace として識別する。各 namespace の `cjob.io/username` アノテーションからユーザー名を、`cjob.io/user-namespace` ラベルの値から有効/無効状態を取得する。
+
+#### `cjobctl user list`
+
+`type=user` ラベルを持つ全 namespace を一覧表示する。
+
+```
+$ cjobctl user list
+NAMESPACE          USERNAME       ENABLED
+user-alice         alice          true
+user-bob           bob            true
+user-charlie       charlie        false
+```
+
+- `--enabled`: `cjob.io/user-namespace` ラベルの値が `"true"` の namespace のみ表示
+- `--disabled`: `cjob.io/user-namespace` ラベルの値が `"true"` でない namespace のみ表示
+- `--enabled` と `--disabled` は排他（同時指定不可）
+
+#### `cjobctl user enable`
+
+指定 namespace に `cjob.io/user-namespace: "true"` ラベルを設定する。対象 namespace が `type=user` ラベルを持つことをバリデーションする。
+
+```bash
+$ cjobctl user enable --namespace user-charlie
+Enabled CJob for namespace 'user-charlie'.
+```
+
+#### `cjobctl user disable`
+
+指定 namespace の `cjob.io/user-namespace` ラベルの値を `"false"` に変更する。対象 namespace が `type=user` ラベルを持つことをバリデーションする。
+
+```bash
+$ cjobctl user disable --namespace user-bob
+Disabled CJob for namespace 'user-bob'.
+```
+
+### 5.8 DB スキーマ管理
 
 | コマンド | 概要 |
 |---|---|
@@ -378,6 +422,7 @@ ctl/
         ├── cli_remove.rs  # cli remove
         ├── cli_set_latest.rs # cli set-latest
         ├── db_migrate.rs  # db migrate
+        ├── user.rs        # user list/enable/disable
         ├── status.rs      # K8s Pod 状態
         ├── logs.rs        # K8s コンポーネントログ
         └── config_show.rs # K8s ConfigMap 表示
