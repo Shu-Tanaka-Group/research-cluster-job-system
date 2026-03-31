@@ -11,10 +11,10 @@
 | `ctl/src/cmd/counters.rs` | `cjobctl counters list` |
 | `ctl/src/cmd/weight.rs` | `cjobctl weight` サブコマンド全般 |
 | `ctl/src/cmd/cluster.rs` | `cjobctl cluster` サブコマンド全般 |
-| `ctl/src/cmd/cli_deploy.rs` | `cjobctl cli deploy` |
-| `ctl/src/cmd/cli_list.rs` | `cjobctl cli list` |
-| `ctl/src/cmd/cli_remove.rs` | `cjobctl cli remove` |
-| `ctl/src/cmd/cli_set_latest.rs` | `cjobctl cli set-latest` |
+| `ctl/src/cmd/cli/deploy.rs` | `cjobctl cli deploy` |
+| `ctl/src/cmd/cli/list.rs` | `cjobctl cli list` |
+| `ctl/src/cmd/cli/remove.rs` | `cjobctl cli remove` |
+| `ctl/src/cmd/cli/set_latest.rs` | `cjobctl cli set-latest` |
 | `ctl/src/cmd/user.rs` | `cjobctl user` サブコマンド全般 |
 | `ctl/src/cmd/system/stop.rs` | `cjobctl system stop` |
 | `ctl/src/cmd/system/start.rs` | `cjobctl system start` |
