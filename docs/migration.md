@@ -117,7 +117,7 @@ cjobctl cli deploy --binary ./target/x86_64-unknown-linux-musl/release/cjob --ve
 
 ```bash
 # コンポーネントの状態
-cjobctl status
+cjobctl system status
 
 # ジョブの投入テスト
 cjob add --cpu 1 --memory 1Gi -- echo "upgrade test"

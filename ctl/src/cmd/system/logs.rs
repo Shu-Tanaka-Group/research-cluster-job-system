@@ -1,18 +1,10 @@
-use anyhow::{bail, Result};
+use anyhow::Result;
 use k8s_openapi::api::core::v1::Pod;
 use kube::api::{ListParams, LogParams};
 use kube::Api;
 
-const VALID_COMPONENTS: &[&str] = &["dispatcher", "watcher", "submit-api"];
-
 pub async fn run(k8s_client: &kube::Client, namespace: &str, component: &str, tail: i64) -> Result<()> {
-    if !VALID_COMPONENTS.contains(&component) {
-        bail!(
-            "Invalid component '{}'. Valid: {}",
-            component,
-            VALID_COMPONENTS.join(", ")
-        );
-    }
+    super::validate_component(component)?;
 
     let pods: Api<Pod> = Api::namespaced(k8s_client.clone(), namespace);
     let lp = ListParams::default().labels(&format!("app={}", component));

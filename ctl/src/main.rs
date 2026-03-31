@@ -30,15 +30,10 @@ enum Commands {
         #[command(subcommand)]
         command: CountersCommands,
     },
-    /// Show pod status in cjob-system namespace
-    Status,
-    /// Show component logs
-    Logs {
-        /// Component name (dispatcher, watcher, submit-api)
-        component: String,
-        /// Number of lines to show
-        #[arg(long, default_value = "50")]
-        tail: i64,
+    /// Manage CJob system components
+    System {
+        #[command(subcommand)]
+        command: SystemCommands,
     },
     /// Show cjob-config ConfigMap
     Config {
@@ -274,6 +269,37 @@ enum CliCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum SystemCommands {
+    /// Stop the CJob system for maintenance
+    Stop {
+        /// Skip confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Start the CJob system after maintenance
+    Start {
+        /// Number of Submit API replicas (default: 2)
+        #[arg(long, default_value_t = cmd::system::DEFAULT_SUBMIT_API_REPLICAS)]
+        submit_api_replicas: i32,
+    },
+    /// Rolling restart a component
+    Restart {
+        /// Component name (dispatcher, watcher, submit-api)
+        component: String,
+    },
+    /// Show pod status in cjob-system namespace
+    Status,
+    /// Show component logs
+    Logs {
+        /// Component name (dispatcher, watcher, submit-api)
+        component: String,
+        /// Number of lines to show
+        #[arg(long, default_value = "50")]
+        tail: i64,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -394,15 +420,27 @@ async fn main() -> Result<()> {
         }
 
         // --- K8s-only commands ---
-        Commands::Status => {
+        Commands::System { command } => {
             let config = config::Config::load()?;
             let k8s_client = k8s::client().await?;
-            cmd::status::run(&k8s_client, config.system_namespace()).await
-        }
-        Commands::Logs { component, tail } => {
-            let config = config::Config::load()?;
-            let k8s_client = k8s::client().await?;
-            cmd::logs::run(&k8s_client, config.system_namespace(), &component, tail).await
+            match command {
+                SystemCommands::Stop { yes } => {
+                    let conn = db::connect(&config.database, config.system_namespace()).await?;
+                    cmd::system::stop::run(&k8s_client, &conn.client, config.system_namespace(), yes).await
+                }
+                SystemCommands::Start { submit_api_replicas } => {
+                    cmd::system::start::run(&k8s_client, config.system_namespace(), submit_api_replicas).await
+                }
+                SystemCommands::Restart { component } => {
+                    cmd::system::restart::run(&k8s_client, config.system_namespace(), &component).await
+                }
+                SystemCommands::Status => {
+                    cmd::system::status::run(&k8s_client, config.system_namespace()).await
+                }
+                SystemCommands::Logs { component, tail } => {
+                    cmd::system::logs::run(&k8s_client, config.system_namespace(), &component, tail).await
+                }
+            }
         }
         Commands::Config { command } => {
             let config = config::Config::load()?;
