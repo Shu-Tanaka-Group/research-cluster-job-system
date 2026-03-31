@@ -367,7 +367,9 @@ user-charlie       charlie        false
 
 #### `cjobctl user enable`
 
-指定 namespace に `cjob.io/user-namespace: "true"` ラベルを設定する。複数 namespace を同時に指定可能。対象 namespace が `type=user` ラベルを持つことをバリデーションする。
+指定 namespace に `cjob.io/user-namespace: "true"` ラベルを設定する。複数 namespace を同時に指定可能。
+
+実行前に全 namespace を事前バリデーションし、存在しない namespace や `type=user` ラベルを持たない namespace が含まれる場合はエラーを返す。バリデーションが通るまでラベルの変更は一切行わない。
 
 ```bash
 $ cjobctl user enable --namespace user-charlie
@@ -380,7 +382,9 @@ Enabled CJob for namespace 'user-bob'.
 
 #### `cjobctl user disable`
 
-指定 namespace の `cjob.io/user-namespace` ラベルの値を `"false"` に変更する。複数 namespace を同時に指定可能。対象 namespace が `type=user` ラベルを持つことをバリデーションする。
+指定 namespace の `cjob.io/user-namespace` ラベルの値を `"false"` に変更する。複数 namespace を同時に指定可能。
+
+事前バリデーションは `enable` と同様（存在確認 + `type=user` ラベル検証）。
 
 ```bash
 $ cjobctl user disable --namespace user-bob
