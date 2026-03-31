@@ -11,6 +11,8 @@
 - `cjob list`
 - `cjob status`
 - `cjob cancel`
+- `cjob hold`
+- `cjob release`
 - `cjob delete`
 - `cjob usage`
 - `cjob reset`
@@ -25,7 +27,7 @@
 - コンテナイメージ名取得（`CJOB_IMAGE` 環境変数から取得、未設定時は `JUPYTER_IMAGE` にフォールバック）
 - コマンド文字列の保存
 - ユーザー namespace 解決（ServiceAccount の namespace ファイルから取得）
-- namespace ごとのジョブ総数上限チェック（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計）
+- namespace ごとのジョブ総数上限チェック（QUEUED / DISPATCHING / DISPATCHED / RUNNING / HELD / CANCELLED の合計）
 - ジョブ ID 発行
 - 内部 DB へのジョブ登録（QUEUED 状態で保存）
 

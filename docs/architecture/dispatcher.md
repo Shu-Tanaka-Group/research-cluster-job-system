@@ -39,7 +39,7 @@ queued AS (
     PARTITION BY namespace ORDER BY created_at ASC
   ) AS rn
   FROM jobs
-  WHERE status = 'QUEUED'
+  WHERE status = 'QUEUED'            -- HELD ジョブはディスパッチ対象外
     AND (retry_after IS NULL OR retry_after <= NOW())
 )
 SELECT q.* FROM queued q

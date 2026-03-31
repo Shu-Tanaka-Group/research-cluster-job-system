@@ -46,7 +46,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    | 条件なし・Pod が Running 中 | `RUNNING` | 初回 RUNNING 遷移時に `started_at` を記録し、Pod の `spec.nodeName` から `node_name` を取得して記録し、`namespace_daily_usage` に累計消費量を加算する（[database.md](database.md) §5.2 参照） |
 
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
-4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）
+4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）。なお `HELD` ジョブは K8s Job が未作成のためこのステップの対象にならない
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
 6. DB の status が `DELETING` のジョブを二フェーズで処理する
 

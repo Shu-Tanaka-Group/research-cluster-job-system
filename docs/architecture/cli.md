@@ -434,6 +434,7 @@ fn cmd_delete(expr, all: bool):
         deleted があれば "削除しました" を表示する
         skipped があれば:
             reason が "running" のジョブ → "実行中のため削除できませんでした。先に cjob cancel を実行してください"
+            reason が "held" のジョブ → "保留中のため削除できませんでした。先に cjob cancel または cjob release を実行してください"
             reason が "deleting" のジョブ → "リセット処理中のため削除できませんでした"
             （API レスポンスの skipped[].reason に基づいて分岐する）
         not_found があれば "見つかりませんでした" を表示する
