@@ -277,7 +277,7 @@ stateDiagram-v2
 
     QUEUED --> CANCELLED : cancel
     QUEUED --> HELD : hold
-    QUEUED --> DISPATCHING : Dispatcher が選択
+    QUEUED --> DISPATCHING : ジョブ作成
 
     HELD --> CANCELLED : cancel
     HELD --> QUEUED : release
