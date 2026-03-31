@@ -226,8 +226,105 @@ cjobctl cluster set-quota --flavor gpu-a100 --gpu 4
 | `cjobctl system status` | cjob-system の Pod 一覧 | `Api::<Pod>::list()` |
 | `cjobctl system logs <component> [--tail <n>]` | コンポーネントログ | `Api::<Pod>::logs()` |
 | `cjobctl config show` | cjob-config ConfigMap の内容 | `Api::<ConfigMap>::get()` |
+| `cjobctl config set <key> <value> [--yes]` | ConfigMap の設定値を更新 | `Api::<ConfigMap>::patch()` |
+| `cjobctl config set <key> --from-file <path> [--yes]` | ファイルから設定値を更新 | `Api::<ConfigMap>::patch()` |
+| `cjobctl config dump` | ConfigMap を `kubectl apply` 可能な YAML で出力 | `Api::<ConfigMap>::get()` |
 
 `system logs` の有効なコンポーネント名: `dispatcher`, `watcher`, `submit-api`。Pod のラベル `app=<component>` で特定する。
+
+#### `cjobctl config set`
+
+ConfigMap `cjob-config` の指定キーの値を更新する。変更内容を表示した上で `[y/N]` の確認プロンプトを挟む。`--yes` で確認をスキップ可能。
+
+```bash
+# スカラー値の更新
+$ cjobctl config set DISPATCH_BATCH_SIZE 100
+DISPATCH_BATCH_SIZE: 50 → 100
+Proceed? [y/N] y
+
+Updated 'DISPATCH_BATCH_SIZE' in cjob-config.
+
+Restart the following component(s) to apply:
+  cjobctl system restart dispatcher
+
+# JSON 値の更新（ファイルから）
+$ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+RESOURCE_FLAVORS: [{"name":"cpu",...}] → [{"name":"cpu",...},{"name":"gpu",...}]
+Proceed? [y/N] y
+
+Updated 'RESOURCE_FLAVORS' in cjob-config.
+
+Restart the following component(s) to apply:
+  cjobctl system restart dispatcher
+  cjobctl system restart watcher
+  cjobctl system restart submit-api
+```
+
+**バリデーション:**
+
+CLI 側で以下のバリデーションを行う:
+
+- キーが ConfigMap に存在すること（不明なキーは拒否）
+- 更新不可キー（`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`）は拒否（DB 接続変更はインフラ作業が必要なため）
+- 値の型チェック:
+  - 整数型キー: `i64` としてパース可能であること
+  - 真偽値型キー: `true` または `false`（大文字小文字不問、保存時は小文字に正規化）
+  - JSON 型キー: 有効な JSON であること
+  - 文字列型キー: 常に有効
+
+**`value` と `--from-file` の排他:**
+
+`value`（位置引数）と `--from-file` は同時に指定できない。`--from-file` 指定時は `value` を省略する。どちらも指定されない場合はエラー。
+
+**キーとコンポーネントの対応:**
+
+更新後、影響を受けるコンポーネントの再起動コマンドを表示する。各キーとコンポーネントの対応は以下の通り:
+
+| キー | 型 | コンポーネント |
+|---|---|---|
+| `DISPATCH_BUDGET_PER_NAMESPACE` | int | dispatcher |
+| `DISPATCH_BATCH_SIZE` | int | dispatcher |
+| `DISPATCH_ROUND_SIZE` | int | dispatcher |
+| `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` | int | dispatcher |
+| `DISPATCH_RETRY_INTERVAL_SEC` | int | dispatcher |
+| `DISPATCH_MAX_RETRIES` | int | dispatcher |
+| `GAP_FILLING_ENABLED` | bool | dispatcher |
+| `GAP_FILLING_STALL_THRESHOLD_SEC` | int | dispatcher |
+| `FAIR_SHARE_WINDOW_DAYS` | int | dispatcher |
+| `RESOURCE_FLAVORS` | json | dispatcher, watcher, submit-api |
+| `DEFAULT_FLAVOR` | string | submit-api |
+| `NODE_RESOURCE_SYNC_INTERVAL_SEC` | int | watcher |
+| `MAX_QUEUED_JOBS_PER_NAMESPACE` | int | submit-api |
+| `MAX_SWEEP_COMPLETIONS` | int | submit-api |
+| `DEFAULT_TIME_LIMIT_SECONDS` | int | submit-api |
+| `MAX_TIME_LIMIT_SECONDS` | int | submit-api |
+| `KUEUE_LOCAL_QUEUE_NAME` | string | submit-api |
+| `USER_NAMESPACE_LABEL` | string | dispatcher, watcher |
+| `WORKSPACE_MOUNT_PATH` | string | submit-api |
+| `LOG_BASE_DIR` | string | submit-api |
+| `TTL_SECONDS_AFTER_FINISHED` | int | submit-api |
+| `JOB_NODE_TAINT` | string | submit-api |
+
+**更新不可キー:**
+
+| キー | 理由 |
+|---|---|
+| `POSTGRES_HOST` | DB 接続変更はインフラ作業が必要 |
+| `POSTGRES_PORT` | DB 接続変更はインフラ作業が必要 |
+| `POSTGRES_DB` | DB 接続変更はインフラ作業が必要 |
+
+#### `cjobctl config dump`
+
+ConfigMap `cjob-config` の内容を `kubectl apply -f` 可能なクリーンな YAML 形式で標準出力に出力する。バックアップや別環境への適用に使用する。
+
+管理フィールド（`managedFields`, `resourceVersion`, `uid`, `creationTimestamp`, `annotations` 内の `kubectl.kubernetes.io/*`）は除去する。
+
+```bash
+$ cjobctl config dump > cjob-config-backup.yaml
+
+# 復元
+$ kubectl apply -f cjob-config-backup.yaml
+```
 
 ### 5.6 CLI バイナリの配布
 
@@ -489,6 +586,7 @@ Restarting submit-api... (use 'cjobctl system status' to check)
 - `cjobctl weight exclusive --release`
 - `cjobctl cli remove`
 - `cjobctl system stop`
+- `cjobctl config set`
 
 ## 7. ソースコード構成
 
@@ -515,14 +613,18 @@ ctl/
         │   ├── restart.rs     # system restart (rolling update)
         │   ├── status.rs      # system status (Pod 一覧)
         │   └── logs.rs        # system logs (コンポーネントログ)
+        ├── config/
+        │   ├── mod.rs         # サブモジュール宣言
+        │   ├── show.rs        # config show (ConfigMap 表示)
+        │   ├── set.rs         # config set (ConfigMap 更新)
+        │   └── dump.rs        # config dump (ConfigMap YAML 出力)
         ├── jobs.rs        # jobs list/stalled/remaining/summary
         ├── usage.rs       # usage list/reset + ClusterTotals
         ├── counters.rs    # counters list
         ├── weight.rs      # weight list/set/reset/exclusive
         ├── cluster.rs     # cluster resources
         ├── db_migrate.rs  # db migrate
-        ├── user.rs        # user list/enable/disable
-        └── config_show.rs # K8s ConfigMap 表示
+        └── user.rs        # user list/enable/disable
 ```
 
 各コマンドが実行する SQL クエリは `ctl/src/cmd/` 配下の対応ファイルを参照。
