@@ -79,27 +79,42 @@ async fn validate_user_namespaces(
     namespaces: &[String],
 ) -> Result<()> {
     let ns_api: Api<Namespace> = Api::all(k8s_client.clone());
-    let mut invalid = Vec::new();
+    let mut not_found = Vec::new();
+    let mut not_user = Vec::new();
 
     for ns in namespaces {
-        let namespace = ns_api.get(ns).await?;
-        let has_user_label = namespace
-            .metadata
-            .labels
-            .as_ref()
-            .and_then(|l| l.get("type"))
-            .map(|v| v == "user")
-            .unwrap_or(false);
-        if !has_user_label {
-            invalid.push(ns.as_str());
+        match ns_api.get(ns).await {
+            Ok(namespace) => {
+                let has_user_label = namespace
+                    .metadata
+                    .labels
+                    .as_ref()
+                    .and_then(|l| l.get("type"))
+                    .map(|v| v == "user")
+                    .unwrap_or(false);
+                if !has_user_label {
+                    not_user.push(ns.as_str());
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                not_found.push(ns.as_str());
+            }
+            Err(e) => return Err(e.into()),
         }
     }
 
-    if !invalid.is_empty() {
-        bail!(
-            "The following namespace(s) do not have label type=user: {}",
-            invalid.join(", ")
-        );
+    let mut errors = Vec::new();
+    if !not_found.is_empty() {
+        errors.push(format!("Namespace(s) not found: {}", not_found.join(", ")));
+    }
+    if !not_user.is_empty() {
+        errors.push(format!(
+            "Namespace(s) do not have label type=user: {}",
+            not_user.join(", ")
+        ));
+    }
+    if !errors.is_empty() {
+        bail!("{}", errors.join("\n"));
     }
 
     Ok(())
