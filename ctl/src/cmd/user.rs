@@ -55,44 +55,61 @@ pub async fn list(k8s_client: &kube::Client, enabled: bool, disabled: bool) -> R
 }
 
 pub async fn enable(k8s_client: &kube::Client, namespaces: &[String]) -> Result<()> {
+    validate_user_namespaces(k8s_client, namespaces).await?;
+    let ns_api: Api<Namespace> = Api::all(k8s_client.clone());
     for ns in namespaces {
-        set_user_namespace_label(k8s_client, ns, true).await?;
+        patch_user_namespace_label(&ns_api, ns, "true").await?;
+        println!("Enabled CJob for namespace '{}'.", ns);
     }
     Ok(())
 }
 
 pub async fn disable(k8s_client: &kube::Client, namespaces: &[String]) -> Result<()> {
+    validate_user_namespaces(k8s_client, namespaces).await?;
+    let ns_api: Api<Namespace> = Api::all(k8s_client.clone());
     for ns in namespaces {
-        set_user_namespace_label(k8s_client, ns, false).await?;
+        patch_user_namespace_label(&ns_api, ns, "false").await?;
+        println!("Disabled CJob for namespace '{}'.", ns);
     }
     Ok(())
 }
 
-async fn set_user_namespace_label(
+async fn validate_user_namespaces(
     k8s_client: &kube::Client,
-    namespace: &str,
-    enabled: bool,
+    namespaces: &[String],
 ) -> Result<()> {
     let ns_api: Api<Namespace> = Api::all(k8s_client.clone());
+    let mut invalid = Vec::new();
 
-    // Fetch and validate the namespace has type=user label
-    let ns = ns_api.get(namespace).await?;
-    let has_user_label = ns
-        .metadata
-        .labels
-        .as_ref()
-        .and_then(|l| l.get("type"))
-        .map(|v| v == "user")
-        .unwrap_or(false);
+    for ns in namespaces {
+        let namespace = ns_api.get(ns).await?;
+        let has_user_label = namespace
+            .metadata
+            .labels
+            .as_ref()
+            .and_then(|l| l.get("type"))
+            .map(|v| v == "user")
+            .unwrap_or(false);
+        if !has_user_label {
+            invalid.push(ns.as_str());
+        }
+    }
 
-    if !has_user_label {
+    if !invalid.is_empty() {
         bail!(
-            "Namespace '{}' does not have label type=user. Only user namespaces can be managed.",
-            namespace
+            "The following namespace(s) do not have label type=user: {}",
+            invalid.join(", ")
         );
     }
 
-    let value = if enabled { "true" } else { "false" };
+    Ok(())
+}
+
+async fn patch_user_namespace_label(
+    ns_api: &Api<Namespace>,
+    namespace: &str,
+    value: &str,
+) -> Result<()> {
     let patch = serde_json::json!({
         "metadata": {
             "labels": {
@@ -100,16 +117,8 @@ async fn set_user_namespace_label(
             }
         }
     });
-
     ns_api
         .patch(namespace, &PatchParams::default(), &Patch::Merge(&patch))
         .await?;
-
-    if enabled {
-        println!("Enabled CJob for namespace '{}'.", namespace);
-    } else {
-        println!("Disabled CJob for namespace '{}'.", namespace);
-    }
-
     Ok(())
 }
