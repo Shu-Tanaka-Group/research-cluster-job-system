@@ -275,28 +275,28 @@ cjob update --version 1.3.0
 stateDiagram-v2
     [*] --> QUEUED : add
 
+    QUEUED --> CANCELLED : cancel
     QUEUED --> HELD : hold
     QUEUED --> DISPATCHING : Dispatcher がジョブを選択
-    QUEUED --> CANCELLED : cancel
 
-    HELD --> QUEUED : release
     HELD --> CANCELLED : cancel
+    HELD --> QUEUED : release
 
+    DISPATCHING --> CANCELLED : cancel
     DISPATCHING --> DISPATCHED : ジョブ作成成功
     DISPATCHING --> QUEUED : 一時障害で再試行
     DISPATCHING --> FAILED : 永続エラー / 最大再試行超過
-    DISPATCHING --> CANCELLED : cancel
 
-    DISPATCHED --> RUNNING : ジョブが実行開始
     DISPATCHED --> CANCELLED : cancel
+    DISPATCHED --> RUNNING : ジョブが実行開始
 
+    RUNNING --> CANCELLED : cancel
     RUNNING --> SUCCEEDED : 正常完了
     RUNNING --> FAILED : エラー / 時間超過
-    RUNNING --> CANCELLED : cancel
 
+    CANCELLED --> DELETING : reset
     SUCCEEDED --> DELETING : reset
     FAILED --> DELETING : reset
-    CANCELLED --> DELETING : reset
 
     DELETING --> [*] : ジョブ削除完了後に DB レコード削除
 ```
