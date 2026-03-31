@@ -261,14 +261,16 @@ ORDER BY
 -- 実行中ジョブ数
 SELECT COUNT(*) AS "実行中" FROM jobs WHERE status = 'RUNNING';
 
--- Flavor 別キュー使用状況
-SELECT
-  flavor,
-  COUNT(*) FILTER (WHERE status = 'RUNNING') AS "実行中",
-  COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED')) AS "待機中"
-FROM jobs
-GROUP BY flavor
-ORDER BY flavor;
+-- Flavor 別キュー使用状況（flavor ごとに実行中→待機中の順）
+SELECT metric, value FROM (
+  SELECT flavor, 1 AS sort_key, flavor || ' 実行中' AS metric,
+    COUNT(*) FILTER (WHERE status = 'RUNNING') AS value
+  FROM jobs GROUP BY flavor
+  UNION ALL
+  SELECT flavor, 2, flavor || ' 待機中',
+    COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED'))
+  FROM jobs GROUP BY flavor
+) sub ORDER BY flavor, sort_key;
 
 -- 成功率（直近 24 時間）
 SELECT

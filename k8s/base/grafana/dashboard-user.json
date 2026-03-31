@@ -560,8 +560,8 @@
         "overrides": [
           {
             "matcher": {
-              "id": "byName",
-              "options": "実行中"
+              "id": "byRegexp",
+              "options": ".*実行中$"
             },
             "properties": [
               {
@@ -575,8 +575,8 @@
           },
           {
             "matcher": {
-              "id": "byName",
-              "options": "待機中"
+              "id": "byRegexp",
+              "options": ".*待機中$"
             },
             "properties": [
               {
@@ -619,7 +619,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  flavor,\n  COUNT(*) FILTER (WHERE status = 'RUNNING') AS \"実行中\",\n  COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED')) AS \"待機中\"\nFROM jobs\nGROUP BY flavor\nORDER BY flavor;",
+          "rawSql": "SELECT metric, value FROM (\n  SELECT flavor, 1 AS sort_key, flavor || ' 実行中' AS metric,\n    COUNT(*) FILTER (WHERE status = 'RUNNING') AS value\n  FROM jobs GROUP BY flavor\n  UNION ALL\n  SELECT flavor, 2, flavor || ' 待機中',\n    COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED'))\n  FROM jobs GROUP BY flavor\n) sub ORDER BY flavor, sort_key;",
           "refId": "A"
         }
       ],
@@ -1324,11 +1324,11 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 6,
-        "x": 14,
+        "w": 8,
+        "x": 16,
         "y": 26
       },
-      "id": 19,
+      "id": 12,
       "options": {
         "legend": {
           "calcs": [
