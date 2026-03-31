@@ -319,6 +319,14 @@ fn parse_time_limit_range(s: &str) -> Result<(Option<u32>, Option<u32>)> {
     if ge.is_none() && lt.is_none() {
         anyhow::bail!("不正な範囲指定です: {}（例: 6h:12h, :12h, 6h:）", s);
     }
+    if let (Some(g), Some(l)) = (ge, lt) {
+        if g >= l {
+            anyhow::bail!(
+                "範囲の下限が上限以上です: {}（下限 < 上限 にしてください）",
+                s
+            );
+        }
+    }
     Ok((ge, lt))
 }
 
@@ -1056,10 +1064,31 @@ mod tests {
     // ── parse_time_limit_range ──
 
     #[test]
-    fn test_parse_time_limit_range_both() {
+    fn test_parse_time_limit_range_both_hours() {
         let (ge, lt) = parse_time_limit_range("6h:12h").unwrap();
         assert_eq!(ge, Some(21600));
         assert_eq!(lt, Some(43200));
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_both_minutes() {
+        let (ge, lt) = parse_time_limit_range("30m:90m").unwrap();
+        assert_eq!(ge, Some(1800));
+        assert_eq!(lt, Some(5400));
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_both_days() {
+        let (ge, lt) = parse_time_limit_range("1d:3d").unwrap();
+        assert_eq!(ge, Some(86400));
+        assert_eq!(lt, Some(259200));
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_mixed_units() {
+        let (ge, lt) = parse_time_limit_range("30m:2h").unwrap();
+        assert_eq!(ge, Some(1800));
+        assert_eq!(lt, Some(7200));
     }
 
     #[test]
@@ -1070,10 +1099,24 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_time_limit_range_ge_only_days() {
+        let (ge, lt) = parse_time_limit_range("1d:").unwrap();
+        assert_eq!(ge, Some(86400));
+        assert_eq!(lt, None);
+    }
+
+    #[test]
     fn test_parse_time_limit_range_lt_only() {
         let (ge, lt) = parse_time_limit_range(":12h").unwrap();
         assert_eq!(ge, None);
         assert_eq!(lt, Some(43200));
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_lt_only_minutes() {
+        let (ge, lt) = parse_time_limit_range(":30m").unwrap();
+        assert_eq!(ge, None);
+        assert_eq!(lt, Some(1800));
     }
 
     #[test]
@@ -1097,5 +1140,16 @@ mod tests {
     fn test_parse_time_limit_range_invalid_duration() {
         assert!(parse_time_limit_range("abc:12h").is_err());
         assert!(parse_time_limit_range("6h:xyz").is_err());
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_ge_greater_than_lt() {
+        assert!(parse_time_limit_range("12h:6h").is_err());
+        assert!(parse_time_limit_range("1d:5h").is_err());
+    }
+
+    #[test]
+    fn test_parse_time_limit_range_ge_equal_lt() {
+        assert!(parse_time_limit_range("6h:6h").is_err());
     }
 }
