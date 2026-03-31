@@ -2,30 +2,6 @@
 
 管理操作は `cjobctl` CLI で行う。セットアップは [ビルド手順](build.md) を参照。
 
-各コマンドが実行する SQL クエリの詳細は `ctl/src/cmd/` 配下のソースコードを参照。
-
-| ソースファイル | 対応コマンド |
-|---|---|
-| `ctl/src/cmd/jobs.rs` | `cjobctl jobs` サブコマンド全般 |
-| `ctl/src/cmd/usage.rs` | `cjobctl usage list / reset` |
-| `ctl/src/cmd/counters.rs` | `cjobctl counters list` |
-| `ctl/src/cmd/weight.rs` | `cjobctl weight` サブコマンド全般 |
-| `ctl/src/cmd/cluster.rs` | `cjobctl cluster` サブコマンド全般 |
-| `ctl/src/cmd/cli/deploy.rs` | `cjobctl cli deploy` |
-| `ctl/src/cmd/cli/list.rs` | `cjobctl cli list` |
-| `ctl/src/cmd/cli/remove.rs` | `cjobctl cli remove` |
-| `ctl/src/cmd/cli/set_latest.rs` | `cjobctl cli set-latest` |
-| `ctl/src/cmd/config/show.rs` | `cjobctl config show` |
-| `ctl/src/cmd/config/set.rs` | `cjobctl config set` |
-| `ctl/src/cmd/config/dump.rs` | `cjobctl config dump` |
-| `ctl/src/cmd/user.rs` | `cjobctl user` サブコマンド全般 |
-| `ctl/src/cmd/system/stop.rs` | `cjobctl system stop` |
-| `ctl/src/cmd/system/start.rs` | `cjobctl system start` |
-| `ctl/src/cmd/system/restart.rs` | `cjobctl system restart` |
-| `ctl/src/cmd/system/status.rs` | `cjobctl system status` |
-| `ctl/src/cmd/system/logs.rs` | `cjobctl system logs` |
-| `ctl/src/cmd/db_migrate.rs` | `cjobctl db migrate` |
-
 ## 1. DB 状態の確認
 
 ### 1.1 PostgreSQL への接続
@@ -498,3 +474,29 @@ cjobctl system restart submit-api
 ```
 
 `kubectl rollout restart` と同等の処理を実行する。Pod が順次入れ替わるため、Submit API（replicas >= 2）ではダウンタイムなしで更新できる。
+
+## 付録: ソースコード参照
+
+各コマンドが実行する SQL クエリの詳細は `ctl/src/cmd/` 配下のソースコードを参照。
+
+| ソースファイル | 対応コマンド |
+|---|---|
+| `ctl/src/cmd/jobs.rs` | `cjobctl jobs` サブコマンド全般 |
+| `ctl/src/cmd/usage.rs` | `cjobctl usage list / reset` |
+| `ctl/src/cmd/counters.rs` | `cjobctl counters list` |
+| `ctl/src/cmd/weight.rs` | `cjobctl weight` サブコマンド全般 |
+| `ctl/src/cmd/cluster.rs` | `cjobctl cluster` サブコマンド全般 |
+| `ctl/src/cmd/cli/deploy.rs` | `cjobctl cli deploy` |
+| `ctl/src/cmd/cli/list.rs` | `cjobctl cli list` |
+| `ctl/src/cmd/cli/remove.rs` | `cjobctl cli remove` |
+| `ctl/src/cmd/cli/set_latest.rs` | `cjobctl cli set-latest` |
+| `ctl/src/cmd/config/show.rs` | `cjobctl config show` |
+| `ctl/src/cmd/config/set.rs` | `cjobctl config set` |
+| `ctl/src/cmd/config/dump.rs` | `cjobctl config dump` |
+| `ctl/src/cmd/user.rs` | `cjobctl user` サブコマンド全般 |
+| `ctl/src/cmd/system/stop.rs` | `cjobctl system stop` |
+| `ctl/src/cmd/system/start.rs` | `cjobctl system start` |
+| `ctl/src/cmd/system/restart.rs` | `cjobctl system restart` |
+| `ctl/src/cmd/system/status.rs` | `cjobctl system status` |
+| `ctl/src/cmd/system/logs.rs` | `cjobctl system logs` |
+| `ctl/src/cmd/db_migrate.rs` | `cjobctl db migrate` |
