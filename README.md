@@ -285,7 +285,7 @@ stateDiagram-v2
     DISPATCHING --> CANCELLED : cancel
     DISPATCHING --> DISPATCHED : ジョブ作成成功
     DISPATCHING --> QUEUED : 再試行
-    DISPATCHING --> FAILED : 永続エラー / 最大再試行超過
+    DISPATCHING --> FAILED : 永続エラー
 
     DISPATCHED --> CANCELLED : cancel
     DISPATCHED --> RUNNING : ジョブが実行開始
