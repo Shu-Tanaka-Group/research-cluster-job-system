@@ -262,6 +262,9 @@ WHERE flavor = :flavor;
 
 ```text
 QUEUED
+  ├─ HELD（ユーザーが保留 → Dispatcher がスキップ。release で QUEUED に戻る）
+  │    ├─ QUEUED（ユーザーが release で保留解除）
+  │    └─ CANCELLED（ユーザーがキャンセル）
   ├─ CANCELLED（ユーザーがキャンセル → Dispatcher が次回スキャン時にスキップ）
   └─ DISPATCHING（Dispatcher が DB スキャンで選択し DISPATCHING に更新した時点）
        ├─ CANCELLED（ユーザーがキャンセル → CAS 前ならスキップ、CAS 後なら Watcher が K8s Job 削除）

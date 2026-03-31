@@ -16,6 +16,16 @@ cjob delete <start>-<end>         # 範囲指定（例: 1-10）
 cjob delete <id>,<id>,...         # 個別複数指定（例: 1,3,5）
 cjob delete <start>-<end>,<id>,.. # 組み合わせ（例: 1-5,8,10-12）
 cjob delete --all                 # 完了済みジョブを全て削除
+cjob hold <job-id>                # 単体指定
+cjob hold <start>-<end>           # 範囲指定（例: 1-10）
+cjob hold <id>,<id>,...           # 個別複数指定（例: 1,3,5）
+cjob hold <start>-<end>,<id>,..   # 組み合わせ（例: 1-5,8,10-12）
+cjob hold --all                   # QUEUED 状態のジョブを全て保留
+cjob release <job-id>             # 単体指定
+cjob release <start>-<end>        # 範囲指定（例: 1-10）
+cjob release <id>,<id>,...        # 個別複数指定（例: 1,3,5）
+cjob release <start>-<end>,<id>,. # 組み合わせ（例: 1-5,8,10-12）
+cjob release --all                # HELD 状態のジョブを全て解除
 cjob reset
 cjob logs <job-id>
 cjob logs --follow <job-id>
@@ -180,6 +190,7 @@ cjob add --time-limit 3d -- python main.py       # 3日
 | 状態 | 動作 |
 |---|---|
 | QUEUED / DISPATCHING / DISPATCHED | ログファイル未生成のため最大 5分待機（待機中は状態と経過時間を表示） |
+| HELD | 保留中のためログなし。「ジョブは保留中です」と表示し、`cjob release` で解除を促す |
 | RUNNING | ファイル生成後に tail -f で追跡（`--follow` 時） |
 | SUCCEEDED / FAILED | ファイルを全量表示して終了 |
 | CANCELLED | ファイルがあれば表示、なければ "No logs available" |
@@ -419,11 +430,86 @@ fn cmd_delete(expr, all: bool):
         not_found があれば "見つかりませんでした" を表示する
 ```
 
-## 11. `cjob reset` の動作
+## 11. `cjob hold` の動作
+
+QUEUED 状態のジョブを保留にし、Dispatcher による実行を停止する。
+
+`--all` フラグがある場合は job_ids を省略して `POST /v1/jobs/hold` を呼ぶ（namespace 内の全 QUEUED ジョブを保留対象とする）。
+それ以外は job_id の指定形式をパースして job_id のリストに展開してから呼ぶ。
+
+```
+# ※ CLI の実装は Rust で行う。以下は概念説明のための擬似コードである。
+
+fn cmd_hold(expr, all: bool):
+    if all:
+        POST /v1/jobs/hold に空のリクエストを送る
+    else:
+        job_ids = parse_job_ids(expr)   // cancel と同じパース処理を共用
+        POST /v1/jobs/hold に job_ids を送る
+
+    result を受け取り:
+        held があれば "保留しました" を表示する
+        skipped があれば "スキップしました（QUEUED 以外）" を表示する
+        not_found があれば "見つかりませんでした" を表示する
+```
+
+### 使用例
+
+```bash
+# 単体指定
+cjob hold 5
+
+# 範囲指定・複数指定
+cjob hold 1-10
+cjob hold 1,3,5
+cjob hold 1-5,8,10-12
+
+# QUEUED 状態のジョブを全て保留
+cjob hold --all
+```
+
+## 12. `cjob release` の動作
+
+保留中（HELD）のジョブをキューに戻し、Dispatcher による実行を再開する。
+
+`--all` フラグがある場合は job_ids を省略して `POST /v1/jobs/release` を呼ぶ（namespace 内の全 HELD ジョブを解除対象とする）。
+それ以外は job_id の指定形式をパースして job_id のリストに展開してから呼ぶ。
+
+```
+# ※ CLI の実装は Rust で行う。以下は概念説明のための擬似コードである。
+
+fn cmd_release(expr, all: bool):
+    if all:
+        POST /v1/jobs/release に空のリクエストを送る
+    else:
+        job_ids = parse_job_ids(expr)   // cancel と同じパース処理を共用
+        POST /v1/jobs/release に job_ids を送る
+
+    result を受け取り:
+        released があれば "キューに戻しました" を表示する
+        skipped があれば "スキップしました（HELD 以外）" を表示する
+        not_found があれば "見つかりませんでした" を表示する
+```
+
+### 使用例
+
+```bash
+# 単体指定
+cjob release 5
+
+# 範囲指定・複数指定
+cjob release 1-10
+cjob release 1,3,5
+
+# HELD 状態のジョブを全て解除
+cjob release --all
+```
+
+## 13. `cjob reset` の動作
 
 1. `GET /v1/jobs` でジョブ一覧を取得し、レスポンスの `log_base_dir` を保持した上で以下の順で確認する
    - `DELETING` のジョブが1件でも存在する場合は「前回のリセット処理がまだ完了していません。しばらく待ってから再試行してください。」を表示して中止する
-   - `QUEUED` / `DISPATCHING` / `DISPATCHED` / `RUNNING` のジョブが1件でも存在する場合は job_id を表示して中止する
+   - `QUEUED` / `DISPATCHING` / `DISPATCHED` / `RUNNING` / `HELD` のジョブが1件でも存在する場合は job_id を表示して中止する
 2. 全ジョブが完了済みの場合はユーザーに確認プロンプトを表示する
 3. y の場合のみ以下を順に実行する
    1. `log_base_dir` で取得したパスのログディレクトリを削除する（API 呼び出し前に削除することで、API 呼び出し後に CLI がクラッシュしても Watcher が counter をリセットした後の job_id=1 再利用時に log_dir が存在しない状態を保証する）
@@ -445,7 +531,7 @@ $ cjob reset   # 全ジョブ完了後
 リセットを開始しました。バックグラウンドでクリーンアップが完了するまでお待ちください。
 ```
 
-## 12. `cjob usage` の動作
+## 14. `cjob usage` の動作
 
 `GET /v1/usage` を呼び出し、直近 `FAIR_SHARE_WINDOW_DAYS` 日分の日別リソース使用状況を表示する。
 
@@ -472,7 +558,7 @@ Resource Usage (past 7 days)
 
 使用実績がない場合は「使用実績がありません。」を表示する。
 
-## 13. `cjob update` の動作
+## 15. `cjob update` の動作
 
 CLI バイナリのバージョン管理と更新を行う。バイナリは Submit API 経由で配布される。
 
@@ -550,7 +636,7 @@ $ cjob update --version 1.3.1-beta.1
 更新が完了しました。(1.3.1-beta.1)
 ```
 
-## 14. `cjob flavor` の動作
+## 16. `cjob flavor` の動作
 
 `GET /v1/flavors` を呼び出し、利用可能な ResourceFlavor の一覧とリソース上限を表示する。認証不要のエンドポイントを使用するため、ServiceAccount JWT がなくても実行できる。
 
