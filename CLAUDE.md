@@ -40,6 +40,8 @@ cjob sweep -n <count> --parallel <n> -- <command>  # パラメータスイープ
 cjob list                            # 一覧表示
 cjob status <job-id>                 # 状態確認
 cjob cancel <job-id>                 # キャンセル（範囲: 1-10, 複数: 1,3,5, 組み合わせ対応）
+cjob hold <job-id>                   # ジョブの実行を保留（範囲・複数・--all 対応）
+cjob release <job-id>                # 保留の解除（範囲・複数・--all 対応）
 cjob logs <job-id>                   # ログ表示（--follow / --index）
 cjob delete <job-id>                 # 完了済みジョブの削除（--all で全件削除）
 cjob usage                           # リソース使用状況の表示

@@ -99,6 +99,36 @@ class SkippedItem(BaseModel):
     reason: str
 
 
+class HoldRequest(BaseModel):
+    job_ids: list[int] | None = None
+
+
+class HoldResponse(BaseModel):
+    held: list[int]
+    skipped: list[int]
+    not_found: list[int]
+
+
+class SingleHoldResponse(BaseModel):
+    job_id: int
+    status: str
+
+
+class ReleaseRequest(BaseModel):
+    job_ids: list[int] | None = None
+
+
+class ReleaseResponse(BaseModel):
+    released: list[int]
+    skipped: list[int]
+    not_found: list[int]
+
+
+class SingleReleaseResponse(BaseModel):
+    job_id: int
+    status: str
+
+
 class DeleteRequest(BaseModel):
     job_ids: list[int] | None = None
 

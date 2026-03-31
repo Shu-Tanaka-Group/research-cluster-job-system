@@ -103,6 +103,32 @@ pub struct CancelResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct HoldRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_ids: Option<Vec<u32>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HoldResponse {
+    pub held: Vec<u32>,
+    pub skipped: Vec<u32>,
+    pub not_found: Vec<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ReleaseRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub job_ids: Option<Vec<u32>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ReleaseResponse {
+    pub released: Vec<u32>,
+    pub skipped: Vec<u32>,
+    pub not_found: Vec<u32>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DeleteRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_ids: Option<Vec<u32>>,
@@ -325,6 +351,58 @@ impl CjobClient {
         let resp = self
             .http
             .post(format!("{}/v1/jobs/delete", self.base_url))
+            .header("Authorization", self.auth_header())
+            .json(&req)
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn hold_single(&self, job_id: u32) -> Result<serde_json::Value> {
+        let resp = self
+            .http
+            .post(format!("{}/v1/jobs/{}/hold", self.base_url, job_id))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn hold_bulk(&self, job_ids: Option<Vec<u32>>) -> Result<HoldResponse> {
+        let req = HoldRequest { job_ids };
+        let resp = self
+            .http
+            .post(format!("{}/v1/jobs/hold", self.base_url))
+            .header("Authorization", self.auth_header())
+            .json(&req)
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn release_single(&self, job_id: u32) -> Result<serde_json::Value> {
+        let resp = self
+            .http
+            .post(format!("{}/v1/jobs/{}/release", self.base_url, job_id))
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn release_bulk(&self, job_ids: Option<Vec<u32>>) -> Result<ReleaseResponse> {
+        let req = ReleaseRequest { job_ids };
+        let resp = self
+            .http
+            .post(format!("{}/v1/jobs/release", self.base_url))
             .header("Authorization", self.auth_header())
             .json(&req)
             .send()

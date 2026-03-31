@@ -12,18 +12,24 @@ from .auth import UserInfo, get_namespace, get_user_info
 from .schemas import (
     CancelRequest,
     CancelResponse,
-    SingleCancelResponse,
     CliVersionResponse,
     CliVersionsResponse,
     DeleteRequest,
     DeleteResponse,
     FlavorListResponse,
+    HoldRequest,
+    HoldResponse,
     JobDetailResponse,
     JobListResponse,
     JobSubmitRequest,
     JobSubmitResponse,
+    ReleaseRequest,
+    ReleaseResponse,
     ResetErrorResponse,
     ResetResponse,
+    SingleCancelResponse,
+    SingleHoldResponse,
+    SingleReleaseResponse,
     SweepSubmitRequest,
     UsageResponse,
 )
@@ -33,8 +39,12 @@ from .services import (
     delete_jobs,
     get_job,
     get_usage,
+    hold_bulk,
+    hold_single,
     list_flavors,
     list_jobs,
+    release_bulk,
+    release_single,
     reset,
     submit_job,
     submit_sweep,
@@ -159,6 +169,48 @@ def post_cancel_bulk(
     session: Session = Depends(get_session),
 ):
     return cancel_bulk(session, namespace, req.job_ids)
+
+
+@router.post("/jobs/hold", response_model=HoldResponse)
+def post_hold_bulk(
+    req: HoldRequest,
+    namespace: str = Depends(get_namespace),
+    session: Session = Depends(get_session),
+):
+    return hold_bulk(session, namespace, req.job_ids)
+
+
+@router.post("/jobs/release", response_model=ReleaseResponse)
+def post_release_bulk(
+    req: ReleaseRequest,
+    namespace: str = Depends(get_namespace),
+    session: Session = Depends(get_session),
+):
+    return release_bulk(session, namespace, req.job_ids)
+
+
+@router.post("/jobs/{job_id}/hold", response_model=SingleHoldResponse)
+def post_hold_single(
+    job_id: int,
+    namespace: str = Depends(get_namespace),
+    session: Session = Depends(get_session),
+):
+    result = hold_single(session, namespace, job_id)
+    if result.get("not_found"):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return SingleHoldResponse(job_id=job_id, status=result["status"])
+
+
+@router.post("/jobs/{job_id}/release", response_model=SingleReleaseResponse)
+def post_release_single(
+    job_id: int,
+    namespace: str = Depends(get_namespace),
+    session: Session = Depends(get_session),
+):
+    result = release_single(session, namespace, job_id)
+    if result.get("not_found"):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return SingleReleaseResponse(job_id=job_id, status=result["status"])
 
 
 @router.post("/jobs/delete", response_model=DeleteResponse)

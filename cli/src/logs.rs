@@ -39,6 +39,11 @@ pub async fn show_logs(job_id: u32, follow: bool, index: Option<u32>, client: &C
     }
 
     match job.status.as_str() {
+        "HELD" => {
+            println!("ジョブ {} は保留中です。(HELD)", job_id);
+            println!("`cjob release {}` でキューに戻せます。", job_id);
+            return Ok(());
+        }
         "QUEUED" | "DISPATCHING" | "DISPATCHED" => {
             if !follow {
                 println!("ジョブ {} はまだ開始されていません。({})", job_id, job.status);
@@ -165,6 +170,9 @@ async fn wait_for_start(job_id: u32, client: &CjobClient) -> Result<()> {
         let secs = elapsed.as_secs() % 60;
 
         match job.status.as_str() {
+            "HELD" => {
+                bail!("ジョブ {} は保留中です。`cjob release {}` でキューに戻してください。", job_id, job_id);
+            }
             "QUEUED" | "DISPATCHING" | "DISPATCHED" => {
                 eprint!(
                     "\rジョブ {} の開始を待機中... ({}) [{:01}:{:02}]",
