@@ -16,6 +16,11 @@
 | `ctl/src/cmd/cli_remove.rs` | `cjobctl cli remove` |
 | `ctl/src/cmd/cli_set_latest.rs` | `cjobctl cli set-latest` |
 | `ctl/src/cmd/user.rs` | `cjobctl user` サブコマンド全般 |
+| `ctl/src/cmd/system/stop.rs` | `cjobctl system stop` |
+| `ctl/src/cmd/system/start.rs` | `cjobctl system start` |
+| `ctl/src/cmd/system/restart.rs` | `cjobctl system restart` |
+| `ctl/src/cmd/system/status.rs` | `cjobctl system status` |
+| `ctl/src/cmd/system/logs.rs` | `cjobctl system logs` |
 | `ctl/src/cmd/db_migrate.rs` | `cjobctl db migrate` |
 
 ## 1. DB 状態の確認
@@ -141,20 +146,20 @@ kubectl get clusterqueue cjob-cluster-queue -o jsonpath='{range .spec.resourceGr
 ### 2.1 Pod の状態
 
 ```bash
-cjobctl status
+cjobctl system status
 ```
 
 ### 2.2 ログの確認
 
 ```bash
 # Dispatcher（デフォルト: 直近50行）
-cjobctl logs dispatcher
+cjobctl system logs dispatcher
 
 # 表示行数を指定
-cjobctl logs watcher --tail 100
+cjobctl system logs watcher --tail 100
 
 # Submit API
-cjobctl logs submit-api
+cjobctl system logs submit-api
 ```
 
 ### 2.3 ConfigMap の確認
@@ -406,3 +411,72 @@ cjobctl cli remove 1.0.0 1.1.0
 3. 一時 Pod 内で `chmod +x` を実行
 4. `--release` 指定時のみ latest ファイルを更新
 5. 一時 Pod を削除
+
+## 9. システムの停止・起動
+
+メンテナンスや K8s クラスタ停止の前に、CJob システムを安全に停止する。PostgreSQL は停止しない（データ保全のため）。
+
+### 9.1 システムの停止
+
+```bash
+cjobctl system stop
+```
+
+以下の処理が順番に実行される。
+
+1. Submit API を replicas=0 にスケールダウン（新規ジョブ投入を遮断）
+2. DB のジョブ状態を更新:
+   - DISPATCHING / DISPATCHED → QUEUED に戻す
+   - RUNNING → FAILED（`last_error: system shutdown`）
+   - QUEUED → 変更なし（起動後に自動的に再 dispatch される）
+3. 全ユーザー namespace の K8s Job を削除
+4. Dispatcher、Watcher を replicas=0 にスケールダウン
+
+ユーザーの `cjob.io/user-namespace` ラベルは変更されない。停止前後でアクセス権限は保持される。
+
+確認プロンプトをスキップする場合:
+
+```bash
+cjobctl system stop --yes
+```
+
+### 9.2 システムの起動
+
+```bash
+cjobctl system start
+```
+
+Dispatcher（1）、Watcher（1）、Submit API（2）をスケールアップする。QUEUED のまま残っていたジョブは Dispatcher が自動的に再 dispatch する。
+
+Submit API の replicas を変更する場合:
+
+```bash
+cjobctl system start --submit-api-replicas 3
+```
+
+起動後の確認:
+
+```bash
+cjobctl system status
+```
+
+### 9.3 K8s クラスタ停止を伴う場合
+
+1. `cjobctl system stop` で CJob を停止する
+2. K8s クラスタを停止する
+3. K8s クラスタを起動する
+4. PostgreSQL Pod が Ready になるまで待つ
+5. `cjobctl system start` で CJob を起動する
+
+### 9.4 コンポーネントの rolling restart
+
+コンポーネントのイメージ更新や設定変更を反映する場合に使用する。
+
+```bash
+# 単一コンポーネントの再起動
+cjobctl system restart dispatcher
+cjobctl system restart watcher
+cjobctl system restart submit-api
+```
+
+`kubectl rollout restart` と同等の処理を実行する。Pod が順次入れ替わるため、Submit API（replicas >= 2）ではダウンタイムなしで更新できる。

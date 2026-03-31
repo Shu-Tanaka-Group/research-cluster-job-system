@@ -223,11 +223,11 @@ cjobctl cluster set-quota --flavor gpu-a100 --gpu 4
 
 | コマンド | 概要 | K8s API |
 |---|---|---|
-| `cjobctl status` | cjob-system の Pod 一覧 | `Api::<Pod>::list()` |
-| `cjobctl logs <component> [--tail <n>]` | コンポーネントログ | `Api::<Pod>::logs()` |
+| `cjobctl system status` | cjob-system の Pod 一覧 | `Api::<Pod>::list()` |
+| `cjobctl system logs <component> [--tail <n>]` | コンポーネントログ | `Api::<Pod>::logs()` |
 | `cjobctl config show` | cjob-config ConfigMap の内容 | `Api::<ConfigMap>::get()` |
 
-`logs` の有効なコンポーネント名: `dispatcher`, `watcher`, `submit-api`。Pod のラベル `app=<component>` で特定する。
+`system logs` の有効なコンポーネント名: `dispatcher`, `watcher`, `submit-api`。Pod のラベル `app=<component>` で特定する。
 
 ### 5.6 CLI バイナリの配布
 
@@ -403,6 +403,83 @@ Disabled CJob for namespace 'user-bob'.
 
 `CREATE TABLE IF NOT EXISTS` / `ALTER TABLE ADD COLUMN IF NOT EXISTS` を使用しており、何度実行しても安全。
 
+### 5.9 システム管理
+
+| コマンド | 概要 | 対象 |
+|---|---|---|
+| `cjobctl system stop [--yes]` | CJob システムの安全な停止 | DB + K8s: Deployment |
+| `cjobctl system start [--submit-api-replicas <n>]` | CJob システムの起動 | K8s: Deployment |
+| `cjobctl system restart <component>` | コンポーネントの rolling restart | K8s: Deployment |
+| `cjobctl system status` | cjob-system の Pod 一覧 | K8s: Pod |
+| `cjobctl system logs <component> [--tail <n>]` | コンポーネントログ | K8s: Pod |
+
+#### `cjobctl system stop`
+
+CJob システムを安全に停止する。メンテナンスや K8s クラスタ停止の前に実行する。PostgreSQL は停止しない。
+
+停止シーケンス:
+
+1. アクティブジョブ数を表示し、確認プロンプトを表示する（`--yes` でスキップ可）
+2. Submit API を replicas=0 にスケールダウンし、新規ジョブ投入を遮断する
+3. DB のジョブ状態を更新する:
+   - DISPATCHING → QUEUED（`retry_after = NULL`, `retry_count = 0` にリセット）
+   - DISPATCHED → QUEUED
+   - RUNNING → FAILED（`last_error = 'system shutdown'`, `finished_at = NOW()`）
+   - QUEUED → 変更なし
+4. 全ユーザー namespace の K8s Job（`cjob.io/job-id` ラベル付き）を `propagationPolicy=Background` で削除する
+5. Dispatcher、Watcher を replicas=0 にスケールダウンする
+
+namespace の `cjob.io/user-namespace` ラベルは変更しない。再起動前後でユーザーのアクセス権限は保持される。
+
+QUEUED に戻されたジョブは、システム起動後に Dispatcher が自動的に再 dispatch する。DISPATCHING のリセットは Dispatcher の起動時初期化（[dispatcher.md](dispatcher.md) §2.5）と同等の処理である。
+
+```bash
+$ cjobctl system stop
+Active jobs: 15 (QUEUED: 8, DISPATCHING: 1, DISPATCHED: 2, RUNNING: 4)
+This will:
+  - Scale down submit-api, dispatcher, watcher to 0 replicas
+  - Revert 3 DISPATCHING/DISPATCHED jobs to QUEUED
+  - Fail 4 RUNNING jobs (last_error: system shutdown)
+  - Delete K8s Jobs in all user namespaces
+  - 8 QUEUED jobs will be re-dispatched on next start
+Proceed? [y/N] y
+Scaled down submit-api to 0 replicas.
+Reverted 1 DISPATCHING job(s) to QUEUED.
+Reverted 2 DISPATCHED job(s) to QUEUED.
+Failed 4 RUNNING job(s).
+Deleted 6 K8s Job(s).
+Scaled down dispatcher to 0 replicas.
+Scaled down watcher to 0 replicas.
+CJob system stopped. PostgreSQL remains running.
+```
+
+#### `cjobctl system start`
+
+CJob システムを起動する。各 Deployment をデフォルトの replicas にスケールアップする。
+
+- Dispatcher: 1
+- Watcher: 1
+- Submit API: 2（`--submit-api-replicas` で変更可）
+
+```bash
+$ cjobctl system start
+Scaled up dispatcher to 1 replica(s).
+Scaled up watcher to 1 replica(s).
+Scaled up submit-api to 2 replica(s).
+CJob system started. Use 'cjobctl system status' to check pod status.
+```
+
+#### `cjobctl system restart`
+
+指定したコンポーネントの Deployment を rolling restart する。`kubectl rollout restart` と同等の処理で、Pod template の annotation `kubectl.kubernetes.io/restartedAt` に現在時刻を設定して K8s の rolling update をトリガーする。
+
+有効なコンポーネント名: `dispatcher`, `watcher`, `submit-api`
+
+```bash
+$ cjobctl system restart submit-api
+Restarting submit-api... (use 'cjobctl system status' to check)
+```
+
 ## 6. 破壊的操作の安全策
 
 以下のコマンドは実行前に `[y/N]` の確認プロンプトを表示する:
@@ -411,6 +488,7 @@ Disabled CJob for namespace 'user-bob'.
 - `cjobctl usage reset`
 - `cjobctl weight exclusive --release`
 - `cjobctl cli remove`
+- `cjobctl system stop`
 
 ## 7. ソースコード構成
 
@@ -430,6 +508,13 @@ ctl/
         │   ├── list.rs        # cli list
         │   ├── remove.rs      # cli remove
         │   └── set_latest.rs  # cli set-latest
+        ├── system/
+        │   ├── mod.rs         # 共有定数 + scale_deployment ヘルパー
+        │   ├── stop.rs        # system stop
+        │   ├── start.rs       # system start
+        │   ├── restart.rs     # system restart (rolling update)
+        │   ├── status.rs      # system status (Pod 一覧)
+        │   └── logs.rs        # system logs (コンポーネントログ)
         ├── jobs.rs        # jobs list/stalled/remaining/summary
         ├── usage.rs       # usage list/reset + ClusterTotals
         ├── counters.rs    # counters list
@@ -437,8 +522,6 @@ ctl/
         ├── cluster.rs     # cluster resources
         ├── db_migrate.rs  # db migrate
         ├── user.rs        # user list/enable/disable
-        ├── status.rs      # K8s Pod 状態
-        ├── logs.rs        # K8s コンポーネントログ
         └── config_show.rs # K8s ConfigMap 表示
 ```
 
