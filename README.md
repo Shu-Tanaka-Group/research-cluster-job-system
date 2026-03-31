@@ -291,12 +291,12 @@ stateDiagram-v2
     DISPATCHED --> RUNNING : ジョブが実行開始
 
     RUNNING --> CANCELLED : cancel
-    RUNNING --> SUCCEEDED : 正常完了
     RUNNING --> FAILED : エラー / 時間超過
+    RUNNING --> SUCCEEDED : 正常完了
 
     CANCELLED --> DELETING : reset
-    SUCCEEDED --> DELETING : reset
     FAILED --> DELETING : reset
+    SUCCEEDED --> DELETING : reset
 
     DELETING --> [*] : ジョブ削除完了後に DB レコード削除
 ```
