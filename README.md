@@ -109,7 +109,7 @@ $ cjob --time-limit 1h -- python main.py
   - 一度RUNNING状態になると実行時間の上限リソースが消費され、その後キャンセルやエラーとなっても返却されません
   - 計算時間が計算時間の上限より短かったとしても、`--time-limit` で指定された計算時間の上限が消費されます。実行プログラムの計算時間を見積り、適切な値を設定してください
 - ジョブ数の上限についての詳細はユーザーガイドの[ジョブ数の制限](./docs/user_guide.md#1-ジョブ数の制限)をご参照ください
-- リソース指定についての詳細はユーザーガイドの[CPUコア数に関する説明](./docs/user_guide.md#4-プログラムが使う-cpu-コア数と---cpu-の合わせ方)をご参照ください
+- リソース指定についての詳細はユーザーガイドの[CPUコア数に関する説明](./docs/user_guide.md#5-プログラムが使う-cpu-コア数と---cpu-の合わせ方)をご参照ください
 
 ### 計算リソースの種類（flavor）を指定する
 
@@ -179,6 +179,22 @@ $ cjob logs --follow <job-id>
 
 > [!CAUTION]
 > 標準出力と標準エラー出力はユーザーのストレージ内に保存されます。大量のログを残しておくとストレージを圧迫することがあるので注意してください。
+
+### ジョブの保留・解除
+
+```bash
+# ジョブの実行を保留する
+$ cjob hold <job-id>
+
+# 保留を解除してキューに戻す
+$ cjob release <job-id>
+```
+
+- 待機中（QUEUED）のジョブの実行を一時的に保留できます
+- 保留中のジョブは Dispatcher に選択されず、実行が開始されません
+- `cjob release` で保留を解除すると、通常の待機ジョブと同様に実行されます
+- キャンセルと同様に範囲指定（`1-5`）や複数指定（`1,3,5`）、`--all` が使用できます
+- 詳細はユーザーガイドの[ジョブの実行を保留する](./docs/user_guide.md#4-ジョブの実行を保留するcjob-hold--cjob-release)をご参照ください
 
 ### 完了済みジョブの削除
 
@@ -259,8 +275,12 @@ cjob update --version 1.3.0
 stateDiagram-v2
     [*] --> QUEUED : cjob add
 
+    QUEUED --> HELD : cjob hold
     QUEUED --> DISPATCHING : Dispatcher がジョブを選択
     QUEUED --> CANCELLED : cjob cancel
+
+    HELD --> QUEUED : cjob release
+    HELD --> CANCELLED : cjob cancel
 
     DISPATCHING --> DISPATCHED : ジョブ作成成功
     DISPATCHING --> QUEUED : 一時障害で再試行
@@ -288,6 +308,7 @@ stateDiagram-v2
 | ステータス      | 説明                                         |
 | --------------- | -------------------------------------------- |
 | **QUEUED**      | 投入済み、Dispatcher の選択待ち              |
+| **HELD**        | ユーザーが実行を保留中（`cjob release` で解除） |
 | **DISPATCHING** | Dispatcher がジョブを作成中                  |
 | **DISPATCHED**  | ジョブ作成済み、実行リソース割当て待ち       |
 | **RUNNING**     | ジョブ実行中                                 |
