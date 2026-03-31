@@ -328,7 +328,7 @@
           "refId": "A"
         },
         {
-          "expr": "kueue_pending_workloads{cluster_queue=\"cjob-cluster-queue\"}",
+          "expr": "sum(kueue_pending_workloads{cluster_queue=\"cjob-cluster-queue\"})",
           "legendFormat": "待機中",
           "refId": "B"
         }
