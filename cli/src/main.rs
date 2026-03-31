@@ -105,6 +105,24 @@ enum Commands {
         /// ジョブ ID（例: 1, 1-5, 1,3,5, 1-5,8,10-12）
         job_ids: String,
     },
+    /// ジョブの実行を保留する
+    Hold {
+        /// ジョブ ID（例: 1, 1-5, 1,3,5, 1-5,8,10-12）
+        job_ids: Option<String>,
+
+        /// QUEUED 状態のジョブを全て保留にする
+        #[arg(long)]
+        all: bool,
+    },
+    /// 保留中のジョブをキューに戻す
+    Release {
+        /// ジョブ ID（例: 1, 1-5, 1,3,5, 1-5,8,10-12）
+        job_ids: Option<String>,
+
+        /// HELD 状態のジョブを全てキューに戻す
+        #[arg(long)]
+        all: bool,
+    },
     /// 完了済みジョブを削除する
     Delete {
         /// ジョブ ID（例: 1, 1-5, 1,3,5）
@@ -209,6 +227,8 @@ async fn main() -> Result<()> {
         Commands::List { status, limit, reverse, all } => cmd_list(&api_client, status.map(|s| s.to_uppercase()), limit, reverse, all).await,
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
+        Commands::Hold { job_ids, all } => cmd_hold(&api_client, job_ids, all).await,
+        Commands::Release { job_ids, all } => cmd_release(&api_client, job_ids, all).await,
         Commands::Delete { job_ids, all } => cmd_delete(&api_client, job_ids, all).await,
         Commands::Usage => cmd_usage(&api_client).await,
         Commands::Reset => cmd_reset(&api_client).await,
@@ -446,6 +466,82 @@ async fn cmd_cancel(client: &client::CjobClient, job_ids_expr: &str) -> Result<(
     Ok(())
 }
 
+async fn cmd_hold(
+    client: &client::CjobClient,
+    job_ids_expr: Option<String>,
+    all: bool,
+) -> Result<()> {
+    let job_ids = if all {
+        None
+    } else if let Some(expr) = job_ids_expr {
+        Some(job_ids::parse_job_ids(&expr)?)
+    } else {
+        anyhow::bail!("job_id を指定するか --all を使用してください");
+    };
+
+    if let Some(ref ids) = job_ids {
+        if ids.len() == 1 {
+            let resp = client.hold_single(ids[0]).await?;
+            let status = resp
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            println!("ジョブ {}: {}", ids[0], status);
+            return Ok(());
+        }
+    }
+
+    let resp = client.hold_bulk(job_ids).await?;
+    if !resp.held.is_empty() {
+        println!("保留しました: {:?}", resp.held);
+    }
+    if !resp.skipped.is_empty() {
+        println!("スキップしました（QUEUED 以外）: {:?}", resp.skipped);
+    }
+    if !resp.not_found.is_empty() {
+        println!("見つかりませんでした: {:?}", resp.not_found);
+    }
+    Ok(())
+}
+
+async fn cmd_release(
+    client: &client::CjobClient,
+    job_ids_expr: Option<String>,
+    all: bool,
+) -> Result<()> {
+    let job_ids = if all {
+        None
+    } else if let Some(expr) = job_ids_expr {
+        Some(job_ids::parse_job_ids(&expr)?)
+    } else {
+        anyhow::bail!("job_id を指定するか --all を使用してください");
+    };
+
+    if let Some(ref ids) = job_ids {
+        if ids.len() == 1 {
+            let resp = client.release_single(ids[0]).await?;
+            let status = resp
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            println!("ジョブ {}: {}", ids[0], status);
+            return Ok(());
+        }
+    }
+
+    let resp = client.release_bulk(job_ids).await?;
+    if !resp.released.is_empty() {
+        println!("キューに戻しました: {:?}", resp.released);
+    }
+    if !resp.skipped.is_empty() {
+        println!("スキップしました（HELD 以外）: {:?}", resp.skipped);
+    }
+    if !resp.not_found.is_empty() {
+        println!("見つかりませんでした: {:?}", resp.not_found);
+    }
+    Ok(())
+}
+
 async fn cmd_delete(
     client: &client::CjobClient,
     job_ids_expr: Option<String>,
@@ -472,6 +568,10 @@ async fn cmd_delete(
         match item.reason.as_str() {
             "running" => println!(
                 "ジョブ {}: 実行中のため削除できませんでした。先に cjob cancel を実行してください",
+                item.job_id
+            ),
+            "held" => println!(
+                "ジョブ {}: 保留中のため削除できませんでした。先に cjob cancel または cjob release を実行してください",
                 item.job_id
             ),
             "deleting" => println!(
@@ -502,7 +602,7 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
     let active: Vec<u32> = list_resp
         .jobs
         .iter()
-        .filter(|j| matches!(j.status.as_str(), "QUEUED" | "DISPATCHING" | "DISPATCHED" | "RUNNING"))
+        .filter(|j| matches!(j.status.as_str(), "QUEUED" | "DISPATCHING" | "DISPATCHED" | "RUNNING" | "HELD"))
         .map(|j| j.job_id)
         .collect();
     if !active.is_empty() {
