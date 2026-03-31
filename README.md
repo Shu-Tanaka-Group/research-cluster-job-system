@@ -277,14 +277,14 @@ stateDiagram-v2
 
     QUEUED --> CANCELLED : cancel
     QUEUED --> HELD : hold
-    QUEUED --> DISPATCHING : Dispatcher がジョブを選択
+    QUEUED --> DISPATCHING : Dispatcher が選択
 
     HELD --> CANCELLED : cancel
     HELD --> QUEUED : release
 
     DISPATCHING --> CANCELLED : cancel
     DISPATCHING --> DISPATCHED : ジョブ作成成功
-    DISPATCHING --> QUEUED : 一時障害で再試行
+    DISPATCHING --> QUEUED : 再試行
     DISPATCHING --> FAILED : 永続エラー / 最大再試行超過
 
     DISPATCHED --> CANCELLED : cancel
