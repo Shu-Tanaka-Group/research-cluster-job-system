@@ -1,6 +1,6 @@
 pub mod cli;
 pub mod cluster;
-pub mod config_show;
+pub mod config;
 pub mod counters;
 pub mod db_migrate;
 pub mod jobs;

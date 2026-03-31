@@ -35,7 +35,7 @@ enum Commands {
         #[command(subcommand)]
         command: SystemCommands,
     },
-    /// Show cjob-config ConfigMap
+    /// Manage cjob-config ConfigMap
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
@@ -153,6 +153,22 @@ enum CountersCommands {
 enum ConfigCommands {
     /// Show cjob-config ConfigMap contents
     Show,
+    /// Set a config value in cjob-config ConfigMap
+    Set {
+        /// Config key name (e.g. DISPATCH_BATCH_SIZE)
+        key: String,
+        /// Value to set (mutually exclusive with --from-file)
+        #[arg(conflicts_with = "from_file")]
+        value: Option<String>,
+        /// Read value from file (for JSON values like RESOURCE_FLAVORS)
+        #[arg(long, conflicts_with = "value")]
+        from_file: Option<String>,
+        /// Skip confirmation prompt
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Dump cjob-config ConfigMap as clean YAML (suitable for kubectl apply)
+    Dump,
 }
 
 #[derive(Subcommand)]
@@ -447,7 +463,20 @@ async fn main() -> Result<()> {
             let k8s_client = k8s::client().await?;
             match command {
                 ConfigCommands::Show => {
-                    cmd::config_show::run(&k8s_client, config.system_namespace()).await
+                    cmd::config::show::run(&k8s_client, config.system_namespace()).await
+                }
+                ConfigCommands::Set { key, value, from_file, yes } => {
+                    cmd::config::set::run(
+                        &k8s_client,
+                        config.system_namespace(),
+                        &key,
+                        value.as_deref(),
+                        from_file.as_deref(),
+                        yes,
+                    ).await
+                }
+                ConfigCommands::Dump => {
+                    cmd::config::dump::run(&k8s_client, config.system_namespace()).await
                 }
             }
         }
