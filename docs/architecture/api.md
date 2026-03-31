@@ -188,8 +188,12 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 | パラメータ | 型 | 省略時の挙動 |
 |---|---|---|
 | `status` | 文字列（任意） | 全ステータスを返す |
+| `time_limit_ge` | 整数（任意、秒） | フィルタしない |
+| `time_limit_lt` | 整数（任意、秒） | フィルタしない |
 | `limit` | 整数（任意） | 全件返す |
 | `order` | 文字列（`"asc"` or `"desc"`） | `"asc"`（JOB_ID 昇順） |
+
+`time_limit_ge` / `time_limit_lt` は `time_limit_seconds` の範囲フィルタ。`time_limit_ge` は「以上」、`time_limit_lt` は「未満」。両方指定した場合は AND 条件。
 
 `limit` 指定時は常に最新（JOB_ID が大きい）N 件を選択し、`order` に応じてソートして返す。
 
@@ -198,6 +202,9 @@ GET /v1/jobs
 GET /v1/jobs?status=RUNNING
 GET /v1/jobs?status=FAILED&limit=10
 GET /v1/jobs?limit=50&order=desc
+GET /v1/jobs?status=QUEUED&time_limit_ge=21600
+GET /v1/jobs?time_limit_lt=43200
+GET /v1/jobs?time_limit_ge=21600&time_limit_lt=43200
 ```
 
 ### response
@@ -211,6 +218,7 @@ GET /v1/jobs?limit=50&order=desc
       "command": "python main.py --alpha 0.1 --beta 16",
       "created_at": "2026-03-23T12:34:56Z",
       "finished_at": null,
+      "time_limit_seconds": 86400,
       "completions": null,
       "parallelism": null,
       "succeeded_count": null,

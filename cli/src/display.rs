@@ -1,5 +1,13 @@
 use crate::client::{JobDetailResponse, JobSummary};
 
+pub fn print_job_ids(jobs: &[JobSummary]) {
+    if jobs.is_empty() {
+        return;
+    }
+    let ids: Vec<String> = jobs.iter().map(|j| j.job_id.to_string()).collect();
+    println!("{}", ids.join(","));
+}
+
 pub fn print_job_table(jobs: &[JobSummary]) {
     if jobs.is_empty() {
         println!("ジョブがありません。");

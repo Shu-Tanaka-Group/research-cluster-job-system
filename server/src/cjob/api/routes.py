@@ -130,12 +130,22 @@ def post_job(
 @router.get("/jobs", response_model=JobListResponse)
 def get_jobs(
     status: str | None = None,
+    time_limit_ge: int | None = None,
+    time_limit_lt: int | None = None,
     limit: int | None = None,
     order: str = "asc",
     namespace: str = Depends(get_namespace),
     session: Session = Depends(get_session),
 ):
-    return list_jobs(session, namespace, status=status, limit=limit, order=order)
+    return list_jobs(
+        session,
+        namespace,
+        status=status,
+        time_limit_ge=time_limit_ge,
+        time_limit_lt=time_limit_lt,
+        limit=limit,
+        order=order,
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=JobDetailResponse)

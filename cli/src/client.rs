@@ -56,6 +56,7 @@ pub struct JobSummary {
     pub command: String,
     pub created_at: String,
     pub finished_at: Option<String>,
+    pub time_limit_seconds: u32,
     pub completions: Option<u32>,
     pub parallelism: Option<u32>,
     pub succeeded_count: Option<u32>,
@@ -277,6 +278,8 @@ impl CjobClient {
     pub async fn list_jobs(
         &self,
         status: Option<&str>,
+        time_limit_ge: Option<u32>,
+        time_limit_lt: Option<u32>,
         limit: Option<u32>,
         order: Option<&str>,
     ) -> Result<JobListResponse> {
@@ -284,6 +287,12 @@ impl CjobClient {
         let mut params = Vec::new();
         if let Some(s) = status {
             params.push(format!("status={}", s));
+        }
+        if let Some(v) = time_limit_ge {
+            params.push(format!("time_limit_ge={}", v));
+        }
+        if let Some(v) = time_limit_lt {
+            params.push(format!("time_limit_lt={}", v));
         }
         if let Some(l) = limit {
             params.push(format!("limit={}", l));
