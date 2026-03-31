@@ -387,7 +387,7 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 8,
+        "w": 6,
         "x": 0,
         "y": 6
       },
@@ -400,9 +400,7 @@
           "calcs": [],
           "displayMode": "list",
           "placement": "right",
-          "values": [
-            "value"
-          ]
+          "values": []
         },
         "pieType": "donut",
         "reduceOptions": {
@@ -447,7 +445,7 @@
       "gridPos": {
         "h": 5,
         "w": 4,
-        "x": 8,
+        "x": 6,
         "y": 6
       },
       "id": 15,
@@ -514,7 +512,7 @@
       "gridPos": {
         "h": 5,
         "w": 4,
-        "x": 12,
+        "x": 10,
         "y": 6
       },
       "id": 17,
@@ -562,8 +560,8 @@
         "overrides": [
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": ".*実行中$"
+              "id": "byName",
+              "options": "実行中"
             },
             "properties": [
               {
@@ -577,8 +575,8 @@
           },
           {
             "matcher": {
-              "id": "byRegexp",
-              "options": ".*待機中$"
+              "id": "byName",
+              "options": "待機中"
             },
             "properties": [
               {
@@ -594,8 +592,8 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 4,
-        "x": 16,
+        "w": 6,
+        "x": 14,
         "y": 6
       },
       "id": 19,
@@ -621,7 +619,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  flavor || ' 実行中' AS metric,\n  COUNT(*) FILTER (WHERE status = 'RUNNING') AS value\nFROM jobs\nGROUP BY flavor\nUNION ALL\nSELECT\n  flavor || ' 待機中',\n  COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED'))\nFROM jobs\nGROUP BY flavor\nORDER BY metric;",
+          "rawSql": "SELECT\n  flavor,\n  COUNT(*) FILTER (WHERE status = 'RUNNING') AS \"実行中\",\n  COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED')) AS \"待機中\"\nFROM jobs\nGROUP BY flavor\nORDER BY flavor;",
           "refId": "A"
         }
       ],
@@ -1326,8 +1324,8 @@
       },
       "gridPos": {
         "h": 6,
-        "w": 8,
-        "x": 16,
+        "w": 6,
+        "x": 14,
         "y": 26
       },
       "id": 19,
