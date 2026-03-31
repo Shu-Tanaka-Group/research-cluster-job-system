@@ -2,7 +2,7 @@ use anyhow::Result;
 use semver::Version;
 use std::cmp::Ordering;
 
-use super::cli_common::{self, PVC_MOUNT_PATH};
+use super::{cleanup_pod, create_temp_pod, run_kubectl, PVC_MOUNT_PATH};
 
 /// Parse ls output into a list of (Version, original_string) pairs.
 /// Filters out the "latest" file entry. Unparseable entries are returned separately.
@@ -44,19 +44,19 @@ fn sort_versions(versions: &mut [Version]) {
 pub async fn run(namespace: &str) -> Result<()> {
     println!("Fetching CLI versions from PVC...");
 
-    let pod_name = cli_common::create_temp_pod(namespace, "list").await?;
+    let pod_name = create_temp_pod(namespace, "list").await?;
 
     let result = list_versions(namespace, &pod_name).await;
 
     println!("  Cleaning up temporary pod...");
-    cli_common::cleanup_pod(namespace, &pod_name).await;
+    cleanup_pod(namespace, &pod_name).await;
 
     result
 }
 
 async fn list_versions(namespace: &str, pod_name: &str) -> Result<()> {
     // Get directory listing
-    let ls_output = cli_common::run_kubectl(&[
+    let ls_output = run_kubectl(&[
         "exec", pod_name,
         "--namespace", namespace,
         "--", "ls", PVC_MOUNT_PATH,
@@ -64,7 +64,7 @@ async fn list_versions(namespace: &str, pod_name: &str) -> Result<()> {
     .await?;
 
     // Get current latest version
-    let latest = cli_common::run_kubectl(&[
+    let latest = run_kubectl(&[
         "exec", pod_name,
         "--namespace", namespace,
         "--", "cat", &format!("{}/latest", PVC_MOUNT_PATH),

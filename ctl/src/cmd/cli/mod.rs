@@ -1,3 +1,8 @@
+pub mod deploy;
+pub mod list;
+pub mod remove;
+pub mod set_latest;
+
 use anyhow::{bail, Context, Result};
 use tokio::process::Command;
 

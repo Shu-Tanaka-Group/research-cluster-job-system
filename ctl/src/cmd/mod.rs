@@ -1,8 +1,4 @@
-pub mod cli_common;
-pub mod cli_deploy;
-pub mod cli_list;
-pub mod cli_remove;
-pub mod cli_set_latest;
+pub mod cli;
 pub mod cluster;
 pub mod config_show;
 pub mod counters;

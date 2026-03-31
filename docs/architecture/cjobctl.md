@@ -424,15 +424,17 @@ ctl/
     ├── k8s.rs             # K8s クライアント初期化
     └── cmd/
         ├── mod.rs
+        ├── cli/
+        │   ├── mod.rs         # 共有ユーティリティ + サブモジュール宣言
+        │   ├── deploy.rs      # cli deploy (ベータ版サポート含む)
+        │   ├── list.rs        # cli list
+        │   ├── remove.rs      # cli remove
+        │   └── set_latest.rs  # cli set-latest
         ├── jobs.rs        # jobs list/stalled/remaining/summary
         ├── usage.rs       # usage list/reset + ClusterTotals
         ├── counters.rs    # counters list
         ├── weight.rs      # weight list/set/reset/exclusive
         ├── cluster.rs     # cluster resources
-        ├── cli_deploy.rs  # cli deploy (ベータ版サポート含む)
-        ├── cli_list.rs    # cli list
-        ├── cli_remove.rs  # cli remove
-        ├── cli_set_latest.rs # cli set-latest
         ├── db_migrate.rs  # db migrate
         ├── user.rs        # user list/enable/disable
         ├── status.rs      # K8s Pod 状態
