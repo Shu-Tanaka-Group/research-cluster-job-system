@@ -11,4 +11,5 @@ pub mod jobs;
 pub mod logs;
 pub mod status;
 pub mod usage;
+pub mod user;
 pub mod weight;
