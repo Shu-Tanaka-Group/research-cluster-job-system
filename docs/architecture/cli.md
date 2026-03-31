@@ -24,7 +24,7 @@ cjob hold --all                   # QUEUED 状態のジョブを全て保留
 cjob release <job-id>             # 単体指定
 cjob release <start>-<end>        # 範囲指定（例: 1-10）
 cjob release <id>,<id>,...        # 個別複数指定（例: 1,3,5）
-cjob release <start>-<end>,<id>,. # 組み合わせ（例: 1-5,8,10-12）
+cjob release <start>-<end>,<id>,.. # 組み合わせ（例: 1-5,8,10-12）
 cjob release --all                # HELD 状態のジョブを全て解除
 cjob reset
 cjob logs <job-id>
@@ -412,6 +412,18 @@ fn parse_job_ids(expr) -> Vec<u32>:
         '-' を含む場合: start..=end の連番を追加
         それ以外: その数値を追加
     重複除去して昇順ソートして返す
+
+fn cmd_cancel(expr):
+    job_ids = parse_job_ids(expr)
+    if len(job_ids) == 1:
+        POST /v1/jobs/{job_id}/cancel を呼ぶ
+        "ジョブ {job_id}: {status}" を表示する
+    else:
+        POST /v1/jobs/cancel に job_ids を送る
+        result を受け取り:
+            cancelled があれば "キャンセルしました" を表示する
+            skipped があれば "スキップしました（完了済みまたはキャンセル済み）" を表示する
+            not_found があれば "見つかりませんでした" を表示する
 ```
 
 ## 10. `cjob delete` の動作

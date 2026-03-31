@@ -91,10 +91,14 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 ```
 
 `time_limit_seconds` は省略可能。省略時はサーバ側デフォルト（ConfigMap: `DEFAULT_TIME_LIMIT_SECONDS`、デフォルト 86400 = 24時間）を使用する。
-`MAX_TIME_LIMIT_SECONDS`（デフォルト 604800 = 7日）を超える値を指定した場合は 400 を返す。
+`MAX_TIME_LIMIT_SECONDS`（デフォルト 604800 = 7日）を超える値を指定した場合は 400 を返す。0 以下の値を指定した場合も 400 を返す。
 
 ```json
 { "detail": "time_limit_seconds は 604800 秒（7日）以下で指定してください" }
+```
+
+```json
+{ "detail": "time_limit_seconds は 1 以上で指定してください" }
 ```
 
 `command` が空文字の場合は 400 を返す。
@@ -103,7 +107,7 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 { "detail": "command は空にできません" }
 ```
 
-namespace のジョブ総数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計）が
+namespace のジョブ総数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / HELD / CANCELLED の合計）が
 `MAX_QUEUED_JOBS_PER_NAMESPACE`（デフォルト 500）に達している場合は 429 を返す。
 CANCELLED ジョブを含めることで、cancel → 再投入の無制限サイクルによる DB 肥大化を防ぐ。
 上限に達した場合は `cjob delete` で CANCELLED ジョブを削除してから再投入すること。
@@ -283,6 +287,7 @@ GET /v1/jobs?time_limit_ge=21600&time_limit_lt=43200
 | 状態 | API の処理 |
 |---|---|
 | `QUEUED` | DB を `CANCELLED` に更新する。Dispatcher が次回スキャン時に `CANCELLED` ならスキップする |
+| `HELD` | DB を `CANCELLED` に更新する。K8s Job は未作成のため削除不要 |
 | `DISPATCHING` | DB を `CANCELLED` に更新する。CAS 更新の前にキャンセルが行われた場合は Dispatcher がスキップする。CAS 更新の後にキャンセルが行われた場合は K8s Job が作成されるが、Watcher が定期監視時に `CANCELLED` ジョブの K8s Job を削除する（`DISPATCHED` / `RUNNING` と同じ経路） |
 | `DISPATCHED` / `RUNNING` | DB を `CANCELLED` に更新する。Watcher が定期監視時に `CANCELLED` ジョブの K8s Job を削除する |
 | `SUCCEEDED` / `FAILED` / `CANCELLED` | 変更不要。`skipped` として返す |

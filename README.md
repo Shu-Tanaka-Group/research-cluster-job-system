@@ -94,10 +94,10 @@ $ uv run -- cjob add -- python main.py
 
 ```bash
 # CPUとメモリを指定
-$ cjob --cpu 10 --memory 16Gi -- python main.py
+$ cjob add --cpu 10 --memory 16Gi -- python main.py
 
 # 実行時間の上限を指定
-$ cjob --time-limit 1h -- python main.py
+$ cjob add --time-limit 1h -- python main.py
 ```
 
 - ジョブが使用する CPU コア数（`--cpu`）やメモリ量（`--memory`）を指定できます。プログラムが実際に使用するリソース量に合わせて設定してください

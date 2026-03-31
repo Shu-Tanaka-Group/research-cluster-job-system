@@ -35,10 +35,14 @@ spec:
 
 | 制限 | 設定箇所 | 値 | 管理主体 | 適用単位 | 制限対象 |
 |---|---|---|---|---|---|
-| `MAX_QUEUED_JOBS_PER_NAMESPACE` | ConfigMap | 500 | Submit API | ユーザーごと | PostgreSQL の `jobs` テーブルへの登録数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / CANCELLED の合計） |
+| `MAX_QUEUED_JOBS_PER_NAMESPACE` | ConfigMap | 500 | Submit API | ユーザーごと | PostgreSQL の `jobs` テーブルへの登録数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / HELD / CANCELLED の合計） |
 | `DISPATCH_BUDGET_PER_NAMESPACE` | ConfigMap | 32 | Dispatcher | ユーザーごと | DB 上の active ジョブ数（DISPATCHING + DISPATCHED + RUNNING の合計）。上限に達すると Dispatcher が新規 dispatch を停止する |
 | `DISPATCH_BATCH_SIZE` | ConfigMap | 50 | Dispatcher | サイクルごと（全体） | 1回の dispatch サイクルで取得するジョブの総数上限。namespace 間でラウンドロビン・DRF 優先で公平に分配される |
 | `DISPATCH_ROUND_SIZE` | ConfigMap | 1 | Dispatcher | サイクルごと（namespace あたり） | ラウンドロビンの 1 ラウンドで各 namespace から取得するジョブ数。5 に設定すると各 namespace から 5 件ずつ交互に取得する |
+| `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` | ConfigMap | 10 | Dispatcher / Watcher | 全体 | Dispatcher と Watcher のメインループ実行間隔（秒） |
+| `DISPATCH_RETRY_INTERVAL_SEC` | ConfigMap | 30 | Dispatcher | ジョブごと | K8s API 一時障害時の再試行待機時間（秒） |
+| `DISPATCH_MAX_RETRIES` | ConfigMap | 5 | Dispatcher | ジョブごと | K8s API 一時障害時の最大再試行回数。超過時はジョブを FAILED に遷移させる |
+| `TTL_SECONDS_AFTER_FINISHED` | ConfigMap | 300 (5分) | Dispatcher | ジョブごと | K8s Job の `ttlSecondsAfterFinished` に設定する値。完了した K8s Job がこの秒数後に自動削除される |
 | `count/jobs.batch` | ResourceQuota | 50 | Kubernetes | ユーザーごと | K8s 上に存在する `batch/v1 Job` オブジェクトの総数。実行中 + TTL 待ち完了済みジョブの合計が対象 |
 
 4つの制限は独立したレイヤーで機能する。
