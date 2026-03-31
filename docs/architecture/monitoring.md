@@ -86,21 +86,31 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | 待機中ジョブ数 | Stat | PostgreSQL | DB 上の待機中ジョブ数（QUEUED + DISPATCHING + DISPATCHED） | green < 5, yellow < 20, red >= 20 |
 | 推定待ち時間 (P50) | Stat | Prometheus | admission wait time の中央値（直近 1 時間） | green < 60s, yellow < 300s, red >= 300s |
 
-#### Row 2: キューの状態
+#### Row 2: 現在のジョブ状況
+
+| Panel | Type | DataSource | 内容 |
+|---|---|---|---|
+| ジョブ状態の内訳 | Pie chart | PostgreSQL | 直近 24 時間のジョブ状態内訳 |
+| 実行中ジョブ数 | Stat | PostgreSQL | 全ユーザー合計の実行中ジョブ数 |
+| 成功率（直近 24 時間） | Stat | PostgreSQL | SUCCEEDED / (SUCCEEDED + FAILED) |
+| Flavor 別キュー使用状況 | Bar gauge | PostgreSQL | Flavor ごとの実行中・待機中ジョブ数 |
+| クラスタノード数 | Stat | PostgreSQL | node_resources テーブルのレコード数 |
+
+#### Row 3: キューの状態
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
 | キュー内ジョブ数の推移 | Time series | Prometheus | 実行中（admitted_active）と待機中（pending）の推移 |
 | ジョブ投入・完了の推移 | Time series (bar) | PostgreSQL | 時間帯別の投入数と完了数 |
 
-#### Row 3: CPU リソースの詳細
+#### Row 4: CPU リソースの詳細
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
 | CPU 予約量の推移 | Time series | Prometheus | cpu の CPU 予約量 vs クォータ上限 |
 | メモリ予約量の推移 | Time series | Prometheus | cpu のメモリ予約量 vs クォータ上限（GiB 表示） |
 
-#### Row 4: GPU リソースの詳細
+#### Row 5: GPU リソースの詳細
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
@@ -108,28 +118,18 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | GPU ノード CPU 予約量 | Time series | Prometheus | gpu の CPU 予約量 vs クォータ上限 |
 | GPU ノード メモリ予約量 | Time series | Prometheus | gpu のメモリ予約量 vs クォータ上限（GiB 表示） |
 
-#### Row 5: 待ち時間の分析
+#### Row 6: 待ち時間の分析
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
 | 待ち時間の推移 (P50 / P95) | Time series | Prometheus | admission wait time のパーセンタイル推移 |
 | 最近のジョブ待ち時間 | Table | PostgreSQL | 直近 6 時間のジョブの実績待ち時間（started_at - created_at） |
 
-#### Row 6: 時間帯別の傾向
+#### Row 7: 時間帯別の傾向
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
 | 時間帯別の混雑度（過去 7 日平均） | Bar chart | PostgreSQL | 0-23 時の平均ジョブ投入数。空いている時間帯を狙ってジョブ投入できる |
-
-#### Row 7: 現在のジョブ状況
-
-| Panel | Type | DataSource | 内容 |
-|---|---|---|---|
-| ジョブ状態の内訳 | Pie chart | PostgreSQL | 直近 24 時間のジョブ状態内訳 |
-| 実行中ジョブ数 | Stat | PostgreSQL | 全ユーザー合計の実行中ジョブ数 |
-| 待機中ジョブ数 | Stat | PostgreSQL | 全ユーザー合計の待機中ジョブ数 |
-| 成功率（直近 24 時間） | Stat | PostgreSQL | SUCCEEDED / (SUCCEEDED + FAILED) |
-| クラスタノード数 | Stat | PostgreSQL | node_resources テーブルのレコード数 |
 
 ### 3.3 メトリクスの単位（Kueue v0.16.4）
 
@@ -261,8 +261,19 @@ ORDER BY
 -- 実行中ジョブ数
 SELECT COUNT(*) AS "実行中" FROM jobs WHERE status = 'RUNNING';
 
--- 待機中ジョブ数
-SELECT COUNT(*) AS "待機中" FROM jobs WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');
+-- Flavor 別キュー使用状況
+SELECT
+  flavor || ' 実行中' AS metric,
+  COUNT(*) FILTER (WHERE status = 'RUNNING') AS value
+FROM jobs
+GROUP BY flavor
+UNION ALL
+SELECT
+  flavor || ' 待機中',
+  COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED'))
+FROM jobs
+GROUP BY flavor
+ORDER BY metric;
 
 -- 成功率（直近 24 時間）
 SELECT
