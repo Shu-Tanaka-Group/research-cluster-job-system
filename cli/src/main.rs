@@ -507,7 +507,8 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
         .collect();
     if !active.is_empty() {
         println!("完了していないジョブがあるためリセットできません。");
-        println!("完了待ちのジョブ: {:?}", active);
+        let active_str: Vec<String> = active.iter().map(|id| id.to_string()).collect();
+        println!("完了待ちのジョブ: {}", active_str.join(", "));
         return Ok(());
     }
 

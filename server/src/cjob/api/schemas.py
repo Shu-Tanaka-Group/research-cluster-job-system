@@ -79,6 +79,11 @@ class JobDetailResponse(BaseModel):
     failed_indexes: str | None = None
 
 
+class SingleCancelResponse(BaseModel):
+    job_id: int
+    status: str
+
+
 class CancelRequest(BaseModel):
     job_ids: list[int]
 
