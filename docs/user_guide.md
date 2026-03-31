@@ -239,7 +239,36 @@ cjob hold --all
 cjob release --all
 ```
 
-### 4.3 保留できるジョブの条件
+### 4.3 実行時間の上限で絞り込んで保留する
+
+`cjob list` の `--time-limit` オプションと `--format ids` オプションを組み合わせると、実行時間の上限（`--time-limit` で設定した値）が一定以上のジョブだけを絞り込んで、まとめて保留できます。
+
+たとえば、メンテナンスまで 6 時間しかないときに、6 時間以上かかるジョブだけを保留するには次のようにします。
+
+```bash
+# 待機中で実行時間の上限が 6 時間以上のジョブの ID 一覧を確認
+cjob list --status QUEUED --time-limit 6h: --format ids
+
+# 確認した結果を使ってまとめて保留
+cjob hold $(cjob list --status QUEUED --time-limit 6h: --format ids)
+```
+
+`--time-limit` は `<下限>:<上限>` の形式で範囲を指定します。下限は「以上」、上限は「未満」です。
+
+```bash
+# 実行時間の上限が 6 時間以上のジョブ
+cjob list --time-limit 6h:
+
+# 実行時間の上限が 12 時間未満のジョブ
+cjob list --time-limit :12h
+
+# 実行時間の上限が 6 時間以上 12 時間未満のジョブ
+cjob list --time-limit 6h:12h
+```
+
+`--format ids` はジョブの ID をコンマ区切りで出力します。`cjob hold` や `cjob cancel` など、ID を受け取るコマンドにそのまま渡せます。
+
+### 4.4 保留できるジョブの条件
 
 保留できるのは **QUEUED（待機中）** のジョブだけです。すでに実行中（RUNNING）やディスパッチ処理中（DISPATCHING / DISPATCHED）のジョブは保留できません。
 
