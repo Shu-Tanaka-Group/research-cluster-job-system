@@ -73,7 +73,25 @@ cjob sweep -n 100 --parallel 10 -- python main.py --trial _INDEX_
 cjob sweep -n 100 --parallel 5 -- python main.py --trial _INDEX_
 ```
 
-### 2.4 実行時間の上限について
+### 2.4 タスクごとのリソース指定
+
+`--cpu`、`--memory`、`--gpu` オプションを使うと、**1 つのタスクが使う計算リソースの量** を指定できます。sweep 全体ではなく、並列で動く個々のタスクそれぞれに割り当てられる量です。
+
+```bash
+# 各タスクに CPU 2 コア、メモリ 4GiB を割り当てて実行する
+cjob sweep -n 50 --parallel 5 --cpu 2 --memory 4Gi -- python main.py --trial _INDEX_
+
+# GPU を使う場合は --gpu で 1 タスクあたりの GPU 数を指定する
+cjob sweep -n 10 --parallel 2 --gpu 1 -- python train.py --trial _INDEX_
+```
+
+- `--cpu`: 1 タスクが使う CPU コア数（省略時: 1）
+- `--memory`: 1 タスクが使うメモリ量（省略時: 1Gi）
+- `--gpu`: 1 タスクが使う GPU 数（省略時: 0、つまり GPU を使わない）
+
+たとえば `--parallel 5 --cpu 2 --memory 4Gi` と指定した場合、最大で 5 タスクが同時に動くため、合計で CPU 10 コア・メモリ 20GiB を同時に消費することになります。クラスタのリソースに余裕がない場合はタスクが待機状態になるため、並列数やリソース量は必要に応じて調整してください。
+
+### 2.5 実行時間の上限について
 
 `--time-limit` で設定する実行時間の上限は、**すべてのタスクが終わるまでの合計時間** に対してかかります。1 回ごとの実行時間ではありません。
 
@@ -81,7 +99,7 @@ cjob sweep -n 100 --parallel 5 -- python main.py --trial _INDEX_
 
 タスク数が多い場合や並列数が少ない場合は、その分だけ完了までの時間が長くなります。十分な余裕を持った値を設定してください。
 
-### 2.5 sweep のログ確認
+### 2.6 sweep のログ確認
 
 sweep で実行した各ジョブのログは、番号を指定して個別に確認できます。
 
@@ -96,7 +114,7 @@ cjob logs 3 --index 5
 cjob logs --follow 3 --index 5
 ```
 
-### 2.6 sweep のキャンセル
+### 2.7 sweep のキャンセル
 
 sweep ジョブをキャンセルすると、進行中の全タスクがまとめて中止されます。特定の番号だけを中止することはできません。
 
