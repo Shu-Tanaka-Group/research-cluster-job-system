@@ -273,30 +273,30 @@ cjob update --version 1.3.0
 
 ```mermaid
 stateDiagram-v2
-    [*] --> QUEUED : add
+    [*] --> QUEUED : cjob add
 
-    QUEUED --> CANCELLED : cancel
-    QUEUED --> HELD : hold
+    QUEUED --> CANCELLED : cjob cancel
+    QUEUED --> HELD : cjob hold
     QUEUED --> DISPATCHING : ジョブ作成
 
-    HELD --> CANCELLED : cancel
-    HELD --> QUEUED : release
+    HELD --> CANCELLED : cjob cancel
+    HELD --> QUEUED : cjob release
 
-    DISPATCHING --> CANCELLED : cancel
+    DISPATCHING --> CANCELLED : cjob cancel
     DISPATCHING --> DISPATCHED : ジョブ作成成功
     DISPATCHING --> QUEUED : 再試行
     DISPATCHING --> FAILED : 永続エラー
 
-    DISPATCHED --> CANCELLED : cancel
+    DISPATCHED --> CANCELLED : cjob cancel
     DISPATCHED --> RUNNING : ジョブが実行開始
 
-    RUNNING --> CANCELLED : cancel
+    RUNNING --> CANCELLED : cjob cancel
     RUNNING --> FAILED : エラー / 時間超過
     RUNNING --> SUCCEEDED : 正常完了
 
-    CANCELLED --> DELETING : reset
-    FAILED --> DELETING : reset
-    SUCCEEDED --> DELETING : reset
+    CANCELLED --> DELETING : cjob reset
+    FAILED --> DELETING : cjob reset
+    SUCCEEDED --> DELETING : cjob reset
 
     DELETING --> [*] : ジョブ削除完了後に DB レコード削除
 ```
