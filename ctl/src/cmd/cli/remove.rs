@@ -1,21 +1,21 @@
 use anyhow::{bail, Result};
 
-use super::cli_common::{self, PVC_MOUNT_PATH};
+use super::{cleanup_pod, create_temp_pod, run_kubectl, PVC_MOUNT_PATH};
 
 pub async fn run(namespace: &str, versions: &[String]) -> Result<()> {
-    let pod_name = cli_common::create_temp_pod(namespace, "remove").await?;
+    let pod_name = create_temp_pod(namespace, "remove").await?;
 
     let result = remove_versions(namespace, &pod_name, versions).await;
 
     println!("  Cleaning up temporary pod...");
-    cli_common::cleanup_pod(namespace, &pod_name).await;
+    cleanup_pod(namespace, &pod_name).await;
 
     result
 }
 
 async fn remove_versions(namespace: &str, pod_name: &str, versions: &[String]) -> Result<()> {
     // Read current latest
-    let latest = cli_common::run_kubectl(&[
+    let latest = run_kubectl(&[
         "exec", pod_name,
         "--namespace", namespace,
         "--", "cat", &format!("{}/latest", PVC_MOUNT_PATH),
@@ -33,7 +33,7 @@ async fn remove_versions(namespace: &str, pod_name: &str, versions: &[String]) -
             );
         }
 
-        let check = cli_common::run_kubectl(&[
+        let check = run_kubectl(&[
             "exec", pod_name,
             "--namespace", namespace,
             "--", "sh", "-c",
@@ -69,7 +69,7 @@ async fn remove_versions(namespace: &str, pod_name: &str, versions: &[String]) -
     // Delete version directories
     for version in &targets {
         println!("  Removing version {}...", version);
-        cli_common::run_kubectl(&[
+        run_kubectl(&[
             "exec", pod_name,
             "--namespace", namespace,
             "--", "rm", "-rf", &format!("{}/{}", PVC_MOUNT_PATH, version),

@@ -417,16 +417,16 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             match command {
                 CliCommands::List => {
-                    cmd::cli_list::run(config.system_namespace()).await
+                    cmd::cli::list::run(config.system_namespace()).await
                 }
                 CliCommands::Deploy { binary, version, release } => {
-                    cmd::cli_deploy::run(config.system_namespace(), &binary, &version, release).await
+                    cmd::cli::deploy::run(config.system_namespace(), &binary, &version, release).await
                 }
                 CliCommands::Remove { versions } => {
-                    cmd::cli_remove::run(config.system_namespace(), &versions).await
+                    cmd::cli::remove::run(config.system_namespace(), &versions).await
                 }
                 CliCommands::SetLatest { version } => {
-                    cmd::cli_set_latest::run(config.system_namespace(), &version).await
+                    cmd::cli::set_latest::run(config.system_namespace(), &version).await
                 }
             }
         }
