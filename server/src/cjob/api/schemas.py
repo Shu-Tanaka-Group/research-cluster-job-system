@@ -41,6 +41,7 @@ class JobSummary(BaseModel):
     command: str
     created_at: datetime
     finished_at: datetime | None = None
+    time_limit_seconds: int
     completions: int | None = None
     parallelism: int | None = None
     succeeded_count: int | None = None

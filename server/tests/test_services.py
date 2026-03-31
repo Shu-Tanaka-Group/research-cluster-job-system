@@ -346,6 +346,35 @@ class TestListJobs:
         resp = list_jobs(db_session, "alice")
         assert resp.total_count == 1
 
+    def test_time_limit_ge(self, db_session):
+        _insert_job(db_session, 1, time_limit_seconds=3600)
+        _insert_job(db_session, 2, time_limit_seconds=21600)
+        _insert_job(db_session, 3, time_limit_seconds=86400)
+        resp = list_jobs(db_session, NS, time_limit_ge=21600)
+        assert resp.total_count == 2
+        assert [j.job_id for j in resp.jobs] == [2, 3]
+
+    def test_time_limit_lt(self, db_session):
+        _insert_job(db_session, 1, time_limit_seconds=3600)
+        _insert_job(db_session, 2, time_limit_seconds=21600)
+        _insert_job(db_session, 3, time_limit_seconds=86400)
+        resp = list_jobs(db_session, NS, time_limit_lt=21600)
+        assert resp.total_count == 1
+        assert resp.jobs[0].job_id == 1
+
+    def test_time_limit_range(self, db_session):
+        _insert_job(db_session, 1, time_limit_seconds=3600)
+        _insert_job(db_session, 2, time_limit_seconds=21600)
+        _insert_job(db_session, 3, time_limit_seconds=86400)
+        resp = list_jobs(db_session, NS, time_limit_ge=3600, time_limit_lt=86400)
+        assert resp.total_count == 2
+        assert [j.job_id for j in resp.jobs] == [1, 2]
+
+    def test_time_limit_seconds_in_summary(self, db_session):
+        _insert_job(db_session, 1, time_limit_seconds=7200)
+        resp = list_jobs(db_session, NS)
+        assert resp.jobs[0].time_limit_seconds == 7200
+
 
 # ── get_job ──
 

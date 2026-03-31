@@ -315,6 +315,8 @@ def list_jobs(
     session: Session,
     namespace: str,
     status: str | None = None,
+    time_limit_ge: int | None = None,
+    time_limit_lt: int | None = None,
     limit: int | None = None,
     order: str = "asc",
 ) -> JobListResponse:
@@ -322,6 +324,10 @@ def list_jobs(
     base_query = session.query(Job).filter(Job.namespace == namespace)
     if status:
         base_query = base_query.filter(Job.status == status)
+    if time_limit_ge is not None:
+        base_query = base_query.filter(Job.time_limit_seconds >= time_limit_ge)
+    if time_limit_lt is not None:
+        base_query = base_query.filter(Job.time_limit_seconds < time_limit_lt)
 
     total_count = base_query.count()
 
@@ -343,6 +349,7 @@ def list_jobs(
             command=j.command,
             created_at=j.created_at,
             finished_at=j.finished_at,
+            time_limit_seconds=j.time_limit_seconds,
             completions=j.completions,
             parallelism=j.parallelism,
             succeeded_count=j.succeeded_count,
