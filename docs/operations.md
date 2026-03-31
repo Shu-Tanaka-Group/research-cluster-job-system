@@ -15,6 +15,7 @@
 | `ctl/src/cmd/cli_list.rs` | `cjobctl cli list` |
 | `ctl/src/cmd/cli_remove.rs` | `cjobctl cli remove` |
 | `ctl/src/cmd/cli_set_latest.rs` | `cjobctl cli set-latest` |
+| `ctl/src/cmd/user.rs` | `cjobctl user` サブコマンド全般 |
 | `ctl/src/cmd/db_migrate.rs` | `cjobctl db migrate` |
 
 ## 1. DB 状態の確認
@@ -205,24 +206,44 @@ cjobctl usage reset --all
 
 ## 5. ユーザーのアクセス制御
 
-namespace のラベル `cjob.io/user-namespace=true` の有無でジョブ投入の可否を制御する。このラベルは NetworkPolicy で参照されており、ラベルがない namespace からは Submit API への通信がブロックされる。
+namespace のラベル `cjob.io/user-namespace` の値でジョブ投入の可否を制御する。このラベルは NetworkPolicy で参照されており、ラベルの値が `"true"` でない namespace からは Submit API への通信がブロックされる。
 
-### 5.1 ユーザーのアクセスを停止する
+### 5.1 ユーザー一覧の確認
 
 ```bash
-# ラベルを削除してジョブ投入を停止
-kubectl label namespace <namespace> cjob.io/user-namespace-
+# 全ユーザー namespace の一覧
+cjobctl user list
+
+# 有効なユーザーのみ表示
+cjobctl user list --enabled
+
+# 無効なユーザーのみ表示
+cjobctl user list --disabled
+```
+
+### 5.2 ユーザーのアクセスを停止する
+
+```bash
+# 単一 namespace を無効化
+cjobctl user disable --namespace user-bob
+
+# 複数 namespace を同時に無効化
+cjobctl user disable --namespace user-alice user-bob
 
 # 必要に応じて実行中のジョブをキャンセル
 cjobctl jobs cancel --namespace <namespace> --all
 ```
 
-ラベルを外しても、既に QUEUED / DISPATCHED / RUNNING のジョブはそのまま動き続ける。完全に停止したい場合は `cjobctl jobs cancel --all` で該当 namespace の全アクティブジョブをキャンセルすること。
+無効化しても、既に QUEUED / DISPATCHED / RUNNING のジョブはそのまま動き続ける。完全に停止したい場合は `cjobctl jobs cancel --namespace <namespace> --all` で該当 namespace の全アクティブジョブをキャンセルすること。
 
-### 5.2 ユーザーのアクセスを再開する
+### 5.3 ユーザーのアクセスを再開する
 
 ```bash
-kubectl label namespace <namespace> cjob.io/user-namespace=true
+# 単一 namespace を有効化
+cjobctl user enable --namespace user-charlie
+
+# 複数 namespace を同時に有効化
+cjobctl user enable --namespace user-alice user-bob
 ```
 
 ## 6. DB スキーマの更新
