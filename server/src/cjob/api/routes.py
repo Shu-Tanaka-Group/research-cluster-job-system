@@ -12,6 +12,7 @@ from .auth import UserInfo, get_namespace, get_user_info
 from .schemas import (
     CancelRequest,
     CancelResponse,
+    SingleCancelResponse,
     CliVersionResponse,
     CliVersionsResponse,
     DeleteRequest,
@@ -139,7 +140,7 @@ def get_job_detail(
     return result
 
 
-@router.post("/jobs/{job_id}/cancel")
+@router.post("/jobs/{job_id}/cancel", response_model=SingleCancelResponse)
 def post_cancel_single(
     job_id: int,
     namespace: str = Depends(get_namespace),
@@ -148,9 +149,7 @@ def post_cancel_single(
     result = cancel_single(session, namespace, job_id)
     if result.get("not_found"):
         raise HTTPException(status_code=404, detail="Job not found")
-    if result.get("skipped"):
-        return {"job_id": job_id, "status": result["status"]}
-    return result
+    return SingleCancelResponse(job_id=job_id, status=result["status"])
 
 
 @router.post("/jobs/cancel", response_model=CancelResponse)

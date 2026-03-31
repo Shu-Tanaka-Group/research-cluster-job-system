@@ -14,11 +14,7 @@ pub fn print_job_table(jobs: &[JobSummary]) {
         let job_type = if job.completions.is_some() { "sweep" } else { "job" };
         let progress = match (job.completions, job.succeeded_count, job.failed_count) {
             (Some(total), Some(succ), Some(fail)) => {
-                if fail > 0 {
-                    format!("{}/{}/{}", succ, fail, total)
-                } else {
-                    format!("{}/{}", succ, total)
-                }
+                format!("{}/{}/{}", succ, fail, total)
             }
             _ => "-".to_string(),
         };
@@ -82,6 +78,8 @@ pub fn print_job_detail(job: &JobDetailResponse) {
     println!("job_id:        {}", job.job_id);
     if is_sweep {
         println!("type:          sweep");
+    } else {
+        println!("type:          job");
     }
     println!("status:        {}", job.status);
     println!("command:       {}", job.command);

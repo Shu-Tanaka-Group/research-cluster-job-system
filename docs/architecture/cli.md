@@ -169,7 +169,7 @@ cjob add --time-limit 1d -- python main.py       # 1日
 cjob add --time-limit 3d -- python main.py       # 3日
 ```
 
-受け付ける表記: 整数（秒）、`<数値>s`（秒）、`<数値>h`（時間）、`<数値>d`（日）。最大 7 日。
+受け付ける表記: 整数（秒）、`<数値>s`（秒）、`<数値>m`（分）、`<数値>h`（時間）、`<数値>d`（日）。最大 7 日。
 
 ## 5. `cjob logs` の動作
 
