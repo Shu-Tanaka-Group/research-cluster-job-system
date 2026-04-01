@@ -213,12 +213,18 @@ pub struct CjobClient {
 }
 
 impl CjobClient {
+    fn skip_tls_verify() -> bool {
+        std::env::var("CJOB_INSECURE_SKIP_VERIFY")
+            .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
+            .unwrap_or(true)
+    }
+
     pub fn new(token: String) -> Result<Self> {
         let base_url = std::env::var("CJOB_API_URL")
             .unwrap_or_else(|_| "http://submit-api.cjob-system.svc.cluster.local:8080".to_string());
 
         let http = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_certs(Self::skip_tls_verify())
             .build()
             .context("HTTP クライアントの初期化に失敗しました")?;
 
@@ -234,7 +240,7 @@ impl CjobClient {
             .unwrap_or_else(|_| "http://submit-api.cjob-system.svc.cluster.local:8080".to_string());
 
         let http = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
+            .danger_accept_invalid_certs(Self::skip_tls_verify())
             .build()
             .context("HTTP クライアントの初期化に失敗しました")?;
 
