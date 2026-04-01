@@ -35,13 +35,13 @@ git diff <old-tag>...<new-tag> -- k8s/base/configmap-cjob-config.yaml
 read -r VERSION < VERSION
 
 # 変更があるコンポーネントのみビルド・push する
-docker build -t yusekiya/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
-docker build -t yusekiya/cjob-dispatcher:${VERSION} -f server/Dockerfile.dispatcher server/
-docker build -t yusekiya/cjob-watcher:${VERSION} -f server/Dockerfile.watcher server/
+docker build -t your-registry/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
+docker build -t your-registry/cjob-dispatcher:${VERSION} -f server/Dockerfile.dispatcher server/
+docker build -t your-registry/cjob-watcher:${VERSION} -f server/Dockerfile.watcher server/
 
-docker push yusekiya/cjob-submit-api:${VERSION}
-docker push yusekiya/cjob-dispatcher:${VERSION}
-docker push yusekiya/cjob-watcher:${VERSION}
+docker push your-registry/cjob-submit-api:${VERSION}
+docker push your-registry/cjob-dispatcher:${VERSION}
+docker push your-registry/cjob-watcher:${VERSION}
 ```
 
 サーバーコンポーネントに変更がない場合は、タグを付け替えて push する。
@@ -50,8 +50,8 @@ docker push yusekiya/cjob-watcher:${VERSION}
 read -r VERSION < VERSION
 
 # Submit APIの例．他のコンポーネントも同様
-docker tag yusekiya/cjob-submit-api:${OLD_VERSION} yusekiya/cjob-submit-api:${VERSION}
-docker push yusekiya/cjob-submit-api:${VERSION}
+docker tag your-registry/cjob-submit-api:${OLD_VERSION} your-registry/cjob-submit-api:${VERSION}
+docker push your-registry/cjob-submit-api:${VERSION}
 ```
 
 ## Step 3: CLI / 管理ツールのビルド

@@ -203,7 +203,7 @@ spec:
           effect: "NoSchedule"
       containers:
         - name: worker
-          image: yusekiya/stg-jupyter:2.1.0   # Dispatcher が DB から取得した image を動的に設定
+          image: your-registry/cjob-jupyter:2.1.0   # Dispatcher が DB から取得した image を動的に設定
           workingDir: /home/jovyan/project-a/exp1
           command: ["/bin/bash", "-lc"]
           args:

@@ -29,13 +29,13 @@ resources:
 
 images:
   - name: cjob-submit-api
-    newName: yusekiya/cjob-submit-api
+    newName: your-registry/cjob-submit-api
     newTag: "1.7.0"
   - name: cjob-dispatcher
-    newName: yusekiya/cjob-dispatcher
+    newName: your-registry/cjob-dispatcher
     newTag: "1.7.0"
   - name: cjob-watcher
-    newName: yusekiya/cjob-watcher
+    newName: your-registry/cjob-watcher
     newTag: "1.7.0"
 
 patches:

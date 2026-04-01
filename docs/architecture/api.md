@@ -29,7 +29,7 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 ```json
 {
   "command": "python main.py --alpha 0.1 --beta 16",
-  "image": "yusekiya/stg-jupyter:2.1.0",
+  "image": "your-registry/cjob-jupyter:2.1.0",
   "cwd": "/home/jovyan/project-a/exp1",
   "env": {
     "OMP_NUM_THREADS": "4",
@@ -131,7 +131,7 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 ```json
 {
   "command": "python main.py --trial $CJOB_INDEX",
-  "image": "yusekiya/stg-jupyter:2.1.0",
+  "image": "your-registry/cjob-jupyter:2.1.0",
   "cwd": "/home/jovyan/project-a",
   "env": {
     "OMP_NUM_THREADS": "4"

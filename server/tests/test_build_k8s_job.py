@@ -11,7 +11,7 @@ def _make_job(**overrides):
         namespace="user-alice",
         job_id=1,
         user="alice",
-        image="yusekiya/stg-jupyter:2.1.0",
+        image="your-registry/cjob-jupyter:2.1.0",
         command="python main.py",
         cwd="/home/jovyan/project-a",
         env_json={"PYTHONPATH": "/home/jovyan/project-a"},

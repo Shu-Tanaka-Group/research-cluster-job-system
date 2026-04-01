@@ -443,7 +443,7 @@ helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --v
 
 ### 14.2 ClusterPolicy の適用
 
-`yusekiya/stg-*` から始まるイメージのみを許可する。
+`your-registry/cjob-*` から始まるイメージのみを許可する。
 ユーザー namespace（`cjob.io/user-namespace: "true"` ラベル付き）内の Job だけが対象であり、
 `cjob-system` namespace のシステムコンポーネントには影響しない。
 
@@ -463,13 +463,13 @@ spec:
             matchLabels:
               cjob.io/user-namespace: "true"
       validate:
-        message: "許可されていないイメージです。yusekiya/stg-* のイメージのみ使用できます。"
+        message: "許可されていないイメージです。your-registry/cjob-* のイメージのみ使用できます。"
         pattern:
           spec:
             template:
               spec:
                 containers:
-                  - image: "yusekiya/stg-*"
+                  - image: "your-registry/cjob-*"
 ```
 
 ```bash
@@ -726,13 +726,13 @@ cp -r k8s/overlay-example /path/to/my-overlay
 
 # 3. システムコンポーネント image のビルドと push
 read -r VERSION < VERSION
-docker build -t yusekiya/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
-docker build -t yusekiya/cjob-dispatcher:${VERSION} -f server/Dockerfile.dispatcher server/
-docker build -t yusekiya/cjob-watcher:${VERSION} -f server/Dockerfile.watcher server/
-docker push yusekiya/cjob-submit-api:${VERSION}
-docker push yusekiya/cjob-dispatcher:${VERSION}
-docker push yusekiya/cjob-watcher:${VERSION}
-# Job Pod（runtime image）は yusekiya/stg-jupyter:2.1.0 を使用する（別途管理）
+docker build -t your-registry/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
+docker build -t your-registry/cjob-dispatcher:${VERSION} -f server/Dockerfile.dispatcher server/
+docker build -t your-registry/cjob-watcher:${VERSION} -f server/Dockerfile.watcher server/
+docker push your-registry/cjob-submit-api:${VERSION}
+docker push your-registry/cjob-dispatcher:${VERSION}
+docker push your-registry/cjob-watcher:${VERSION}
+# Job Pod（runtime image）は your-registry/cjob-jupyter:2.1.0 を使用する（別途管理）
 
 # 4. Kustomize で全リソースをデプロイ
 kubectl apply -k /path/to/my-overlay
