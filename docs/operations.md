@@ -30,6 +30,9 @@ cjobctl jobs list --namespace user-alice
 # ステータスでフィルタ
 cjobctl jobs list --status RUNNING
 
+# 個別ジョブの詳細表示
+cjobctl jobs status --namespace user-alice --job-id 42
+
 # namespace × ステータスのジョブ数（ピボットテーブル）
 cjobctl jobs summary
 ```
