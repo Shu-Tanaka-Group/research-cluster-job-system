@@ -35,6 +35,8 @@ data:
         succeeded_count   INTEGER,
         failed_count      INTEGER,
         node_name         TEXT,
+        cpu_millicores    INTEGER,
+        memory_mib        INTEGER,
         PRIMARY KEY (namespace, job_id)
     );
     CREATE TABLE IF NOT EXISTS user_job_counters (
