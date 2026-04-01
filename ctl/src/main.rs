@@ -105,6 +105,15 @@ enum JobsCommands {
         #[arg(long)]
         reverse: bool,
     },
+    /// Show detailed status of a specific job
+    Status {
+        /// Target namespace (required)
+        #[arg(long)]
+        namespace: String,
+        /// Job ID (required)
+        #[arg(long)]
+        job_id: i32,
+    },
     /// Show job count by namespace and status
     Summary,
     /// Cancel jobs in a namespace
@@ -337,6 +346,7 @@ async fn main() -> Result<()> {
                     };
                     cmd::jobs::list(&conn.client, namespace.as_deref(), status_upper.as_deref(), sort.as_deref(), reverse, wide).await
                 }
+                JobsCommands::Status { namespace, job_id } => cmd::jobs::status(&conn.client, &namespace, job_id).await,
                 JobsCommands::Stalled { sort, reverse } => cmd::jobs::stalled(&conn.client, sort.as_deref(), reverse).await,
                 JobsCommands::Remaining { sort, reverse } => cmd::jobs::remaining(&conn.client, sort.as_deref(), reverse).await,
                 JobsCommands::Summary => cmd::jobs::summary(&conn.client).await,

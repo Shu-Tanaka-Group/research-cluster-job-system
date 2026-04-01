@@ -65,6 +65,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 | コマンド | 概要 | 対象テーブル |
 |---|---|---|
 | `cjobctl jobs list [--namespace <ns>] [--status <s>] [--sort <field>] [--reverse] [-o wide]` | ジョブ一覧 | `jobs` |
+| `cjobctl jobs status --namespace <ns> --job-id <id>` | 個別ジョブの詳細表示（`cjob status` と同等） | `jobs` |
 | `cjobctl jobs summary` | namespace × ステータスのジョブ数（ピボットテーブル） | `jobs` |
 | `cjobctl jobs stalled [--sort <field>] [--reverse]` | DISPATCHED のまま滞留しているジョブ | `jobs` |
 | `cjobctl jobs remaining [--sort <field>] [--reverse]` | RUNNING ジョブの残り時間 | `jobs` |
