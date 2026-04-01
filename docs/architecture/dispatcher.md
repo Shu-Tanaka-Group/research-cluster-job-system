@@ -127,7 +127,7 @@ Dispatcher のメインループは各スキャンサイクル完了時に `/tmp
 ```text
 dispatch_budget = namespace_dispatch_limit - active_jobs_in_db(namespace)
 
-namespace_dispatch_limit = 256（ConfigMap: DISPATCH_BUDGET_PER_NAMESPACE で設定）
+namespace_dispatch_limit = 32 （ConfigMap: DISPATCH_BUDGET_PER_NAMESPACE で設定）
 batch_size              = 50 （ConfigMap: DISPATCH_BATCH_SIZE で設定）
 
 active_jobs_in_db(namespace) は PostgreSQL から取得する。
