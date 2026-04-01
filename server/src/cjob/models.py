@@ -53,6 +53,8 @@ class Job(Base):
     succeeded_count: Mapped[int | None] = mapped_column(Integer)
     failed_count: Mapped[int | None] = mapped_column(Integer)
     node_name: Mapped[str | None] = mapped_column(String)
+    cpu_millicores: Mapped[int | None] = mapped_column(Integer)
+    memory_mib: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (
         Index("idx_jobs_k8s_job_name", "k8s_job_name"),
