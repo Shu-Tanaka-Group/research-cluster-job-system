@@ -137,6 +137,106 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
     Ok(())
 }
 
+pub async fn status(client: &Client, namespace: &str, job_id: i32) -> Result<()> {
+    let row = client
+        .query_opt(
+            "SELECT namespace, job_id, status, command, cwd, flavor, cpu, memory, gpu, \
+                    time_limit_seconds, completions, parallelism, \
+                    succeeded_count, failed_count, failed_indexes, \
+                    created_at, dispatched_at, started_at, finished_at, \
+                    k8s_job_name, log_dir, last_error \
+             FROM jobs \
+             WHERE namespace = $1 AND job_id = $2",
+            &[&namespace, &job_id],
+        )
+        .await?;
+
+    let row = match row {
+        Some(r) => r,
+        None => {
+            bail!("Job not found: namespace={}, job_id={}", namespace, job_id);
+        }
+    };
+
+    let ns: &str = row.get(0);
+    let jid: i32 = row.get(1);
+    let status: &str = row.get(2);
+    let command: &str = row.get(3);
+    let cwd: &str = row.get(4);
+    let flavor: &str = row.get(5);
+    let cpu: &str = row.get(6);
+    let memory: &str = row.get(7);
+    let gpu: i32 = row.get(8);
+    let time_limit_seconds: i32 = row.get(9);
+    let completions: Option<i32> = row.get(10);
+    let parallelism: Option<i32> = row.get(11);
+    let succeeded_count: Option<i32> = row.get(12);
+    let failed_count: Option<i32> = row.get(13);
+    let failed_indexes: Option<&str> = row.get(14);
+    let created_at: chrono::DateTime<chrono::Utc> = row.get(15);
+    let dispatched_at: Option<chrono::DateTime<chrono::Utc>> = row.get(16);
+    let started_at: Option<chrono::DateTime<chrono::Utc>> = row.get(17);
+    let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(18);
+    let k8s_job_name: Option<&str> = row.get(19);
+    let log_dir: Option<&str> = row.get(20);
+    let last_error: Option<&str> = row.get(21);
+
+    let is_sweep = completions.is_some();
+    let fmt_ts = |t: Option<chrono::DateTime<chrono::Utc>>| -> String {
+        t.map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+            .unwrap_or_else(|| "-".to_string())
+    };
+
+    println!("namespace:     {}", ns);
+    println!("job_id:        {}", jid);
+    println!("type:          {}", if is_sweep { "sweep" } else { "job" });
+    println!("status:        {}", status);
+    println!("command:       {}", command);
+    println!("cwd:           {}", cwd);
+    println!("flavor:        {}", flavor);
+    println!("cpu:           {}", cpu);
+    println!("memory:        {}", memory);
+    println!("gpu:           {}", gpu);
+    if let (Some(comp), Some(par)) = (completions, parallelism) {
+        println!("completions:   {}", comp);
+        println!("parallelism:   {}", par);
+        if let (Some(succ), Some(fail)) = (succeeded_count, failed_count) {
+            println!("progress:      {}/{}/{} (succeeded/failed/total)", succ, fail, comp);
+        }
+        if let Some(fi) = failed_indexes {
+            if !fi.is_empty() {
+                println!("failed_indexes: {}", fi);
+            }
+        }
+    }
+
+    // time_limit with remaining for RUNNING jobs
+    let time_limit_display = format_duration(time_limit_seconds);
+    if status == "RUNNING" {
+        if let Some(sa) = started_at {
+            let elapsed = chrono::Utc::now().signed_duration_since(sa).num_seconds() as i32;
+            let remaining = (time_limit_seconds - elapsed).max(0);
+            println!("time_limit:    {} (残り {})", time_limit_display, format_duration(remaining));
+        } else {
+            println!("time_limit:    {}", time_limit_display);
+        }
+    } else {
+        println!("time_limit:    {}", time_limit_display);
+    }
+
+    println!("created_at:    {}", created_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    println!("dispatched_at: {}", fmt_ts(dispatched_at));
+    println!("started_at:    {}", fmt_ts(started_at));
+    println!("finished_at:   {}", fmt_ts(finished_at));
+    println!("k8s_job_name:  {}", k8s_job_name.unwrap_or("-"));
+    println!("log_dir:       {}", log_dir.unwrap_or("-"));
+    if let Some(err) = last_error {
+        println!("last_error:    {}", err);
+    }
+
+    Ok(())
+}
+
 pub async fn stalled(client: &Client, sort: Option<&str>, reverse: bool) -> Result<()> {
     let allowed = [SortField::Namespace, SortField::Created];
     let sort_field = sort.map(|s| parse_sort_field(s, &allowed)).transpose()?;
