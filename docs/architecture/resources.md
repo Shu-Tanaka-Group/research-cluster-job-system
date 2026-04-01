@@ -38,7 +38,7 @@ spec:
 | `MAX_QUEUED_JOBS_PER_NAMESPACE` | ConfigMap | 500 | Submit API | ユーザーごと | PostgreSQL の `jobs` テーブルへの登録数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / HELD / CANCELLED の合計） |
 | `DISPATCH_BUDGET_PER_NAMESPACE` | ConfigMap | 32 | Dispatcher | ユーザーごと | DB 上の active ジョブ数（DISPATCHING + DISPATCHED + RUNNING の合計）。上限に達すると Dispatcher が新規 dispatch を停止する |
 | `DISPATCH_BATCH_SIZE` | ConfigMap | 50 | Dispatcher | サイクルごと（全体） | 1回の dispatch サイクルで取得するジョブの総数上限。namespace 間でラウンドロビン・DRF 優先で公平に分配される |
-| `DISPATCH_ROUND_SIZE` | ConfigMap | 1 | Dispatcher | サイクルごと（namespace あたり） | ラウンドロビンの 1 ラウンドで各 namespace から取得するジョブ数。5 に設定すると各 namespace から 5 件ずつ交互に取得する |
+| `DISPATCH_ROUND_SIZE` | ConfigMap | 1 | Dispatcher | サイクルごと（namespace あたり） | ラウンドロビンと DRF のバランスを制御する。値が小さいとラウンドロビン主導（均等配分）、`DISPATCH_BUDGET_PER_NAMESPACE` と同値にすると DRF 主導（消費量ベースの優先制御）になる。詳細は [dispatcher.md](dispatcher.md) §1.2 調整指針を参照 |
 | `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` | ConfigMap | 10 | Dispatcher / Watcher | 全体 | Dispatcher と Watcher のメインループ実行間隔（秒） |
 | `DISPATCH_RETRY_INTERVAL_SEC` | ConfigMap | 30 | Dispatcher | ジョブごと | K8s API 一時障害時の再試行待機時間（秒） |
 | `DISPATCH_MAX_RETRIES` | ConfigMap | 5 | Dispatcher | ジョブごと | K8s API 一時障害時の最大再試行回数。超過時はジョブを FAILED に遷移させる |

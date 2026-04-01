@@ -16,7 +16,7 @@ Dispatcher は PostgreSQL を定期的にスキャンし、以下の基準で di
 - budget を使い切ったユーザーのジョブが他ユーザーをブロックしない
 - 同一ユーザーの投入順（`created_at` 昇順）は常に保証される
 - 複数ユーザーが同時に QUEUED 状態でも公平に処理される
-- namespace 数が `DISPATCH_BATCH_SIZE` を超えても累計消費量による優先で公平性が維持される
+- `DISPATCH_ROUND_SIZE` の設定により、ラウンドロビンによる均等配分から DRF による消費量ベースの優先制御まで調整できる（§1.2 調整指針参照）
 - 1サイクルあたりの dispatch 数が固定されるため K8s API への負荷が予測可能になる
 
 **Fair sharing（DRF）：** namespace ごとの直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量（[database.md](database.md) §5 の `namespace_daily_usage` テーブル）を参照し、Dominant Resource Fairness（DRF）に基づいて dispatch 優先度を決定する。各リソース（CPU・メモリ・GPU）をクラスタ全体の容量で正規化し、最大値（dominant share）を namespace の weight（[database.md](database.md) §4）で割った値が小さい namespace を優先的に dispatch する。これにより、リソースを多く消費した namespace の優先度が下がり、消費の少ない namespace にリソースが行き渡る。weight が大きい namespace はより多くのリソースを消費するまで優先され続ける。日別の消費量をスライディングウィンドウで集計するため、一括リセットの断崖が生じない。
@@ -90,6 +90,21 @@ LIMIT :batch_size;                         -- 1サイクルの総取得数を固
 **in-flight CTE による予測消費量の反映：** DISPATCHING/DISPATCHED ジョブは `namespace_daily_usage` に未記録（Watcher が RUNNING 遷移時に記録するため）であるが、in_flight CTE により `time_limit_seconds × リソース量` の予測消費量が DRF スコアに加算される。RUNNING に遷移したジョブは `namespace_daily_usage` に記録済みであり、かつ `status IN ('DISPATCHING', 'DISPATCHED')` の条件から除外されるため、二重計上は発生しない。PostgreSQL の MVCC（スナップショット分離）により、同一トランザクション内でのステータス遷移の一貫性が保証される。in_flight CTE は `jobs.cpu_millicores` / `jobs.memory_mib` カラム（Submit API が `parse_cpu_millicores()` / `parse_memory_mib()` で設定する数値カラム）を使用する（[database.md](database.md) §1 参照）。
 
 **古い行の削除：** `fetch_dispatchable_jobs()` の実行前に、ウィンドウ外の古い行を削除する（[database.md](database.md) §5.4 参照）。
+
+**`DISPATCH_ROUND_SIZE` の調整指針：** `DISPATCH_ROUND_SIZE` はラウンドロビン（primary sort）と DRF（secondary sort）のバランスを制御する。クエリの `ORDER BY` は以下の優先度で並べ替える。
+
+1. `CEIL(rn / round_size)` — ラウンドロビングループ
+2. DRF dominant share / weight — グループ内の namespace 優先度
+3. namespace 名 — 同率タイブレイク
+
+DRF が dispatch 結果を実質的に変えるのは、1 つのラウンドロビングループ内のジョブ数が `DISPATCH_BATCH_SIZE` を超え、`LIMIT` による切り落としが発生するときである。`round_size` が小さいと各グループの件数が少なくなり、DRF は順序の調整にとどまる。`round_size` が大きいと各グループの件数が多くなり、DRF が dispatch 枠の配分自体を左右する。
+
+| 設定 | 挙動 | 特性 |
+|---|---|---|
+| `round_size = 1`（デフォルト） | 各 namespace から 1 件ずつ交互に取得。DRF はグループ内の順序のみ決定 | namespace 数が `DISPATCH_BATCH_SIZE` 以下の場合、全 namespace が均等に dispatch される。DRF の影響は namespace 数が `DISPATCH_BATCH_SIZE` を超えた場合にのみ現れる |
+| `round_size = DISPATCH_BUDGET_PER_NAMESPACE` | 各 namespace の budget 内の全ジョブが同一グループに入り、DRF が namespace 間の配分を完全に決定 | リソース消費量の少ない namespace が優先的に dispatch され、消費量の多い namespace の dispatch が抑制される。in_flight CTE の自己補正により、特定 namespace への集中は数サイクル（数十秒）で均衡に戻る |
+
+中間値は `DISPATCH_BATCH_SIZE mod (namespace 数 × round_size)` の剰余に依存して DRF の影響度が変動し、namespace 数の増減で挙動が不安定になるため推奨しない。DRF による消費量ベースの優先制御を意図する場合は `round_size = DISPATCH_BUDGET_PER_NAMESPACE` を設定する。DRF を使用せずラウンドロビンのみで運用する場合はデフォルトの `round_size = 1` を維持する。
 
 ### 1.3 再試行の管理
 

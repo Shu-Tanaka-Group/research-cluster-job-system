@@ -475,6 +475,29 @@ cjobctl system restart submit-api
 
 `kubectl rollout restart` と同等の処理を実行する。Pod が順次入れ替わるため、Submit API（replicas >= 2）ではダウンタイムなしで更新できる。
 
+## 10. パラメータチューニング
+
+システムの挙動を調整する主要なパラメータは ConfigMap で管理される（§2.3 参照）。変更後は影響を受けるコンポーネントの再起動が必要。
+
+### 10.1 パラメータ一覧と設計根拠
+
+全パラメータの設定値一覧・各レイヤーの関係・設計根拠は [リソース設計](architecture/resources.md) §2 を参照。
+
+### 10.2 スケジューリング調整
+
+Dispatcher のジョブ dispatch 順序・頻度・公平性に関するパラメータの詳細と調整指針は [Dispatcher 設計](architecture/dispatcher.md) §1 を参照。主要なパラメータ：
+
+| パラメータ | 調整の目的 |
+|---|---|
+| `DISPATCH_BUDGET_PER_NAMESPACE` | namespace あたりの同時アクティブジョブ数の上限 |
+| `DISPATCH_BATCH_SIZE` | 1 サイクルあたりの dispatch 総数の上限 |
+| `DISPATCH_ROUND_SIZE` | ラウンドロビンと DRF（消費量ベースの公平性）のバランス制御 |
+| `FAIR_SHARE_WINDOW_DAYS` | DRF の消費量集計ウィンドウ日数 |
+
+### 10.3 リソース制限の調整
+
+クラスタのリソース制限（ResourceQuota、ClusterQueue nominalQuota 等）の設定値と調整方法は [リソース設計](architecture/resources.md) §1 を参照。ClusterQueue の nominalQuota 更新手順は本ガイドの §7.3 を参照。
+
 ## 付録: ソースコード参照
 
 各コマンドが実行する SQL クエリの詳細は `ctl/src/cmd/` 配下のソースコードを参照。
