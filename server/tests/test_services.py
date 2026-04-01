@@ -300,6 +300,14 @@ class TestSubmitJob:
         resp = submit_job(db_session, NS, "alice", req)
         assert resp.status == "QUEUED"
 
+    def test_cpu_millicores_and_memory_mib(self, db_session):
+        """submit_job should set cpu_millicores and memory_mib from resource strings."""
+        req = _make_request(resources=ResourceSpec(cpu="500m", memory="4Gi", gpu=0))
+        resp = submit_job(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.cpu_millicores == 500
+        assert job.memory_mib == 4096
+
 
 # ── list_jobs ──
 
@@ -819,6 +827,14 @@ class TestSubmitSweep:
                                    resources=ResourceSpec(cpu="32", memory="128Gi", gpu=0))
         resp = submit_sweep(db_session, NS, "alice", req)
         assert resp.status == "QUEUED"
+
+    def test_sweep_cpu_millicores_and_memory_mib(self, db_session):
+        """submit_sweep should set cpu_millicores and memory_mib from resource strings."""
+        req = _make_sweep_request(resources=ResourceSpec(cpu="2", memory="8Gi", gpu=0))
+        resp = submit_sweep(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.cpu_millicores == 2000
+        assert job.memory_mib == 8192
 
 
 # ── list_jobs / get_job with sweep fields ──

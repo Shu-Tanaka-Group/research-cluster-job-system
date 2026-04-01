@@ -36,6 +36,8 @@ CREATE TABLE jobs (
     succeeded_count   INTEGER,       -- 成功タスク数
     failed_count      INTEGER,       -- 失敗タスク数
     node_name         TEXT,          -- ジョブ実行ノード名（Watcher が RUNNING 遷移時に記録。RUNNING スキップ時は完了遷移時に取得）
+    cpu_millicores    INTEGER,       -- cpu 文字列のパース済み数値（ミリコア）。"500m" → 500, "2" → 2000。Dispatcher の in-flight CTE で使用
+    memory_mib        INTEGER,       -- memory 文字列のパース済み数値（MiB）。"4Gi" → 4096, "500Mi" → 500。Dispatcher の in-flight CTE で使用
     PRIMARY KEY (namespace, job_id)
 );
 
@@ -48,6 +50,8 @@ CREATE INDEX idx_jobs_namespace_status ON jobs (namespace, status);
 ```
 
 `completions IS NULL` で通常ジョブと sweep ジョブを判別する。sweep ジョブの場合、`completed_indexes` / `failed_indexes` は K8s API の `status.completedIndexes` / `status.failedIndexes`（圧縮表記文字列）を Watcher が書き込む。`succeeded_count` / `failed_count` は `completed_indexes` のパースなしに集計値を参照するためのキャッシュカラムである。
+
+`cpu_millicores` / `memory_mib` は `cpu` / `memory` 文字列カラムの非正規化数値表現であり、Submit API がジョブ作成時に `parse_cpu_millicores()` / `parse_memory_mib()` で設定する。Dispatcher の DRF クエリで DISPATCHING/DISPATCHED ジョブの予測消費量を SQL 内で集計するために使用する（[dispatcher.md](dispatcher.md) §1.2 参照）。
 
 ## 2. `user_job_counters` テーブル
 

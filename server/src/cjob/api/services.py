@@ -191,6 +191,8 @@ def submit_job(
         time_limit_seconds=time_limit,
         status="QUEUED",
         log_dir=log_dir,
+        cpu_millicores=parse_cpu_millicores(req.resources.cpu),
+        memory_mib=parse_memory_mib(req.resources.memory),
     )
     session.add(job)
 
@@ -295,6 +297,8 @@ def submit_sweep(
         parallelism=req.parallelism,
         succeeded_count=0,
         failed_count=0,
+        cpu_millicores=parse_cpu_millicores(req.resources.cpu),
+        memory_mib=parse_memory_mib(req.resources.memory),
     )
     session.add(job)
 

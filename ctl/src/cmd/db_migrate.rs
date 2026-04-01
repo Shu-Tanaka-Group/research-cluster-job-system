@@ -32,12 +32,41 @@ pub async fn migrate(client: &Client) -> Result<()> {
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS succeeded_count INTEGER; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS failed_count INTEGER; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS node_name TEXT; \
-        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS flavor TEXT NOT NULL DEFAULT 'cpu';";
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS flavor TEXT NOT NULL DEFAULT 'cpu'; \
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cpu_millicores INTEGER; \
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS memory_mib INTEGER;";
 
     client
         .batch_execute(ddl)
         .await
         .context("Failed to run schema migration")?;
+
+    // Backfill cpu_millicores from cpu string column
+    let backfill_cpu = "\
+        UPDATE jobs SET cpu_millicores = CASE \
+            WHEN cpu LIKE '%m' THEN CAST(REPLACE(cpu, 'm', '') AS INTEGER) \
+            ELSE CAST(CEIL(CAST(cpu AS DOUBLE PRECISION) * 1000) AS INTEGER) \
+        END \
+        WHERE cpu_millicores IS NULL";
+
+    // Backfill memory_mib from memory string column
+    let backfill_mem = "\
+        UPDATE jobs SET memory_mib = CASE \
+            WHEN memory LIKE '%Gi' THEN CAST(CEIL(CAST(REPLACE(memory, 'Gi', '') AS DOUBLE PRECISION) * 1024) AS INTEGER) \
+            WHEN memory LIKE '%Mi' THEN CAST(CEIL(CAST(REPLACE(memory, 'Mi', '') AS DOUBLE PRECISION)) AS INTEGER) \
+            WHEN memory LIKE '%Ki' THEN CAST(CEIL(CAST(REPLACE(memory, 'Ki', '') AS DOUBLE PRECISION) / 1024) AS INTEGER) \
+            ELSE CAST(CEIL(CAST(memory AS DOUBLE PRECISION) / (1024 * 1024)) AS INTEGER) \
+        END \
+        WHERE memory_mib IS NULL";
+
+    client
+        .batch_execute(backfill_cpu)
+        .await
+        .context("Failed to backfill cpu_millicores")?;
+    client
+        .batch_execute(backfill_mem)
+        .await
+        .context("Failed to backfill memory_mib")?;
 
     println!("Schema migration completed successfully.");
     Ok(())
