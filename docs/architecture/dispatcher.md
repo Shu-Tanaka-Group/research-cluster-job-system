@@ -41,6 +41,19 @@ queued AS (
   FROM jobs
   WHERE status = 'QUEUED'            -- HELD ジョブはディスパッチ対象外
     AND (retry_after IS NULL OR retry_after <= NOW())
+),
+-- in_flight CTE: DISPATCHING/DISPATCHED ジョブの予測消費量を集計
+in_flight AS (
+  SELECT namespace,
+    SUM(time_limit_seconds * cpu_millicores
+        * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END) AS cpu_millicores_seconds,
+    SUM(time_limit_seconds * memory_mib
+        * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END) AS memory_mib_seconds,
+    SUM(time_limit_seconds * gpu
+        * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END) AS gpu_seconds
+  FROM jobs
+  WHERE status IN ('DISPATCHING', 'DISPATCHED')
+  GROUP BY namespace
 )
 SELECT q.* FROM queued q
   LEFT JOIN active a USING (namespace)
@@ -53,25 +66,28 @@ SELECT q.* FROM queued q
     WHERE usage_date > CURRENT_DATE - :window_days
     GROUP BY namespace
   ) u ON q.namespace = u.namespace
+  LEFT JOIN in_flight inf ON q.namespace = inf.namespace
   LEFT JOIN namespace_weights w ON q.namespace = w.namespace
 WHERE COALESCE(a.active_count, 0) < :dispatch_limit          -- budget に余裕がある namespace のみ
   AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0)  -- 残り budget 分だけ取得
   AND COALESCE(w.weight, 1) > 0                               -- weight=0 の namespace は dispatch 対象外
 ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 namespace から round_size 件ずつ交互）
          GREATEST(                         -- DRF: dominant share / weight が小さい namespace を優先
-           COALESCE(u.cpu_millicores_seconds, 0)::float / :cluster_cpu_millicores,
-           COALESCE(u.memory_mib_seconds, 0)::float / :cluster_memory_mib,
-           COALESCE(u.gpu_seconds, 0)::float / NULLIF(:cluster_gpus, 0)  -- GPU=0 のクラスタでは NULL → GREATEST が無視し CPU/mem のみで判定
+           (COALESCE(u.cpu_millicores_seconds, 0) + COALESCE(inf.cpu_millicores_seconds, 0))::float / :cluster_cpu_millicores,
+           (COALESCE(u.memory_mib_seconds, 0) + COALESCE(inf.memory_mib_seconds, 0))::float / :cluster_memory_mib,
+           (COALESCE(u.gpu_seconds, 0) + COALESCE(inf.gpu_seconds, 0))::float / NULLIF(:cluster_gpus, 0)
          ) / COALESCE(w.weight, 1) ASC NULLS FIRST,  -- 消費量レコードなし(NULL)の namespace が最優先
          q.namespace ASC                   -- 同率の場合は namespace 名で決定的に順序付け
 LIMIT :batch_size;                         -- 1サイクルの総取得数を固定
 ```
 
-このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_daily_usage` のウィンドウ集計はサブクエリで行い、namespace ごとに 1 行に集約されるため JOIN のコストは無視できる（20 namespace × 7 日 = 140 行程度）。
+このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_daily_usage` のウィンドウ集計はサブクエリで行い、namespace ごとに 1 行に集約されるため JOIN のコストは無視できる（20 namespace × 7 日 = 140 行程度）。`in_flight` CTE も `idx_jobs_namespace_status` インデックスを利用し、DISPATCHING/DISPATCHED ジョブ（通常 `DISPATCH_BUDGET_PER_NAMESPACE × namespace 数` 以下）を効率的に集計する。
 
 **ラウンドロビンの仕組み：** `ROW_NUMBER()` を QUEUED ジョブのみに振り、`CEIL(rn / round_size)` でグループ化することで、各 namespace から `DISPATCH_ROUND_SIZE` 件ずつ交互に取得する。デフォルト（`round_size = 1`）では各 namespace から 1 件ずつ交互に並び、`round_size = 5` なら 5 件ずつまとめて並ぶ。`LIMIT :batch_size` で打ち切ることで、1 サイクルの dispatch 数が制限される。
 
-**公平性の保証（DRF）：** 直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量をクラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求め、namespace の weight（`namespace_weights` テーブル、デフォルト 1）で割ってソートする。クラスタ容量は `node_resources` テーブルから `SUM()` で動的に取得する（[database.md](database.md) §6.2 参照）。これにより、支配的リソースの消費割合が小さい namespace が優先され、weight が大きい namespace はより多くのリソースを消費するまで優先され続ける。`namespace_daily_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。`node_resources` テーブルが空の場合は DRF ソートを無効化し、namespace 名順にフォールバックする。
+**公平性の保証（DRF）：** 直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量（`namespace_daily_usage`）と DISPATCHING/DISPATCHED ジョブの予測消費量（`in_flight` CTE）を合算し、クラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求め、namespace の weight（`namespace_weights` テーブル、デフォルト 1）で割ってソートする。クラスタ容量は `node_resources` テーブルから `SUM()` で動的に取得する（[database.md](database.md) §6.2 参照）。これにより、支配的リソースの消費割合が小さい namespace が優先され、weight が大きい namespace はより多くのリソースを消費するまで優先され続ける。`namespace_daily_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。`node_resources` テーブルが空の場合は DRF ソートを無効化し、namespace 名順にフォールバックする。
+
+**in-flight CTE による予測消費量の反映：** DISPATCHING/DISPATCHED ジョブは `namespace_daily_usage` に未記録（Watcher が RUNNING 遷移時に記録するため）であるが、in_flight CTE により `time_limit_seconds × リソース量` の予測消費量が DRF スコアに加算される。RUNNING に遷移したジョブは `namespace_daily_usage` に記録済みであり、かつ `status IN ('DISPATCHING', 'DISPATCHED')` の条件から除外されるため、二重計上は発生しない。PostgreSQL の MVCC（スナップショット分離）により、同一トランザクション内でのステータス遷移の一貫性が保証される。in_flight CTE は `jobs.cpu_millicores` / `jobs.memory_mib` カラム（Submit API が `parse_cpu_millicores()` / `parse_memory_mib()` で設定する数値カラム）を使用する（[database.md](database.md) §1 参照）。
 
 **古い行の削除：** `fetch_dispatchable_jobs()` の実行前に、ウィンドウ外の古い行を削除する（[database.md](database.md) §5.4 参照）。
 
