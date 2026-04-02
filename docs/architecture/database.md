@@ -225,7 +225,7 @@ DELETE FROM node_resources WHERE node_name != ALL(:current_node_names);
 
 ### 6.2 参照パターン
 
-**Submit API（リソース超過リジェクト判定）**: 指定された flavor のノードに限定して各リソースの最大値を取得する。要求リソースが flavor 内のいずれのノードの allocatable も超える場合、そのジョブは原理的に実行不可能であるため 400 でリジェクトする。
+**Submit API（リソース超過リジェクト判定）**: 指定された flavor のノードに限定して各リソースの最大値を取得する。`flavor_quotas` テーブルの nominalQuota と合わせて、有効上限を `min(最大ノード allocatable, nominalQuota)` で決定する。要求リソースが有効上限を超える場合、400 でリジェクトする。
 
 ```sql
 SELECT MAX(cpu_millicores) AS max_cpu,
@@ -298,6 +298,14 @@ DELETE FROM flavor_quotas WHERE flavor != ALL(:current_flavors);
 
 ### 7.2 参照パターン
 
+**Submit API（リソース超過リジェクト判定）**: ジョブ投入時に指定 flavor の nominalQuota を取得し、`node_resources` の MAX 値と合わせて有効上限を `min(max_node_allocatable, nominalQuota)` で決定する。sweep ではクラスタ全体チェックの上限を `min(allocatable 合計, nominalQuota)` で決定する。
+
+```sql
+SELECT cpu, memory, gpu
+FROM flavor_quotas
+WHERE flavor = :flavor;
+```
+
 **Submit API（`GET /v1/flavors`）**: 各 flavor の nominalQuota を取得し、CLI に返す。CLI は `node_resources` の MAX 値と合わせて、タスクあたりのリソース上限（`min(max_node_allocatable, nominalQuota)`）を計算・表示する。
 
 ```sql
@@ -308,7 +316,7 @@ FROM flavor_quotas;
 ### 7.3 設計判断
 
 - **TEXT 保存**: nominalQuota を K8s リソース量文字列のまま保存する。CLI の表示で "1000Gi" をそのまま使用でき、数値パース→復元の情報損失（例: 1000Gi → 1024000 MiB → 復元不可）を回避する。DB 上でのリソース量演算は不要
-- **テーブルが空の場合のフォールバック**: Watcher 未同期時は `flavor_quotas` が空となる。API は `quota: null` を返し、CLI は「リソース情報がまだ取得されていません」と表示する
+- **テーブルが空の場合のフォールバック**: Watcher 未同期時は `flavor_quotas` が空となる。Submit API のリソースバリデーションは `node_resources` の allocatable のみで判定する。`GET /v1/flavors` は `quota: null` を返し、CLI は「リソース情報がまだ取得されていません」と表示する
 - **行数の見積もり**: flavor 数と同数。2〜5 flavor 程度を想定しており、クエリのコストは無視できる
 
 ## 8. 状態遷移

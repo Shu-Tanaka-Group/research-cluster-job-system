@@ -77,7 +77,7 @@ cjobctl cluster resources
 
 - **Node Resources**: ノードごとの allocatable（CPU / メモリ / GPU）と最終更新時刻
 - **Cluster Totals**: 全ノードの合計値。Dispatcher の DRF 正規化に使用される
-- **Max per Node**: 各リソースの最大ノード値。Submit API のリソース超過リジェクトの閾値となる
+- **Max per Node**: 各リソースの最大ノード値。Submit API のリソース超過リジェクトでは nominalQuota と合わせて `min(最大ノード, nominalQuota)` が有効上限となる
 
 ノードの追加・撤去は Watcher が `NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）間隔で自動反映する。手動更新は不要。
 
