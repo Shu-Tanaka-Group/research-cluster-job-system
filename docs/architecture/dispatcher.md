@@ -414,7 +414,28 @@ def apply_gap_filling(
 - **空間方向のパッキングは行わない**: Dispatcher は CPU/メモリの合計値を追跡しない。「滞留ジョブがいるので隙間だけ埋める」という時間方向の制御のみを行い、空間方向は Kueue に委ねる
 - **time_limit_seconds が実行時間と大きく乖離する場合**: ユーザーが time_limit を実際の実行時間より大幅に長く設定すると、T の推定が保守的になりすぎて隙間充填の効果が薄れる。ただしこれは制御が保守的な方向（dispatch を控える）にずれるだけで、starvation を悪化させることはない
 
-### 2.5 起動時の初期化処理
+### 2.5 ResourceQuota プレチェック
+
+Dispatcher は dispatch 候補に対して namespace の ResourceQuota 残リソースを確認し、不足しているジョブを候補から除外する（QUEUED に留める）。これにより、JupyterHub 等の User Pod が ResourceQuota を圧迫している場合に、ジョブが DISPATCHED のまま滞留して最終的に時間切れで FAILED になることを防ぐ。
+
+```python
+# ※ 概念説明のための擬似コードである。
+
+candidates = fetch_dispatchable_jobs(session, settings)
+candidates = apply_gap_filling(session, candidates, settings)
+candidates = filter_by_resource_quota(session, candidates)  # 追加
+```
+
+`filter_by_resource_quota()` は `namespace_resource_quotas` テーブル（[database.md](database.md) §8 参照）から候補 namespace の ResourceQuota 情報を読み取り、以下のロジックで候補をフィルタする:
+
+1. テーブルに行がない namespace のジョブは制限なしとして通過させる
+2. DRF 優先順序のまま候補を iterate し、残リソース（hard - used）がジョブのリソース要求以上であれば通過させる
+3. sweep ジョブの場合は `parallelism` 倍のリソースを要求するものとして計算する
+4. 同一サイクル内で通過させたジョブのリソースを累計し、後続ジョブの残リソース計算に反映する（同一サイクルでの過剰 dispatch を防止）
+
+**前提:** ResourceQuota の使用状況は Watcher が定期同期するため、`NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）分の遅延がある。このチェックは best-effort であり、チェック通過後に Kueue が admit するまでの間に ResourceQuota の使用状況が変わる可能性がある。ただし、チェックなしの場合（DISPATCHED 滞留 → 時間切れ FAILED）と比較して大幅に改善される。
+
+### 2.6 起動時の初期化処理
 
 Dispatcher 再起動時に `DISPATCHING` で止まっているジョブを `QUEUED` に戻す。
 

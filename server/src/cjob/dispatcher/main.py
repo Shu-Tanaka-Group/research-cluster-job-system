@@ -14,6 +14,7 @@ from .scheduler import (
     apply_gap_filling,
     cas_update_to_dispatching,
     fetch_dispatchable_jobs,
+    filter_by_resource_quota,
     increment_retry,
     mark_dispatched,
     mark_failed,
@@ -106,6 +107,7 @@ def run():
         try:
             candidates = fetch_dispatchable_jobs(session, settings)
             candidates = apply_gap_filling(session, candidates, settings)
+            candidates = filter_by_resource_quota(session, candidates)
             if candidates:
                 logger.info("Found %d dispatchable jobs", len(candidates))
             for job in candidates:

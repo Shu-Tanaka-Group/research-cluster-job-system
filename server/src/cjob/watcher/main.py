@@ -11,6 +11,7 @@ from cjob.db import create_session
 from .node_sync import sync_node_resources
 from .quota_sync import sync_flavor_quotas
 from .reconciler import list_cjob_k8s_jobs, reconcile_cycle
+from .resource_quota_sync import sync_resource_quotas
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,15 @@ def run():
                 sync_flavor_quotas(session, settings)
             except Exception:
                 logger.exception("Error in flavor quota sync")
+                session.rollback()
+            finally:
+                session.close()
+
+            session = create_session()
+            try:
+                sync_resource_quotas(session, settings)
+            except Exception:
+                logger.exception("Error in resource quota sync")
                 session.rollback()
             finally:
                 session.close()

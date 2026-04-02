@@ -111,6 +111,21 @@ class FlavorQuota(Base):
     )
 
 
+class NamespaceResourceQuota(Base):
+    __tablename__ = "namespace_resource_quotas"
+
+    namespace: Mapped[str] = mapped_column(String, primary_key=True)
+    hard_cpu_millicores: Mapped[int] = mapped_column(Integer, nullable=False)
+    hard_memory_mib: Mapped[int] = mapped_column(Integer, nullable=False)
+    hard_gpu: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    used_cpu_millicores: Mapped[int] = mapped_column(Integer, nullable=False)
+    used_memory_mib: Mapped[int] = mapped_column(Integer, nullable=False)
+    used_gpu: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class JobEvent(Base):
     __tablename__ = "job_events"
 

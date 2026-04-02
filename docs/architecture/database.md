@@ -319,7 +319,69 @@ FROM flavor_quotas;
 - **テーブルが空の場合のフォールバック**: Watcher 未同期時は `flavor_quotas` が空となる。Submit API のリソースバリデーションは `node_resources` の allocatable のみで判定する。`GET /v1/flavors` は `quota: null` を返し、CLI は「リソース情報がまだ取得されていません」と表示する
 - **行数の見積もり**: flavor 数と同数。2〜5 flavor 程度を想定しており、クエリのコストは無視できる
 
-## 8. 状態遷移
+## 8. `namespace_resource_quotas` テーブル
+
+各 user namespace の ResourceQuota 使用状況を記録する。Watcher が K8s API から ResourceQuota を定期取得（`node_resources` と同じサイクル）し、UPSERT で更新する。Dispatcher が dispatch 前に残リソースを確認し、不足時はジョブを QUEUED に留めるために使用する。
+
+```sql
+CREATE TABLE namespace_resource_quotas (
+    namespace            TEXT PRIMARY KEY,
+    hard_cpu_millicores  INTEGER NOT NULL,
+    hard_memory_mib      INTEGER NOT NULL,
+    hard_gpu             INTEGER NOT NULL DEFAULT 0,
+    used_cpu_millicores  INTEGER NOT NULL,
+    used_memory_mib      INTEGER NOT NULL,
+    used_gpu             INTEGER NOT NULL DEFAULT 0,
+    updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+`hard_*` は `spec.hard` の値、`used_*` は `status.used` の値をパース済み数値で保存する。CPU はミリコア、メモリは MiB、GPU は個数。`node_resources` と同じく数値で保存する理由は、Dispatcher が Python 側で残リソース（hard - used）を算出し、ジョブのリソース要求と比較するためである。
+
+### 8.1 同期処理
+
+Watcher が DB から active な namespace（`status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED', 'RUNNING', 'HELD')` のジョブが存在する namespace）を取得し、各 namespace の ResourceQuota を K8s API から読み取って UPSERT する。active でなくなった namespace の行は DELETE する。
+
+```sql
+-- UPSERT（namespace ごと）
+INSERT INTO namespace_resource_quotas
+(namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu,
+ used_cpu_millicores, used_memory_mib, used_gpu, updated_at)
+VALUES (:ns, :h_cpu, :h_mem, :h_gpu, :u_cpu, :u_mem, :u_gpu, NOW())
+ON CONFLICT (namespace) DO UPDATE SET
+    hard_cpu_millicores = :h_cpu, hard_memory_mib = :h_mem, hard_gpu = :h_gpu,
+    used_cpu_millicores = :u_cpu, used_memory_mib = :u_mem, used_gpu = :u_gpu,
+    updated_at = NOW();
+
+-- active でなくなった namespace の削除
+DELETE FROM namespace_resource_quotas WHERE namespace NOT IN (:active_namespaces);
+```
+
+ResourceQuota が存在しない namespace（K8s API が 404 を返す場合）は行を DELETE する。これにより Dispatcher はその namespace に制限なしとして扱う。K8s API の一時的なエラー（500 等）の場合は既存データを保持し、次回サイクルで再試行する。
+
+GPU の値は `RESOURCE_FLAVORS` 設定（[resources.md](resources.md) 参照）の各 flavor 定義の `gpu_resource_name` を使用して ResourceQuota から `requests.{gpu_resource_name}` を取得する。複数の GPU リソース名が設定されている場合は、最初に見つかった非ゼロの値を使用する。
+
+### 8.2 参照パターン
+
+**Dispatcher（ResourceQuota プレチェック）**: dispatch 候補の namespace に対して残リソースを取得し、ジョブのリソース要求と比較する。
+
+```sql
+SELECT namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu,
+       used_cpu_millicores, used_memory_mib, used_gpu
+FROM namespace_resource_quotas
+WHERE namespace IN (:candidate_namespaces);
+```
+
+テーブルに行がない namespace は ResourceQuota が存在しないか Watcher が未同期であり、制限なしとして dispatch する。
+
+### 8.3 設計判断
+
+- **数値パース済み保存**: `node_resources` と同じ理由。Dispatcher が Python 側で hard - used の残リソースを算出し、ジョブの `cpu_millicores` / `memory_mib` / `gpu` と比較する
+- **hard/used 両方を保持**: remaining（hard - used）だけでなく元の値を保持することで、cjobctl での表示やデバッグ時に使用状況を確認できる
+- **行なし = 制限なし**: ResourceQuota が存在しない namespace や Watcher 未同期時はテーブルが空となる。Dispatcher はこれらの namespace に対して制限なしとして dispatch する。`node_resources` / `flavor_quotas` のフォールバックパターンと一貫する
+- **行数の見積もり**: active な namespace 数と同数。20 namespace 程度を想定しており、クエリのコストは無視できる
+
+## 9. 状態遷移
 
 ```text
 QUEUED
