@@ -309,6 +309,115 @@ class TestSubmitJob:
         assert job.cpu_millicores == 500
         assert job.memory_mib == 4096
 
+    def test_cpu_exceeds_quota(self, db_session):
+        """Job within node allocatable but exceeding nominalQuota CPU should be rejected."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 64000, 262144, 0)"
+            )
+        )
+        db_session.execute(
+            text(
+                "INSERT INTO flavor_quotas (flavor, cpu, memory, gpu) "
+                "VALUES ('cpu', '16', '1000Gi', '0')"
+            )
+        )
+        db_session.flush()
+        req = _make_request(resources=ResourceSpec(cpu="32", memory="1Gi", gpu=0))
+        with pytest.raises(HTTPException) as exc_info:
+            submit_job(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "クォータ" in exc_info.value.detail
+        assert "CPU" in exc_info.value.detail
+
+    def test_memory_exceeds_quota(self, db_session):
+        """Job within node allocatable but exceeding nominalQuota memory should be rejected."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 64000, 262144, 0)"
+            )
+        )
+        db_session.execute(
+            text(
+                "INSERT INTO flavor_quotas (flavor, cpu, memory, gpu) "
+                "VALUES ('cpu', '256', '64Gi', '0')"
+            )
+        )
+        db_session.flush()
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="128Gi", gpu=0))
+        with pytest.raises(HTTPException) as exc_info:
+            submit_job(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "クォータ" in exc_info.value.detail
+        assert "メモリ" in exc_info.value.detail
+
+    def test_gpu_exceeds_quota(self, db_session):
+        """Job within node GPU but exceeding nominalQuota GPU should be rejected."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('gpu-node', 32000, 131072, 8, 'gpu')"
+            )
+        )
+        db_session.execute(
+            text(
+                "INSERT INTO flavor_quotas (flavor, cpu, memory, gpu) "
+                "VALUES ('gpu', '256', '1000Gi', '4')"
+            )
+        )
+        db_session.flush()
+        req = _make_request(resources=ResourceSpec(cpu="1", memory="1Gi", gpu=6, flavor="gpu"))
+        with pytest.raises(HTTPException) as exc_info:
+            submit_job(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "クォータ" in exc_info.value.detail
+        assert "GPU" in exc_info.value.detail
+
+    def test_resource_within_quota_and_node(self, db_session):
+        """Job within both node allocatable and nominalQuota should be accepted."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 64000, 262144, 0)"
+            )
+        )
+        db_session.execute(
+            text(
+                "INSERT INTO flavor_quotas (flavor, cpu, memory, gpu) "
+                "VALUES ('cpu', '32', '128Gi', '0')"
+            )
+        )
+        db_session.flush()
+        req = _make_request(resources=ResourceSpec(cpu="16", memory="64Gi", gpu=0))
+        resp = submit_job(db_session, NS, "alice", req)
+        assert resp.status == "QUEUED"
+
+    def test_quota_missing_falls_back_to_node(self, db_session):
+        """When flavor_quotas is empty, validation should use node_resources only."""
+        from sqlalchemy import text
+
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 64000, 262144, 0)"
+            )
+        )
+        db_session.flush()
+        # Within node limits, no quota → should be accepted
+        req = _make_request(resources=ResourceSpec(cpu="32", memory="128Gi", gpu=0))
+        resp = submit_job(db_session, NS, "alice", req)
+        assert resp.status == "QUEUED"
+
 
 # ── list_jobs ──
 
@@ -836,6 +945,62 @@ class TestSubmitSweep:
         job = db_session.get(Job, (NS, resp.job_id))
         assert job.cpu_millicores == 2000
         assert job.memory_mib == 8192
+
+    def test_sweep_cpu_exceeds_quota(self, db_session):
+        """Sweep within node total but exceeding nominalQuota should be rejected."""
+        from sqlalchemy import text
+
+        # Node has 64 cores total, but quota is only 16 cores
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu) "
+                "VALUES ('node-1', 64000, 262144, 0)"
+            )
+        )
+        db_session.execute(
+            text(
+                "INSERT INTO flavor_quotas (flavor, cpu, memory, gpu) "
+                "VALUES ('cpu', '16', '1000Gi', '0')"
+            )
+        )
+        db_session.flush()
+        # parallelism=10, cpu=2 -> 20000m > 16000m quota
+        req = _make_sweep_request(
+            completions=100, parallelism=10,
+            resources=ResourceSpec(cpu="2", memory="1Gi", gpu=0),
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "CPU" in exc_info.value.detail
+
+    def test_sweep_gpu_exceeds_quota(self, db_session):
+        """Sweep within node GPU total but exceeding nominalQuota GPU should be rejected."""
+        from sqlalchemy import text
+
+        # Node has 8 GPUs, but quota is only 4
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('gpu-node', 32000, 131072, 8, 'gpu')"
+            )
+        )
+        db_session.execute(
+            text(
+                "INSERT INTO flavor_quotas (flavor, cpu, memory, gpu) "
+                "VALUES ('gpu', '256', '1000Gi', '4')"
+            )
+        )
+        db_session.flush()
+        # parallelism=5, gpu=1 -> 5 > 4 quota
+        req = _make_sweep_request(
+            completions=10, parallelism=5,
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=1, flavor="gpu"),
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "GPU" in exc_info.value.detail
 
 
 # ── list_jobs / get_job with sweep fields ──

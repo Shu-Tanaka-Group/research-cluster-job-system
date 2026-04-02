@@ -111,21 +111,42 @@ def _validate_common(
         {"flavor": flavor},
     ).mappings().first()
 
+    # Fetch nominalQuota for the flavor
+    quota_row = session.execute(
+        text("SELECT cpu, memory, gpu FROM flavor_quotas WHERE flavor = :flavor"),
+        {"flavor": flavor},
+    ).mappings().first()
+
     if max_resources and max_resources["max_cpu"] is not None:
         req_cpu = parse_cpu_millicores(resources.cpu)
         req_mem = parse_memory_mib(resources.memory)
 
-        if req_cpu > max_resources["max_cpu"]:
+        effective_cpu = max_resources["max_cpu"]
+        cpu_source = "最大ノード"
+        effective_memory = max_resources["max_memory"]
+        memory_source = "最大ノード"
+
+        if quota_row:
+            quota_cpu = parse_cpu_millicores(quota_row["cpu"])
+            quota_mem = parse_memory_mib(quota_row["memory"])
+            if quota_cpu < effective_cpu:
+                effective_cpu = quota_cpu
+                cpu_source = "クォータ"
+            if quota_mem < effective_memory:
+                effective_memory = quota_mem
+                memory_source = "クォータ"
+
+        if req_cpu > effective_cpu:
             raise HTTPException(
                 status_code=400,
-                detail=f"要求 CPU ({resources.cpu}) が flavor '{flavor}' 内の最大ノード "
-                       f"({max_resources['max_cpu']}m) を超えています",
+                detail=f"要求 CPU ({resources.cpu}) が flavor '{flavor}' の{cpu_source} "
+                       f"({effective_cpu}m) を超えています",
             )
-        if req_mem > max_resources["max_memory"]:
+        if req_mem > effective_memory:
             raise HTTPException(
                 status_code=400,
-                detail=f"要求メモリ ({resources.memory}) が flavor '{flavor}' 内の最大ノード "
-                       f"({max_resources['max_memory']}Mi) を超えています",
+                detail=f"要求メモリ ({resources.memory}) が flavor '{flavor}' の{memory_source} "
+                       f"({effective_memory}Mi) を超えています",
             )
 
     # Check GPU resource
@@ -141,11 +162,18 @@ def _validate_common(
                 status_code=400,
                 detail=f"flavor '{flavor}' に GPU ノードが登録されていません",
             )
-        if resources.gpu > max_gpu:
+        effective_gpu = max_gpu
+        gpu_source = "最大ノード"
+        if quota_row:
+            quota_gpu = int(quota_row["gpu"])
+            if quota_gpu < effective_gpu:
+                effective_gpu = quota_gpu
+                gpu_source = "クォータ"
+        if resources.gpu > effective_gpu:
             raise HTTPException(
                 status_code=400,
-                detail=f"要求 GPU ({resources.gpu}) が flavor '{flavor}' 内の最大ノード "
-                       f"({max_gpu}) を超えています",
+                detail=f"要求 GPU ({resources.gpu}) が flavor '{flavor}' の{gpu_source} "
+                       f"({effective_gpu}) を超えています",
             )
 
     # Resolve time_limit_seconds
@@ -231,7 +259,7 @@ def submit_sweep(
             detail="parallelism は 1 以上 completions 以下で指定してください",
         )
 
-    # Check parallelism * per_pod_resource <= flavor total
+    # Check parallelism * per_pod_resource <= flavor total (capped by nominalQuota)
     flavor_totals = session.execute(
         text(
             "SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu, "
@@ -243,33 +271,51 @@ def submit_sweep(
         {"flavor": flavor},
     ).mappings().first()
 
+    # Fetch nominalQuota for sweep cluster-wide check
+    quota_row = session.execute(
+        text("SELECT cpu, memory, gpu FROM flavor_quotas WHERE flavor = :flavor"),
+        {"flavor": flavor},
+    ).mappings().first()
+
     if flavor_totals and flavor_totals["total_cpu"] > 0:
         req_cpu = parse_cpu_millicores(req.resources.cpu)
         req_mem = parse_memory_mib(req.resources.memory)
         total_cpu = req_cpu * req.parallelism
         total_mem = req_mem * req.parallelism
 
-        if total_cpu > flavor_totals["total_cpu"]:
+        effective_total_cpu = flavor_totals["total_cpu"]
+        effective_total_mem = flavor_totals["total_memory"]
+        if quota_row:
+            quota_cpu = parse_cpu_millicores(quota_row["cpu"])
+            quota_mem = parse_memory_mib(quota_row["memory"])
+            effective_total_cpu = min(effective_total_cpu, quota_cpu)
+            effective_total_mem = min(effective_total_mem, quota_mem)
+
+        if total_cpu > effective_total_cpu:
             raise HTTPException(
                 status_code=400,
                 detail=f"parallelism × 要求 CPU ({total_cpu}m) が flavor '{flavor}' の CPU 合計 "
-                       f"({flavor_totals['total_cpu']}m) を超えています",
+                       f"({effective_total_cpu}m) を超えています",
             )
-        if total_mem > flavor_totals["total_memory"]:
+        if total_mem > effective_total_mem:
             raise HTTPException(
                 status_code=400,
                 detail=f"parallelism × 要求メモリ ({total_mem}Mi) が flavor '{flavor}' のメモリ合計 "
-                       f"({flavor_totals['total_memory']}Mi) を超えています",
+                       f"({effective_total_mem}Mi) を超えています",
             )
 
     if req.resources.gpu > 0 and flavor_totals:
         total_gpu = req.resources.gpu * req.parallelism
         flavor_gpu = flavor_totals["total_gpu"]
-        if flavor_gpu == 0 or total_gpu > flavor_gpu:
+        effective_gpu = flavor_gpu
+        if quota_row:
+            quota_gpu = int(quota_row["gpu"])
+            effective_gpu = min(effective_gpu, quota_gpu)
+        if effective_gpu == 0 or total_gpu > effective_gpu:
             raise HTTPException(
                 status_code=400,
                 detail=f"parallelism × 要求 GPU ({total_gpu}) が flavor '{flavor}' の GPU 合計 "
-                       f"({flavor_gpu}) を超えています",
+                       f"({effective_gpu}) を超えています",
             )
 
     # Allocate job_id
