@@ -12,6 +12,7 @@ from cjob.api.services import (
     get_usage,
     hold_bulk,
     hold_single,
+    list_flavors,
     list_jobs,
     release_bulk,
     release_single,
@@ -876,3 +877,53 @@ class TestSweepFieldsInResponses:
         resp = get_job(db_session, NS, 1)
         assert resp.completions is None
         assert resp.completed_indexes is None
+
+
+class TestListFlavors:
+    def test_returns_quota_when_present(self, db_session):
+        """list_flavors should include quota from flavor_quotas table."""
+        from sqlalchemy import text as sql_text
+        db_session.execute(
+            sql_text(
+                "INSERT INTO flavor_quotas (flavor, cpu, memory, gpu) "
+                "VALUES ('cpu', '256', '1000Gi', '0')"
+            )
+        )
+        db_session.commit()
+
+        resp = list_flavors(db_session)
+        cpu_flavor = next(f for f in resp.flavors if f.name == "cpu")
+        assert cpu_flavor.quota is not None
+        assert cpu_flavor.quota.cpu == "256"
+        assert cpu_flavor.quota.memory == "1000Gi"
+        assert cpu_flavor.quota.gpu == "0"
+
+    def test_returns_none_quota_when_absent(self, db_session):
+        """list_flavors should return quota=None when flavor_quotas is empty."""
+        resp = list_flavors(db_session)
+        for f in resp.flavors:
+            assert f.quota is None
+
+    def test_returns_nodes_and_quota(self, db_session):
+        """list_flavors should include both nodes and quota."""
+        from sqlalchemy import text as sql_text
+        db_session.execute(
+            sql_text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('worker01', 128000, 515481, 0, 'cpu')"
+            )
+        )
+        db_session.execute(
+            sql_text(
+                "INSERT INTO flavor_quotas (flavor, cpu, memory, gpu) "
+                "VALUES ('cpu', '256', '1000Gi', '0')"
+            )
+        )
+        db_session.commit()
+
+        resp = list_flavors(db_session)
+        cpu_flavor = next(f for f in resp.flavors if f.name == "cpu")
+        assert len(cpu_flavor.nodes) == 1
+        assert cpu_flavor.nodes[0].node_name == "worker01"
+        assert cpu_flavor.quota is not None
+        assert cpu_flavor.quota.cpu == "256"
