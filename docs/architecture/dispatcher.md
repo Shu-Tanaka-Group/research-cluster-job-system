@@ -220,6 +220,8 @@ class Dispatcher:
             candidates = db.fetch_dispatchable_jobs()
             # §2.4 の隙間充填フィルタ（滞留ジョブがある namespace の候補を制限）
             candidates = apply_gap_filling(session, candidates, settings)
+            # §2.5 の ResourceQuota プレチェック（namespace の残リソースで候補を制限）
+            candidates = filter_by_resource_quota(session, candidates)
             for job in candidates:
                 self.dispatch(job)
             time.sleep(self.check_interval)
@@ -455,7 +457,7 @@ def apply_gap_filling(
 #### 2.4.7 制約と限界
 
 - **時間推定の精度**: DB ベースの推定であり、Kueue/K8s Scheduler が把握する実際のノード空き状況とは乖離する。ジョブが time_limit より早く完了した場合、推定より早くリソースが空くが、Dispatcher は次のサイクルで再評価する
-- **リソース推定の精度**: RUNNING ジョブのみを集計するため、最近 DISPATCHED されて Kueue に admit 済みだがまだ RUNNING に遷移していないジョブのリソース消費は反映されない。結果として利用可能リソースを若干過大評価する場合があるが、Kueue が最終的な admission を判断するため実害はない
+- **リソース推定の精度**: RUNNING ジョブのみを集計するため、最近 DISPATCHED されて Kueue に admit 済みだがまだ RUNNING に遷移していないジョブのリソース消費は反映されない。結果として利用可能リソースを若干過大評価する場合がある。DRF スコアでは in-flight CTE により DISPATCHING/DISPATCHED ジョブの予測消費量を加算しているが（§1.2 参照）、隙間充填のリソース推定は ClusterQueue の実消費（RUNNING のみ）に基づくため、同様の補正は行わない。Kueue が最終的な admission を判断するため実害はない
 - **ノード配置は考慮しない**: リソース推定は flavor ごとの合計値で行い、個々のノードの空き状況は考慮しない。合計では収まるが特定ノードに空きがない場合、Kueue が admit しない可能性がある
 - **time_limit_seconds が実行時間と大きく乖離する場合**: ユーザーが time_limit を実際の実行時間より大幅に長く設定すると、T の推定が保守的になりすぎて隙間充填の効果が薄れる。ただしこれは制御が保守的な方向（dispatch を控える）にずれるだけで、starvation を悪化させることはない
 
@@ -509,7 +511,9 @@ spec:
   activeDeadlineSeconds: <time_limit_seconds>
 ```
 
-`backoffLimitPerIndex: 0` により、1 回失敗したタスクは再試行せず即座に `failedIndexes` に追加される。
+`backoffLimitPerIndex: 0` により、1 回失敗したタスクは再試行せず即座に `failedIndexes` に追加される。sweep ジョブでは失敗タスクの再試行が parallelism 枠を占有し、他のタスクの実行を妨げるため、即座に枠を解放する必要がある。
+
+通常ジョブでは `backoffLimit` を明示的に設定せず、K8s デフォルト（6 回）に委ねる。通常ジョブはタスクが 1 つのみであり、再試行が他タスクに影響しない。`activeDeadlineSeconds` により再試行を含む総実行時間が制限されるため、再試行による滞留は bounded である。一方で、一時的なノード障害（OOM・ネットワーク等）からの自動復旧が期待できる利点がある。
 
 ### 3.3 コマンドラッパー
 
