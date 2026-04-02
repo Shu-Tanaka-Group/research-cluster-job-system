@@ -167,6 +167,9 @@ histogram_quantile(0.95, rate(kueue_admission_wait_time_seconds_bucket{cluster_q
 # 実行中ワークロード数
 kueue_admitted_active_workloads{cluster_queue="cjob-cluster-queue"}
 
+# 待機中ワークロード数
+sum(kueue_pending_workloads{cluster_queue="cjob-cluster-queue"})
+
 # CPU 使用量（コア）
 kueue_cluster_queue_resource_usage{cluster_queue="cjob-cluster-queue", flavor="cpu", resource="cpu"}
 
@@ -216,7 +219,7 @@ LIMIT 15;
 
 -- 時間帯別混雑度（過去 7 日平均）
 SELECT
-  h AS "時間帯",
+  h::text || '時' AS "時間帯",
   ROUND(AVG(job_count), 1) AS "平均ジョブ数"
 FROM (
   SELECT
@@ -235,9 +238,8 @@ ORDER BY h;
 SELECT
   CASE status
     WHEN 'QUEUED' THEN '待機中'
-    WHEN 'HELD' THEN '保留中'
-    WHEN 'DISPATCHING' THEN '投入処理中'
-    WHEN 'DISPATCHED' THEN 'スケジュール待ち'
+    WHEN 'DISPATCHING' THEN '投入中'
+    WHEN 'DISPATCHED' THEN '実行待ち'
     WHEN 'RUNNING' THEN '実行中'
     WHEN 'SUCCEEDED' THEN '成功'
     WHEN 'FAILED' THEN '失敗'
@@ -252,12 +254,11 @@ ORDER BY
   CASE status
     WHEN 'RUNNING' THEN 1
     WHEN 'QUEUED' THEN 2
-    WHEN 'HELD' THEN 3
-    WHEN 'DISPATCHING' THEN 4
-    WHEN 'DISPATCHED' THEN 5
-    WHEN 'SUCCEEDED' THEN 6
-    WHEN 'FAILED' THEN 7
-    WHEN 'CANCELLED' THEN 8
+    WHEN 'DISPATCHING' THEN 3
+    WHEN 'DISPATCHED' THEN 4
+    WHEN 'SUCCEEDED' THEN 5
+    WHEN 'FAILED' THEN 6
+    WHEN 'CANCELLED' THEN 7
   END;
 
 -- 実行中ジョブ数
