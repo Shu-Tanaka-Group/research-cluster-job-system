@@ -374,6 +374,17 @@ WHERE namespace IN (:candidate_namespaces);
 
 テーブルに行がない namespace は ResourceQuota が存在しないか Watcher が未同期であり、制限なしとして dispatch する。
 
+**Usage API（ResourceQuota 表示）**: `GET /v1/usage` で自 namespace の ResourceQuota 使用状況を返す。
+
+```sql
+SELECT hard_cpu_millicores, hard_memory_mib, hard_gpu,
+       used_cpu_millicores, used_memory_mib, used_gpu
+FROM namespace_resource_quotas
+WHERE namespace = :namespace;
+```
+
+行がない場合はレスポンスの `resource_quota` を `null` とする。
+
 ### 8.3 設計判断
 
 - **数値パース済み保存**: `node_resources` と同じ理由。Dispatcher が Python 側で hard - used の残リソースを算出し、ジョブの `cpu_millicores` / `memory_mib` / `gpu` と比較する

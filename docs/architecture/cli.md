@@ -665,6 +665,34 @@ Resource Usage (past 7 days)
 
 使用実績がない場合は「使用実績がありません。」を表示する。
 
+### Resource Quota の表示
+
+レスポンスの `resource_quota` が `null` でない場合、使用状況テーブルの前に Resource Quota セクションを表示する。`remaining` は `hard - used` で算出する。
+
+- CPU: ミリコアのまま表示（例: `280000m / 300000m`）
+- メモリ: MiB → GiB に変換して表示（例: `800Gi / 1250Gi`）
+- GPU: 個数のまま表示（例: `1 / 4`）
+
+GPU 行は `hard_gpu == 0` の場合は非表示とする。
+
+```
+$ cjob usage
+
+Resource Quota:
+  CPU:    280000m / 300000m (remaining: 20000m)
+  Memory: 800Gi / 1250Gi (remaining: 450Gi)
+  GPU:    1 / 4 (remaining: 3)
+
+Resource Usage (past 7 days)
+──────────────────────────────────────────────────
+  Date              CPU (core·h)    Mem (GiB·h)
+  2026-03-23               24.0           48.0
+  2026-03-24               12.5           25.0
+  2026-03-25                8.0           16.0
+  ────────────────────────────────────────────────
+  Total                    44.5           89.0
+```
+
 ## 15. `cjob update` の動作
 
 CLI バイナリのバージョン管理と更新を行う。バイナリは Submit API 経由で配布される。
