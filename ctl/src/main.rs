@@ -150,6 +150,12 @@ enum UsageCommands {
         #[arg(long)]
         all: bool,
     },
+    /// Show ResourceQuota usage per namespace
+    Quota {
+        /// Filter by namespace
+        #[arg(long)]
+        namespace: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -373,6 +379,13 @@ async fn main() -> Result<()> {
                 }
                 UsageCommands::Reset { namespace, all } => {
                     cmd::usage::reset(&conn.client, namespace.as_deref(), all).await
+                }
+                UsageCommands::Quota { namespace } => {
+                    let k8s_client = k8s::client().await?;
+                    let label = config.user_namespace_label();
+                    let user_namespaces =
+                        fetch_user_namespaces(&k8s_client, label).await?;
+                    cmd::usage::quota(&conn.client, &user_namespaces, namespace.as_deref()).await
                 }
             }
         }
