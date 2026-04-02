@@ -12,20 +12,24 @@ logger = logging.getLogger(__name__)
 
 
 def sync_resource_quotas(session: Session, settings: Settings):
-    """Sync ResourceQuota status from K8s to DB for active namespaces."""
-    # Get namespaces with active or queued jobs
-    rows = session.execute(
-        text(
-            "SELECT DISTINCT namespace FROM jobs "
-            "WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED', 'RUNNING', 'HELD')"
-        )
-    )
-    active_namespaces = [row[0] for row in rows]
+    """Sync ResourceQuota status from K8s to DB for all user namespaces."""
+    core_v1 = k8s_client.CoreV1Api()
 
-    if not active_namespaces:
+    # Get all user namespaces via label selector
+    try:
+        ns_list = core_v1.list_namespace(
+            label_selector=settings.USER_NAMESPACE_LABEL,
+        )
+    except ApiException as e:
+        logger.error("Failed to list user namespaces: %s", e)
+        return
+
+    user_namespaces = {ns.metadata.name for ns in ns_list.items}
+
+    if not user_namespaces:
         session.execute(text("DELETE FROM namespace_resource_quotas"))
         session.commit()
-        logger.info("No active namespaces; cleared namespace_resource_quotas")
+        logger.info("No user namespaces; cleared namespace_resource_quotas")
         return
 
     # Collect GPU resource names from flavor config
@@ -34,32 +38,33 @@ def sync_resource_quotas(session: Session, settings: Settings):
         if f.gpu_resource_name and f.gpu_resource_name not in gpu_resource_names:
             gpu_resource_names.append(f.gpu_resource_name)
 
-    core_v1 = k8s_client.CoreV1Api()
-    synced_namespaces: set[str] = set()
+    # Fetch all ResourceQuotas named RESOURCE_QUOTA_NAME in a single API call
+    try:
+        rq_list = core_v1.list_resource_quota_for_all_namespaces(
+            field_selector=f"metadata.name={settings.RESOURCE_QUOTA_NAME}",
+        )
+    except ApiException as e:
+        logger.error("Failed to list ResourceQuotas: %s", e)
+        return
 
-    for ns in active_namespaces:
-        try:
-            rq = core_v1.read_namespaced_resource_quota(
-                name=settings.RESOURCE_QUOTA_NAME,
-                namespace=ns,
-            )
-        except ApiException as e:
-            if e.status == 404:
-                # No ResourceQuota -> remove row if exists
-                session.execute(
-                    text(
-                        "DELETE FROM namespace_resource_quotas "
-                        "WHERE namespace = :ns"
-                    ),
-                    {"ns": ns},
-                )
-                synced_namespaces.add(ns)
-                continue
-            logger.error(
-                "Failed to read ResourceQuota '%s' for %s: %s",
-                settings.RESOURCE_QUOTA_NAME,
-                ns,
-                e,
+    # Build namespace -> ResourceQuota mapping (user namespaces only)
+    rq_map: dict[str, object] = {}
+    for rq in rq_list.items:
+        if rq.metadata.namespace in user_namespaces:
+            rq_map[rq.metadata.namespace] = rq
+
+    synced_count = 0
+
+    for ns in user_namespaces:
+        rq = rq_map.get(ns)
+        if rq is None:
+            # No ResourceQuota for this namespace -> remove row if exists
+            session.execute(
+                text(
+                    "DELETE FROM namespace_resource_quotas "
+                    "WHERE namespace = :ns"
+                ),
+                {"ns": ns},
             )
             continue
 
@@ -99,12 +104,11 @@ def sync_resource_quotas(session: Session, settings: Settings):
                 "u_gpu": used_gpu,
             },
         )
-        synced_namespaces.add(ns)
+        synced_count += 1
 
-    # Delete rows for namespaces no longer active
-    active_set = set(active_namespaces)
-    ph = ", ".join(f":n{i}" for i in range(len(active_set)))
-    params = {f"n{i}": ns for i, ns in enumerate(active_set)}
+    # Delete rows for namespaces no longer in user namespace set
+    ph = ", ".join(f":n{i}" for i in range(len(user_namespaces)))
+    params = {f"n{i}": ns for i, ns in enumerate(user_namespaces)}
     session.execute(
         text(
             f"DELETE FROM namespace_resource_quotas "
@@ -115,7 +119,7 @@ def sync_resource_quotas(session: Session, settings: Settings):
 
     session.commit()
     logger.info(
-        "Synced resource quotas: %d namespace(s) synced out of %d active",
-        len(synced_namespaces),
-        len(active_namespaces),
+        "Synced resource quotas: %d namespace(s) with quota out of %d user namespaces",
+        synced_count,
+        len(user_namespaces),
     )

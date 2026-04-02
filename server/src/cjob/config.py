@@ -57,6 +57,7 @@ class Settings(BaseSettings):
 
     # ResourceQuota
     RESOURCE_QUOTA_NAME: str = "computing-quota"
+    RESOURCE_QUOTA_SYNC_INTERVAL_SEC: int = 10
 
     # Node Taint
     JOB_NODE_TAINT: str = "role=computing:NoSchedule"

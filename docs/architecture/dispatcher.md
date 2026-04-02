@@ -433,7 +433,7 @@ candidates = filter_by_resource_quota(session, candidates)  # 追加
 3. sweep ジョブの場合は `parallelism` 倍のリソースを要求するものとして計算する
 4. 同一サイクル内で通過させたジョブのリソースを累計し、後続ジョブの残リソース計算に反映する（同一サイクルでの過剰 dispatch を防止）
 
-**前提:** ResourceQuota の使用状況は Watcher が定期同期するため、`NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）分の遅延がある。このチェックは best-effort であり、チェック通過後に Kueue が admit するまでの間に ResourceQuota の使用状況が変わる可能性がある。ただし、チェックなしの場合（DISPATCHED 滞留 → 時間切れ FAILED）と比較して大幅に改善される。
+**前提:** ResourceQuota の使用状況は Watcher が定期同期するため、`RESOURCE_QUOTA_SYNC_INTERVAL_SEC`（デフォルト 10 秒）分の遅延がある。このチェックは best-effort であり、チェック通過後に Kueue が admit するまでの間に ResourceQuota の使用状況が変わる可能性がある。ただし、チェックなしの場合（DISPATCHED 滞留 → 時間切れ FAILED）と比較して大幅に改善される。
 
 ### 2.6 起動時の初期化処理
 
