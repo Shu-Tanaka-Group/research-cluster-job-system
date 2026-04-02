@@ -598,6 +598,41 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 
 `daily` は `usage_date` 昇順でソートされる。ウィンドウ内に使用実績がない場合は `daily` が空配列、各 total が 0 となる。
 
+### resource_quota
+
+`namespace_resource_quotas` テーブルから自 namespace の ResourceQuota 情報を取得し、`resource_quota` フィールドとして返す。ResourceQuota が設定されていない、または Watcher が未同期でテーブルに行がない場合は `null` を返す。
+
+```json
+{
+  "window_days": 7,
+  "daily": [...],
+  "total_cpu_millicores_seconds": 131400000,
+  "total_memory_mib_seconds": 269107200,
+  "total_gpu_seconds": 0,
+  "resource_quota": {
+    "hard_cpu_millicores": 300000,
+    "hard_memory_mib": 1280000,
+    "hard_gpu": 4,
+    "used_cpu_millicores": 280000,
+    "used_memory_mib": 819200,
+    "used_gpu": 1
+  }
+}
+```
+
+ResourceQuota が存在しない場合:
+
+```json
+{
+  "window_days": 7,
+  "daily": [...],
+  "total_cpu_millicores_seconds": 0,
+  "total_memory_mib_seconds": 0,
+  "total_gpu_seconds": 0,
+  "resource_quota": null
+}
+```
+
 ## 14. GET /v1/flavors
 
 利用可能な ResourceFlavor の一覧とリソース情報を返す。認証不要。

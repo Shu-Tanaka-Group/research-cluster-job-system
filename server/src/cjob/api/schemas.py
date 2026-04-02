@@ -148,12 +148,22 @@ class DailyUsage(BaseModel):
     gpu_seconds: int
 
 
+class ResourceQuota(BaseModel):
+    hard_cpu_millicores: int
+    hard_memory_mib: int
+    hard_gpu: int
+    used_cpu_millicores: int
+    used_memory_mib: int
+    used_gpu: int
+
+
 class UsageResponse(BaseModel):
     window_days: int
     daily: list[DailyUsage]
     total_cpu_millicores_seconds: int
     total_memory_mib_seconds: int
     total_gpu_seconds: int
+    resource_quota: ResourceQuota | None = None
 
 
 class ResetResponse(BaseModel):

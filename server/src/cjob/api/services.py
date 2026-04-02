@@ -22,6 +22,7 @@ from .schemas import (
     JobSubmitResponse,
     JobSummary,
     ReleaseResponse,
+    ResourceQuota,
     ResourceSpec,
     SkippedItem,
     SweepSubmitRequest,
@@ -700,12 +701,25 @@ def get_usage(session: Session, namespace: str) -> UsageResponse:
         total_mem += mem
         total_gpu += gpu
 
+    quota_row = session.execute(
+        text(
+            "SELECT hard_cpu_millicores, hard_memory_mib, hard_gpu, "
+            "       used_cpu_millicores, used_memory_mib, used_gpu "
+            "FROM namespace_resource_quotas "
+            "WHERE namespace = :namespace"
+        ),
+        {"namespace": namespace},
+    ).mappings().first()
+
+    resource_quota = ResourceQuota(**quota_row) if quota_row else None
+
     return UsageResponse(
         window_days=window_days,
         daily=daily,
         total_cpu_millicores_seconds=total_cpu,
         total_memory_mib_seconds=total_mem,
         total_gpu_seconds=total_gpu,
+        resource_quota=resource_quota,
     )
 
 
