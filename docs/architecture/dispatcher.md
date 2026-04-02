@@ -298,7 +298,11 @@ WHERE status = 'DISPATCHED'
 
 #### 2.4.3 リソース空き推定
 
-滞留ジョブが検知された場合、同一 namespace の RUNNING ジョブから「リソースが空くまでの推定残り時間」を計算する。
+滞留ジョブが検知された場合、時間とリソースの2軸で空き状況を推定する。
+
+##### 時間方向の推定
+
+同一 namespace の RUNNING ジョブから「リソースが空くまでの推定残り時間」を計算する。
 
 ```sql
 SELECT MIN(
@@ -316,23 +320,43 @@ WHERE namespace = :namespace
 
 T は「少なくともあと T 秒後には、いずれかの RUNNING ジョブが終了する」ことを意味する。実際にはジョブが time_limit より早く完了する場合が多いため、T は保守的な（長めの）推定となる。
 
+##### リソース方向の推定
+
+ClusterQueue の利用可能リソースを flavor ごとに推定する。
+
+```
+available[flavor] = flavor_quotas[flavor] - SUM(RUNNING jobs の resource[flavor])
+```
+
+- `flavor_quotas` テーブル（[database.md](database.md) §7 参照）から ClusterQueue の nominalQuota を取得する
+- クラスタ全体の RUNNING ジョブを flavor 別に集計し、消費中のリソースを算出する
+- DISPATCHED ジョブは集計に含めない。滞留ジョブを含む DISPATCHED ジョブは Kueue に admit されていない可能性があり、ClusterQueue のリソースを消費していないため
+- sweep ジョブの場合は `parallelism` 倍のリソースを消費しているものとして計算する
+- `flavor_quotas` テーブルに行がない flavor は制限なしとして扱う
+
 #### 2.4.4 隙間充填ロジック
 
-滞留ジョブが存在する namespace について、QUEUED ジョブの dispatch 対象を制限する。
+滞留ジョブが存在する namespace について、QUEUED ジョブの dispatch 対象を時間とリソースの両面で制限する。
 
 ```
 dispatch サイクル:
   1. 通常の fetch_dispatchable_jobs() で候補を取得する
   2. 各 namespace について滞留ジョブの有無を確認する
   3. 滞留ジョブが存在しない namespace → 候補をそのまま dispatch（現行動作）
-  4. 滞留ジョブが存在する namespace → 候補をフィルタリング:
+  4. ClusterQueue の利用可能リソースを flavor ごとに推定する
+  5. 滞留ジョブが存在する namespace → 候補をフィルタリング:
      a. RUNNING ジョブの最短残り時間 T を計算する
-     b. T = None（RUNNING ジョブなし）→ 全候補を制限なしで dispatch（デッドロック防止）
-     c. T が値を持つ場合 → 候補のうち time_limit_seconds ≤ T のジョブだけを dispatch 対象とする
-     d. time_limit_seconds > T のジョブは dispatch を保留する（次サイクルで再評価）
+     b. T = None（RUNNING ジョブなし）→ 時間条件を免除（デッドロック防止）
+     c. T が値を持つ場合 → time_limit_seconds ≤ T のジョブのみ通過（時間条件）
+     d. 時間条件を通過したジョブに対し、リソース条件を適用:
+        - 候補の flavor に対応する利用可能リソースと比較する
+        - CPU・メモリ・GPU の全てが利用可能リソース以内であれば通過する
+        - sweep ジョブは parallelism 倍のリソースとして計算する
+        - 通過したジョブのリソースを利用可能リソースから差し引く（累積追跡）
+     e. 両条件を満たさないジョブは dispatch を保留する（次サイクルで再評価）
 ```
 
-**RUNNING ジョブが存在しない場合**（全て DISPATCHED で待機中）: T = None となり、全候補を制限なしで dispatch する。これにより、滞留ジョブのみが DISPATCHED にある状態で namespace 全体の dispatch が永久に停止するデッドロックを防止する。新しくdispatch されたジョブが RUNNING に遷移すれば、次のサイクルで T が計算可能になり、通常の隙間充填制御に戻る。
+**RUNNING ジョブが存在しない場合**（全て DISPATCHED で待機中）: T = None となり、時間条件を免除する。リソース条件は引き続き適用する。ClusterQueue に空きがなければ dispatch しても Kueue に admit されないため、リソース条件の維持はデッドロックを悪化させない。ClusterQueue に空きがある場合は dispatch が許可され、ジョブが RUNNING に遷移すれば次のサイクルで T が計算可能になり通常の制御に戻る。
 
 **設計判断: namespace 内スコープに限定する理由**
 
@@ -378,6 +402,9 @@ def apply_gap_filling(
     if not stalled_namespaces:
         return candidates
 
+    # ClusterQueue の利用可能リソースを flavor ごとに推定
+    available = estimate_available_cluster_resources(session, settings)
+
     # 滞留が発生していない namespace の候補はそのまま通す
     result = [c for c in candidates if c.namespace not in stalled_namespaces]
 
@@ -390,28 +417,46 @@ def apply_gap_filling(
         # RUNNING ジョブの最短残り時間を計算
         remaining = estimate_shortest_remaining(session, ns)
 
-        # RUNNING ジョブがない場合は全候補を通す（デッドロック防止）
-        if remaining is None:
-            result.extend(ns_candidates)
-            continue
-
-        # time_limit_seconds が残り時間以内のジョブだけを通す
         for c in ns_candidates:
-            if c.time_limit_seconds <= remaining:
-                result.append(c)
-            else:
+            # 時間条件: remaining=None（RUNNING なし）の場合は免除（デッドロック防止）
+            if remaining is not None and c.time_limit_seconds > remaining:
                 logger.debug(
-                    "Gap filling: holding %s/%d (time_limit=%ds, remaining=%s)",
+                    "Gap filling: holding %s/%d (time_limit=%ds > remaining=%ds)",
                     ns, c.job_id, c.time_limit_seconds, remaining,
                 )
+                continue
+
+            # リソース条件: flavor の利用可能リソースに収まるか
+            multiplier = c.parallelism if c.completions is not None else 1
+            job_cpu = c.cpu_millicores * multiplier
+            job_mem = c.memory_mib * multiplier
+            job_gpu = c.gpu * multiplier
+
+            flavor_avail = available.get(c.flavor)
+            if flavor_avail is not None:
+                if (job_cpu > flavor_avail["cpu"]
+                        or job_mem > flavor_avail["mem"]
+                        or job_gpu > flavor_avail["gpu"]):
+                    logger.debug(
+                        "Gap filling: holding %s/%d (resource exceeds available for flavor=%s)",
+                        ns, c.job_id, c.flavor,
+                    )
+                    continue
+                # 累積追跡: 通過したジョブのリソースを差し引く
+                flavor_avail["cpu"] -= job_cpu
+                flavor_avail["mem"] -= job_mem
+                flavor_avail["gpu"] -= job_gpu
+
+            result.append(c)
 
     return result
 ```
 
 #### 2.4.7 制約と限界
 
-- **推定精度**: DB ベースの推定であり、Kueue/K8s Scheduler が把握する実際のノード空き状況とは乖離する。ジョブが time_limit より早く完了した場合、推定より早くリソースが空くが、Dispatcher は次のサイクルで再評価する
-- **空間方向のパッキングは行わない**: Dispatcher は CPU/メモリの合計値を追跡しない。「滞留ジョブがいるので隙間だけ埋める」という時間方向の制御のみを行い、空間方向は Kueue に委ねる
+- **時間推定の精度**: DB ベースの推定であり、Kueue/K8s Scheduler が把握する実際のノード空き状況とは乖離する。ジョブが time_limit より早く完了した場合、推定より早くリソースが空くが、Dispatcher は次のサイクルで再評価する
+- **リソース推定の精度**: RUNNING ジョブのみを集計するため、最近 DISPATCHED されて Kueue に admit 済みだがまだ RUNNING に遷移していないジョブのリソース消費は反映されない。結果として利用可能リソースを若干過大評価する場合があるが、Kueue が最終的な admission を判断するため実害はない
+- **ノード配置は考慮しない**: リソース推定は flavor ごとの合計値で行い、個々のノードの空き状況は考慮しない。合計では収まるが特定ノードに空きがない場合、Kueue が admit しない可能性がある
 - **time_limit_seconds が実行時間と大きく乖離する場合**: ユーザーが time_limit を実際の実行時間より大幅に長く設定すると、T の推定が保守的になりすぎて隙間充填の効果が薄れる。ただしこれは制御が保守的な方向（dispatch を控える）にずれるだけで、starvation を悪化させることはない
 
 ### 2.5 ResourceQuota プレチェック
