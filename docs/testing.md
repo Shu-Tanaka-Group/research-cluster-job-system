@@ -38,7 +38,7 @@ cargo test
 | `tests/test_gap_filling.py` | `dispatcher/scheduler.py::apply_gap_filling` | 7 | 隙間充填フィルタリング。無効時 / 滞留なし / 残り時間による候補選択 / RUNNING なし / namespace 混在 / 残り時間 0 / 候補なし |
 | `tests/test_resource_utils.py` | `resource_utils.py` | 12 | CPU・メモリ文字列のパース。整数 / 小数 / ミリコア / Gi / Mi / Ki / 大きな値等 |
 | `tests/test_node_sync.py` | `watcher/node_sync.py::sync_node_resources` | 12 | ノードリソース同期。挿入 / 更新 / 削除 / 全削除 / GPU パース / API エラー時のデータ保持 / ラベルセレクタ |
-| `tests/test_cli_endpoints.py` | `api/routes.py` CLI 配布エンドポイント | 16 | `/v1/cli/version`・`/v1/cli/versions`・`/v1/cli/download` の正常系 / 404 / 認証不要 / バージョンソート / バージョン指定ダウンロード / 無効ディレクトリ除外の検証 |
+| `tests/test_cli_endpoints.py` | `api/routes.py` CLI 配布エンドポイント | 17 | `/v1/cli/version`・`/v1/cli/versions`・`/v1/cli/download` の正常系 / 404 / 認証不要 / バージョンソート / バージョン指定ダウンロード / 無効ディレクトリ除外 / 不正バージョン文字列の拒否（パストラバーサル防止）の検証 |
 | `tests/test_cluster_totals.py` | `dispatcher/scheduler.py::_fetch_cluster_totals` | 3 | DRF 正規化用クラスタ合計取得。空テーブル / 単一ノード / 複数ノード合計 |
 | **Rust** | | | |
 | `src/job_ids.rs` | `parse_job_ids` | 7 | ジョブ ID 式のパース（単体 / 範囲 / リスト / 組み合わせ / 重複除去 / エラー） |

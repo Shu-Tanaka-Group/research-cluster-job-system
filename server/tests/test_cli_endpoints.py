@@ -153,6 +153,14 @@ class TestCliDownload:
             resp = client.get("/v1/cli/download", params={"version": "9.9.9"})
             assert resp.status_code == 404
 
+    def test_download_invalid_version_format_returns_400(self, tmp_path):
+        _setup_pvc(tmp_path)
+        with _make_client(tmp_path) as client:
+            resp = client.get(
+                "/v1/cli/download", params={"version": "../../etc/passwd"}
+            )
+            assert resp.status_code == 400
+
     def test_download_without_version_uses_latest(self, tmp_path):
         binary_content = b"\x7fELFlatest"
         _setup_pvc(tmp_path, binary_content=binary_content)

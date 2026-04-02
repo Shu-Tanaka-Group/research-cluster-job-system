@@ -92,6 +92,10 @@ def download_cli_binary(version: str | None = Query(default=None)):
     settings = get_settings()
     if version is None:
         version = _read_latest_version(settings.CLI_BINARY_DIR)
+    try:
+        Version(version)
+    except InvalidVersion:
+        raise HTTPException(status_code=400, detail="Invalid version format")
     binary_path = Path(settings.CLI_BINARY_DIR) / version / "cjob"
     if not binary_path.is_file():
         raise HTTPException(status_code=404, detail="CLI binary not found")
