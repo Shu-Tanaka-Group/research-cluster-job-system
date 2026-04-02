@@ -9,6 +9,7 @@ from cjob.config import get_settings
 from cjob.db import create_session
 
 from .node_sync import sync_node_resources
+from .quota_sync import sync_flavor_quotas
 from .reconciler import list_cjob_k8s_jobs, reconcile_cycle
 
 logger = logging.getLogger(__name__)
@@ -58,13 +59,22 @@ def run():
         finally:
             session.close()
 
-        # Sync node resources every N cycles (including first cycle)
+        # Sync node resources and flavor quotas every N cycles (including first cycle)
         if cycle_count % cycles_per_sync == 0:
             session = create_session()
             try:
                 sync_node_resources(session, settings)
             except Exception:
                 logger.exception("Error in node resource sync")
+                session.rollback()
+            finally:
+                session.close()
+
+            session = create_session()
+            try:
+                sync_flavor_quotas(session, settings)
+            except Exception:
+                logger.exception("Error in flavor quota sync")
                 session.rollback()
             finally:
                 session.close()

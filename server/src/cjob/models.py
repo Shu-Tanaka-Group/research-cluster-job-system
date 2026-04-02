@@ -99,6 +99,18 @@ class NodeResource(Base):
     )
 
 
+class FlavorQuota(Base):
+    __tablename__ = "flavor_quotas"
+
+    flavor: Mapped[str] = mapped_column(String, primary_key=True)
+    cpu: Mapped[str] = mapped_column(String, nullable=False)
+    memory: Mapped[str] = mapped_column(String, nullable=False)
+    gpu: Mapped[str] = mapped_column(String, nullable=False, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class JobEvent(Base):
     __tablename__ = "job_events"
 

@@ -53,6 +53,7 @@ class Settings(BaseSettings):
 
     # Kueue
     KUEUE_LOCAL_QUEUE_NAME: str = "default"
+    CLUSTER_QUEUE_NAME: str = "cjob-cluster-queue"
 
     # Node Taint
     JOB_NODE_TAINT: str = "role=computing:NoSchedule"
