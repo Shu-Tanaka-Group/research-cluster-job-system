@@ -1,12 +1,12 @@
 mod auth;
 mod client;
+mod config;
 mod display;
 mod job_ids;
 mod logs;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::collections::HashMap;
 
 #[derive(Parser)]
 #[command(name = "cjob", about = "CJob - ジョブキューシステム CLI", version)]
@@ -162,6 +162,11 @@ enum Commands {
         #[command(subcommand)]
         action: FlavorCommands,
     },
+    /// ユーザー設定を管理する
+    Config {
+        #[command(subcommand)]
+        action: ConfigCommands,
+    },
     /// CLI を最新バージョンに更新する
     Update {
         /// プレリリース版を含める
@@ -193,6 +198,46 @@ enum FlavorCommands {
     },
 }
 
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// 全設定を表示する
+    List,
+    /// リスト型の設定に要素を追加する
+    Add {
+        /// テーブル名（例: env）
+        table: String,
+        /// キー名（例: exclude）
+        key: String,
+        /// 追加する値
+        value: String,
+    },
+    /// リスト型の設定から要素を削除する
+    Remove {
+        /// テーブル名（例: env）
+        table: String,
+        /// キー名（例: exclude）
+        key: String,
+        /// 削除する値
+        value: String,
+    },
+    /// スカラー型の設定値を変更する
+    Set {
+        /// テーブル名
+        table: String,
+        /// キー名
+        key: String,
+        /// 設定する値
+        value: String,
+    },
+    /// スカラー型の設定値を削除する
+    Unset {
+        /// テーブル名
+        table: String,
+        /// キー名
+        key: String,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -207,6 +252,16 @@ async fn main() -> Result<()> {
         return match action {
             FlavorCommands::List => cmd_flavor_list(&api_client).await,
             FlavorCommands::Info { name } => cmd_flavor_info(&api_client, &name).await,
+        };
+    }
+
+    if let Commands::Config { action } = cli.command {
+        return match action {
+            ConfigCommands::List => cmd_config_list(),
+            ConfigCommands::Add { table, key, value } => cmd_config_add(&table, &key, &value),
+            ConfigCommands::Remove { table, key, value } => cmd_config_remove(&table, &key, &value),
+            ConfigCommands::Set { table, key, value } => cmd_config_set(&table, &key, &value),
+            ConfigCommands::Unset { table, key } => cmd_config_unset(&table, &key),
         };
     }
 
@@ -249,6 +304,7 @@ async fn main() -> Result<()> {
         Commands::Logs { job_id, follow, index } => logs::show_logs(job_id, follow, index, &api_client).await,
         Commands::Update { .. } => unreachable!(),
         Commands::Flavor { .. } => unreachable!(),
+        Commands::Config { .. } => unreachable!(),
     }
 }
 
@@ -351,8 +407,9 @@ async fn cmd_add(
         anyhow::bail!("CJOB_IMAGE または JUPYTER_IMAGE 環境変数が設定されていません");
     }
 
-    // Collect exported environment variables
-    let env: HashMap<String, String> = std::env::vars().collect();
+    // Collect exported environment variables, filtering by user config
+    let user_config = config::load()?;
+    let env = config::filter_env(std::env::vars().collect(), &user_config);
 
     let cmd_str = build_command_string(&command);
 
@@ -403,8 +460,9 @@ async fn cmd_sweep(
         anyhow::bail!("CJOB_IMAGE または JUPYTER_IMAGE 環境変数が設定されていません");
     }
 
-    // Collect exported environment variables
-    let env: HashMap<String, String> = std::env::vars().collect();
+    // Collect exported environment variables, filtering by user config
+    let user_config = config::load()?;
+    let env = config::filter_env(std::env::vars().collect(), &user_config);
 
     // Replace _INDEX_ placeholder with $CJOB_INDEX before quoting.
     // Double-quote strategy ensures $CJOB_INDEX expands in the Job Pod.
@@ -899,6 +957,82 @@ async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> 
     }
 
     Ok(())
+}
+
+fn cmd_config_list() -> Result<()> {
+    let cfg = config::load()?;
+    let toml_str = toml::to_string_pretty(&cfg)
+        .map_err(|e| anyhow::anyhow!("設定のシリアライズに失敗しました: {}", e))?;
+    print!("{}", toml_str);
+    Ok(())
+}
+
+fn cmd_config_add(table: &str, key: &str, value: &str) -> Result<()> {
+    match config::lookup_key_type(table, key) {
+        None => anyhow::bail!("不明な設定: {}.{}", table, key),
+        Some(config::KeyType::Scalar) => {
+            anyhow::bail!("{}.{} はスカラー型です。set / unset を使用してください", table, key);
+        }
+        Some(config::KeyType::List) => {}
+    }
+
+    let mut cfg = config::load()?;
+    match (table, key) {
+        ("env", "exclude") => {
+            if !cfg.env.exclude.contains(&value.to_string()) {
+                cfg.env.exclude.push(value.to_string());
+            }
+        }
+        _ => unreachable!(),
+    }
+    config::save(&cfg)?;
+    Ok(())
+}
+
+fn cmd_config_remove(table: &str, key: &str, value: &str) -> Result<()> {
+    match config::lookup_key_type(table, key) {
+        None => anyhow::bail!("不明な設定: {}.{}", table, key),
+        Some(config::KeyType::Scalar) => {
+            anyhow::bail!("{}.{} はスカラー型です。set / unset を使用してください", table, key);
+        }
+        Some(config::KeyType::List) => {}
+    }
+
+    let mut cfg = config::load()?;
+    match (table, key) {
+        ("env", "exclude") => {
+            cfg.env.exclude.retain(|v| v != value);
+        }
+        _ => unreachable!(),
+    }
+    config::save(&cfg)?;
+    Ok(())
+}
+
+fn cmd_config_set(table: &str, key: &str, _value: &str) -> Result<()> {
+    match config::lookup_key_type(table, key) {
+        None => anyhow::bail!("不明な設定: {}.{}", table, key),
+        Some(config::KeyType::List) => {
+            anyhow::bail!("{}.{} はリスト型です。add / remove を使用してください", table, key);
+        }
+        Some(config::KeyType::Scalar) => {
+            // Future: implement scalar set
+            todo!("スカラー型の設定は未実装です")
+        }
+    }
+}
+
+fn cmd_config_unset(table: &str, key: &str) -> Result<()> {
+    match config::lookup_key_type(table, key) {
+        None => anyhow::bail!("不明な設定: {}.{}", table, key),
+        Some(config::KeyType::List) => {
+            anyhow::bail!("{}.{} はリスト型です。add / remove を使用してください", table, key);
+        }
+        Some(config::KeyType::Scalar) => {
+            // Future: implement scalar unset
+            todo!("スカラー型の設定は未実装です")
+        }
+    }
 }
 
 fn replace_binary(binary: &[u8]) -> Result<()> {

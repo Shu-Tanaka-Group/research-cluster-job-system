@@ -35,6 +35,11 @@ cjob usage
 cjob flavor list                         # 利用可能な flavor 一覧
 cjob flavor info <name>                  # 指定 flavor のリソース上限
 cjob update
+cjob config list                              # 全設定を表示
+cjob config add <table> <key> <value>         # リスト型の設定に要素を追加
+cjob config remove <table> <key> <value>      # リスト型の設定から要素を削除
+cjob config set <table> <key> <value>         # スカラー型の設定値を変更
+cjob config unset <table> <key>               # スカラー型の設定値を削除
 ```
 
 ## 2. 使用例
@@ -386,6 +391,8 @@ Error: convergence failed
 
 ## 8. CLI の設定
 
+### 8.1 API エンドポイント
+
 Submit API のエンドポイントは環境変数 `CJOB_API_URL` から読む。未設定時はデフォルト値を使用する。
 
 ```
@@ -396,6 +403,84 @@ SUBMIT_API_URL = env("CJOB_API_URL")
 ```
 
 ログディレクトリのパスは CLI 側で保持せず、API から取得する。個別ジョブの `log_dir` は `GET /v1/jobs/{job_id}` から、ログベースディレクトリは `GET /v1/jobs` の `log_base_dir` から取得する。これにより CLI 側の設定とサーバー側の ConfigMap（`LOG_BASE_DIR`）の不整合を防ぐ。
+
+### 8.2 ユーザー設定ファイル
+
+ユーザー固有の設定は TOML 形式のファイルで管理する。`cjob config` サブコマンドで操作する。
+
+#### 設定ファイルのパス
+
+`$XDG_CONFIG_HOME/cjob/config.toml` に保存する。`XDG_CONFIG_HOME` が未設定の場合は `~/.config/cjob/config.toml` をデフォルトとする。
+
+#### TOML スキーマ
+
+```toml
+[env]
+exclude = ["SECRET_TOKEN", "JUPYTER_TOKEN"]
+```
+
+| テーブル | キー | 型 | 説明 |
+|---|---|---|---|
+| `env` | `exclude` | リスト | ジョブ投入時に除外する環境変数名のリスト |
+
+設定ファイルが存在しない場合は全項目がデフォルト値（空）として扱われる。
+
+#### `cjob config` サブコマンド
+
+`cjob config` は認証不要のローカル操作である。
+
+##### `cjob config list`
+
+全設定を TOML 形式で表示する。設定ファイルが存在しない場合はデフォルト値を表示する。
+
+```
+$ cjob config list
+[env]
+exclude = [
+    "SECRET_TOKEN",
+    "JUPYTER_TOKEN",
+]
+```
+
+##### `cjob config add <table> <key> <value>`
+
+リスト型の設定に要素を追加する。既に存在する値を追加した場合は何もしない（重複なし）。
+
+```bash
+cjob config add env exclude MY_SECRET
+```
+
+##### `cjob config remove <table> <key> <value>`
+
+リスト型の設定から要素を削除する。
+
+```bash
+cjob config remove env exclude MY_SECRET
+```
+
+##### `cjob config set <table> <key> <value>`
+
+スカラー型の設定値を変更する。リスト型のキーに対して使用するとエラーになる。
+
+##### `cjob config unset <table> <key>`
+
+スカラー型の設定値を削除（デフォルトに戻す）する。リスト型のキーに対して使用するとエラーになる。
+
+##### バリデーション
+
+未知のテーブル/キーの組み合わせはエラーとする。型に合わないサブコマンド（リスト型に `set`/`unset`、スカラー型に `add`/`remove`）もエラーとし、正しいコマンドを案内する。
+
+```
+$ cjob config set env exclude X
+エラー: env.exclude はリスト型です。add / remove を使用してください
+
+$ cjob config add unknown key value
+エラー: 不明な設定: unknown.key
+```
+
+#### 環境変数の除外
+
+`cjob add` / `cjob sweep` はジョブ投入前に設定ファイルを読み込み、`env.exclude` に含まれる環境変数を送信対象から除外する。設定ファイルが存在しない場合は従来どおり全環境変数を送信する。
 
 ## 9. `cjob cancel` の動作
 

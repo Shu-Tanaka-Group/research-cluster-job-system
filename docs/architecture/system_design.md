@@ -23,7 +23,7 @@
 ### 1.2 submit 機能
 
 - 現在の作業ディレクトリ取得
-- export 済み環境変数取得
+- export 済み環境変数取得（ユーザー設定ファイルの `env.exclude` で指定された変数を除外）
 - コンテナイメージ名取得（`CJOB_IMAGE` 環境変数から取得、未設定時は `JUPYTER_IMAGE` にフォールバック）
 - コマンド文字列の保存
 - ユーザー namespace 解決（ServiceAccount の namespace ファイルから取得）
@@ -130,7 +130,7 @@ Dispatcher が DB をスキャンして Job を materialize する。
 submit 時に取得した以下を Job Pod に反映する。
 
 - `cwd` → Kubernetes container `workingDir`
-- `env` → Kubernetes container `env`（`PATH` / `VIRTUAL_ENV` を含む全 export 済み環境変数）
+- `env` → Kubernetes container `env`（`PATH` / `VIRTUAL_ENV` を含む export 済み環境変数。ユーザー設定の `env.exclude` で除外された変数は含まない）
 - `command` → `bash -lc "<command>"`
 
 ### 3.6 ログ取得方針
