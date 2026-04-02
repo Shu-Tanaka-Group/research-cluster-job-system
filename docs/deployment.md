@@ -301,6 +301,7 @@ echo "Creating namespace and resources: ns=${NS_NAME}, user=${USERNAME}"
 kubectl create namespace ${NS_NAME}
 
 # ユーザー namespace 識別ラベルとユーザー名アノテーションを付与
+kubectl label namespace ${NS_NAME} type=user
 kubectl label namespace ${NS_NAME} cjob.io/user-namespace=true
 kubectl annotate namespace ${NS_NAME} cjob.io/username=${USERNAME}
 
