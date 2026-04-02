@@ -34,7 +34,14 @@ pub async fn migrate(client: &Client) -> Result<()> {
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS node_name TEXT; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS flavor TEXT NOT NULL DEFAULT 'cpu'; \
         ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cpu_millicores INTEGER; \
-        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS memory_mib INTEGER;";
+        ALTER TABLE jobs ADD COLUMN IF NOT EXISTS memory_mib INTEGER; \
+        CREATE TABLE IF NOT EXISTS flavor_quotas ( \
+            flavor TEXT PRIMARY KEY, \
+            cpu TEXT NOT NULL, \
+            memory TEXT NOT NULL, \
+            gpu TEXT NOT NULL DEFAULT '0', \
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW() \
+        );";
 
     client
         .batch_execute(ddl)

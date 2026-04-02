@@ -580,7 +580,7 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 
 ## 14. GET /v1/flavors
 
-利用可能な ResourceFlavor の一覧とリソース上限を返す。認証不要。
+利用可能な ResourceFlavor の一覧とリソース情報を返す。認証不要。
 
 ### response
 
@@ -593,14 +593,16 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
       "nodes": [
         {"node_name": "worker07", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0},
         {"node_name": "worker08", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0}
-      ]
+      ],
+      "quota": {"cpu": "256", "memory": "1000Gi", "gpu": "0"}
     },
     {
       "name": "gpu",
       "has_gpu": true,
       "nodes": [
         {"node_name": "gworker02", "cpu_millicores": 128000, "memory_mib": 515686, "gpu": 4}
-      ]
+      ],
+      "quota": {"cpu": "64", "memory": "500Gi", "gpu": "4"}
     }
   ],
   "default_flavor": "cpu"
@@ -608,6 +610,8 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 ```
 
 各 flavor の `nodes` には `node_resources` テーブルからその flavor に属するノードの一覧が含まれる。Watcher 未起動でノード情報がない flavor は `nodes` が空配列となる。
+
+`quota` には `flavor_quotas` テーブルから取得した ClusterQueue の nominalQuota が含まれる。Watcher 未同期で quota 情報がない flavor は `quota` が `null` となる。
 
 `default_flavor` は ConfigMap `DEFAULT_FLAVOR` の値。
 

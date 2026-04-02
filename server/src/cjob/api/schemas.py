@@ -172,10 +172,17 @@ class FlavorNodeInfo(BaseModel):
     gpu: int
 
 
+class FlavorQuotaInfo(BaseModel):
+    cpu: str
+    memory: str
+    gpu: str
+
+
 class FlavorInfo(BaseModel):
     name: str
     has_gpu: bool
     nodes: list[FlavorNodeInfo]
+    quota: FlavorQuotaInfo | None = None
 
 
 class FlavorListResponse(BaseModel):

@@ -73,5 +73,12 @@ data:
         flavor              TEXT NOT NULL DEFAULT 'cpu',
         updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    CREATE TABLE IF NOT EXISTS flavor_quotas (
+        flavor      TEXT PRIMARY KEY,
+        cpu         TEXT NOT NULL,
+        memory      TEXT NOT NULL,
+        gpu         TEXT NOT NULL DEFAULT '0',
+        updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
     CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
     CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ON jobs (namespace, status);

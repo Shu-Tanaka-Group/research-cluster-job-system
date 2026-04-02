@@ -175,6 +175,7 @@ pub struct UsageResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct FlavorNodeInfo {
     pub node_name: String,
     pub cpu_millicores: i64,
@@ -183,10 +184,18 @@ pub struct FlavorNodeInfo {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct FlavorQuotaInfo {
+    pub cpu: String,
+    pub memory: String,
+    pub gpu: String,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct FlavorInfo {
     pub name: String,
     pub has_gpu: bool,
     pub nodes: Vec<FlavorNodeInfo>,
+    pub quota: Option<FlavorQuotaInfo>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -907,6 +907,32 @@ async fn cmd_flavor_list(client: &client::CjobClient) -> Result<()> {
     Ok(())
 }
 
+/// Parse a K8s memory quantity string (e.g. "1000Gi", "500Mi", "1Ti") to MiB.
+fn parse_memory_to_mib(s: &str) -> Option<f64> {
+    if let Some(v) = s.strip_suffix("Ti") {
+        v.parse::<f64>().ok().map(|n| n * 1024.0 * 1024.0)
+    } else if let Some(v) = s.strip_suffix("Gi") {
+        v.parse::<f64>().ok().map(|n| n * 1024.0)
+    } else if let Some(v) = s.strip_suffix("Mi") {
+        v.parse::<f64>().ok().map(|n| n)
+    } else if let Some(v) = s.strip_suffix("Ki") {
+        v.parse::<f64>().ok().map(|n| n / 1024.0)
+    } else {
+        // Plain bytes
+        s.parse::<f64>().ok().map(|n| n / (1024.0 * 1024.0))
+    }
+}
+
+/// Format MiB value as a human-readable GiB string.
+fn format_memory_gib(mib: f64) -> String {
+    let gib = mib / 1024.0;
+    if (gib - gib.round()).abs() < 0.05 {
+        format!("{}Gi", gib.round() as i64)
+    } else {
+        format!("{:.1}Gi", gib)
+    }
+}
+
 async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> {
     let resp = client.get_flavors().await?;
 
@@ -926,34 +952,61 @@ async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> 
     println!("name:   {}", flavor.name);
     println!("GPU:    {}", if flavor.has_gpu { "対応" } else { "非対応" });
 
-    if flavor.nodes.is_empty() {
-        println!();
-        println!("（ノード情報がまだ取得されていません）");
-        return Ok(());
-    }
+    let quota = match &flavor.quota {
+        Some(q) => q,
+        None => {
+            println!();
+            println!("（リソース情報がまだ取得されていません）");
+            return Ok(());
+        }
+    };
+
+    // Compute max node allocatable
+    let max_cpu_millicores = flavor.nodes.iter().map(|n| n.cpu_millicores).max();
+    let max_memory_mib = flavor.nodes.iter().map(|n| n.memory_mib).max();
+    let max_gpu = flavor.nodes.iter().map(|n| n.gpu).max();
+
+    // Parse quota values for comparison
+    let quota_cpu_cores: f64 = quota.cpu.parse().unwrap_or(0.0);
+    let quota_cpu_millicores = (quota_cpu_cores * 1000.0) as i64;
+    let quota_memory_mib = parse_memory_to_mib(&quota.memory).unwrap_or(0.0);
+    let quota_gpu: i64 = quota.gpu.parse().unwrap_or(0);
+
+    // TASK LIMIT = min(max_node, quota), displayed appropriately
+    let task_limit_cpu = match max_cpu_millicores {
+        Some(max_mc) => {
+            let effective_mc = quota_cpu_millicores.min(max_mc);
+            (effective_mc / 1000).to_string()
+        }
+        None => "-".to_string(),
+    };
+
+    let task_limit_memory = match max_memory_mib {
+        Some(max_mib) => {
+            let max_mib_f = max_mib as f64;
+            if quota_memory_mib <= max_mib_f {
+                quota.memory.clone()
+            } else {
+                format_memory_gib(max_mib_f)
+            }
+        }
+        None => "-".to_string(),
+    };
+
+    let task_limit_gpu = match max_gpu {
+        Some(max_g) => {
+            let effective = quota_gpu.min(max_g);
+            effective.to_string()
+        }
+        None => "-".to_string(),
+    };
 
     println!();
+    println!("{:<10} {:>10} {:>12}", "RESOURCE", "QUOTA", "TASK LIMIT");
+    println!("{:<10} {:>10} {:>12}", "CPU", &quota.cpu, task_limit_cpu);
+    println!("{:<10} {:>10} {:>12}", "Memory", &quota.memory, task_limit_memory);
     if flavor.has_gpu {
-        println!("{:<24} {:>12} {:>14} {:>6}", "NODE", "CPU (cores)", "Memory (GiB)", "GPU");
-        for n in &flavor.nodes {
-            println!(
-                "{:<24} {:>12} {:>14.1} {:>6}",
-                n.node_name,
-                n.cpu_millicores / 1000,
-                n.memory_mib as f64 / 1024.0,
-                n.gpu,
-            );
-        }
-    } else {
-        println!("{:<24} {:>12} {:>14}", "NODE", "CPU (cores)", "Memory (GiB)");
-        for n in &flavor.nodes {
-            println!(
-                "{:<24} {:>12} {:>14.1}",
-                n.node_name,
-                n.cpu_millicores / 1000,
-                n.memory_mib as f64 / 1024.0,
-            );
-        }
+        println!("{:<10} {:>10} {:>12}", "GPU", &quota.gpu, task_limit_gpu);
     }
 
     Ok(())

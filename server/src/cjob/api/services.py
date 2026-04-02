@@ -14,6 +14,7 @@ from .schemas import (
     FlavorInfo,
     FlavorListResponse,
     FlavorNodeInfo,
+    FlavorQuotaInfo,
     HoldResponse,
     JobDetailResponse,
     JobListResponse,
@@ -676,12 +677,25 @@ def list_flavors(session: Session) -> FlavorListResponse:
             )
         )
 
+    # Fetch flavor quotas
+    quota_result = session.execute(
+        text("SELECT flavor, cpu, memory, gpu FROM flavor_quotas")
+    )
+    quotas_by_flavor: dict[str, FlavorQuotaInfo] = {}
+    for row in quota_result.mappings():
+        quotas_by_flavor[row["flavor"]] = FlavorQuotaInfo(
+            cpu=row["cpu"],
+            memory=row["memory"],
+            gpu=row["gpu"],
+        )
+
     flavors = []
     for flavor_def in settings.flavors:
         flavors.append(FlavorInfo(
             name=flavor_def.name,
             has_gpu=flavor_def.gpu_resource_name is not None,
             nodes=nodes_by_flavor.get(flavor_def.name, []),
+            quota=quotas_by_flavor.get(flavor_def.name),
         ))
 
     return FlavorListResponse(

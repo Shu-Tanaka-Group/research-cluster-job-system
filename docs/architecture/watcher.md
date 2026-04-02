@@ -28,6 +28,15 @@ Watcher は K8s API からノードの `allocatable` リソースを定期取得
 - K8s API から取得したノード一覧に存在しないが DB に残っているノード（撤去・ラベル除去）は DELETE する
 - K8s API 呼び出し失敗時はログを出力してスキップし、次回サイクルで再試行する（DB の既存データはそのまま維持される）。特定 flavor のノード取得に失敗しても、他の flavor のノード同期は継続する
 
+## 1.2 nominalQuota 同期
+
+Watcher は K8s API から ClusterQueue の nominalQuota を定期取得し、DB の `flavor_quotas` テーブルに書き込む（[database.md](database.md) §7 参照）。
+
+- ノードリソース同期（§1.1）と同じサイクルで実行する
+- `CustomObjectsApi.get_cluster_custom_object()` で ClusterQueue（`CLUSTER_QUEUE_NAME`、デフォルト `cjob-cluster-queue`）を取得する
+- `spec.resourceGroups[0].flavors[]` の各 flavor について、`resources[]` から nominalQuota を読み取る。リソース名 `cpu` → cpu 列、`memory` → memory 列、それ以外 → gpu 列にマッピングする
+- K8s API 呼び出し失敗時はログを出力してスキップし、次回サイクルで再試行する（DB の既存データはそのまま維持される）
+
 ## 2. 必要性
 
 Dispatcher が DB スキャンで Job を作成しても、その後の実行状態（RUNNING / SUCCEEDED / FAILED）は Kubernetes 側でのみ確定する。
