@@ -13,16 +13,18 @@ logger = logging.getLogger(__name__)
 
 
 def list_cjob_k8s_jobs() -> list[k8s_client.V1Job]:
-    """List all K8s Jobs with cjob.io/job-id label across all namespaces."""
+    """List all K8s Jobs with cjob.io/job-id label across all namespaces.
+
+    Raises ApiException on failure so that the caller (main loop) can skip
+    the entire reconcile cycle.  Processing with an incomplete job list would
+    cause Step 8 to mark healthy jobs as FAILED and DELETING Phase 2 to
+    prematurely clean up DB records.
+    """
     batch_v1 = k8s_client.BatchV1Api()
-    try:
-        result = batch_v1.list_job_for_all_namespaces(
-            label_selector="cjob.io/job-id"
-        )
-        return result.items
-    except ApiException as e:
-        logger.error("Failed to list K8s Jobs: %s", e)
-        return []
+    result = batch_v1.list_job_for_all_namespaces(
+        label_selector="cjob.io/job-id"
+    )
+    return result.items
 
 
 def determine_status(k8s_job: k8s_client.V1Job) -> tuple[str | None, str | None]:
