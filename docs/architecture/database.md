@@ -385,6 +385,17 @@ WHERE namespace = :namespace;
 
 行がない場合はレスポンスの `resource_quota` を `null` とする。
 
+**cjobctl（管理者向け ResourceQuota 一覧）**: `cjobctl usage quota` で全ユーザー namespace の ResourceQuota 使用状況を一覧表示する。K8s API からユーザー namespace 一覧を取得し、DB と突き合わせる。
+
+```sql
+SELECT namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu,
+       used_cpu_millicores, used_memory_mib, used_gpu, updated_at
+FROM namespace_resource_quotas
+ORDER BY namespace;
+```
+
+DB に行がない namespace は ResourceQuota 未設定として `-` 表示する。
+
 ### 8.3 設計判断
 
 - **数値パース済み保存**: `node_resources` と同じ理由。Dispatcher が Python 側で hard - used の残リソースを算出し、ジョブの `cpu_millicores` / `memory_mib` / `gpu` と比較する

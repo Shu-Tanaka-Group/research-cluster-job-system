@@ -110,6 +110,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 |---|---|---|
 | `cjobctl usage list [--namespace <ns>]` | 日別消費量・7日ウィンドウ集計・DRF dominant share | `namespace_daily_usage`, `namespace_weights` |
 | `cjobctl usage reset [--namespace <ns> \| --all]` | 消費量データの削除 | `namespace_daily_usage` |
+| `cjobctl usage quota [--namespace <ns>]` | 全 namespace の ResourceQuota 使用状況 | `namespace_resource_quotas` + K8s namespace 一覧 |
 
 `usage list` の Daily Usage はデフォルトで日付昇順（古い日付が上）で表示する。`--namespace` オプションで特定 namespace のデータのみに絞り込める（Daily / 7-Day Window / DRF すべてのセクションに適用）。
 
@@ -120,6 +121,27 @@ dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 ```
 
 クラスタのリソース総量は DB の `node_resources` テーブルから `SUM()` で取得する。テーブルが空の場合は dominant share 列を `N/A` と表示する（Dispatcher は DRF ソートを無効化して namespace 名順にフォールバックするが、cjobctl は表示ツールのため計算不能であることを明示する）。
+
+#### `cjobctl usage quota`
+
+全ユーザー namespace の ResourceQuota 使用状況を表示する。K8s API からユーザー namespace 一覧を取得し（`weight exclusive` と同じパターン）、DB の `namespace_resource_quotas` テーブルと突き合わせる。
+
+- CPU は cores 表示（millicores / 1000）、`cjob usage`（#105）と統一
+- Memory は GiB 表示（MiB / 1024）
+- GPU は個数表示
+- `updated_at` は相対時間（`Xm ago`, `Xh ago` 等）で鮮度を表示
+- `--namespace` で特定 namespace にフィルタ可能
+- DB に行がない namespace（ResourceQuota 未設定）は各列を `-` で表示
+- ユーザー namespace が存在しない場合は "No user namespaces found." を表示
+
+出力例:
+
+```
+Namespace        CPU (used/hard)      Memory (used/hard)       GPU (used/hard)  Updated
+user-alice       20.0 / 300.0         80Gi / 1250Gi            0 / 4            2m ago
+user-bob         260.0 / 300.0        800Gi / 1250Gi           1 / 4            2m ago
+user-charlie     -                    -                        -                -
+```
 
 ### 5.3 namespace weight 管理
 
