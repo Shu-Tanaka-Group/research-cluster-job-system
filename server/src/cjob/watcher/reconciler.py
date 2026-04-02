@@ -191,6 +191,7 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
             new_status = "FAILED"
 
         if new_status and new_status != db_job.status:
+            old_status = db_job.status
             db_job.status = new_status
             if new_status == "RUNNING" and db_job.started_at is None:
                 db_job.started_at = func.now()
@@ -207,7 +208,7 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
             session.add(
                 JobEvent(namespace=ns, job_id=jid, event_type=new_status)
             )
-            logger.info("Updated %s/%d: %s -> %s", ns, jid, db_job.status, new_status)
+            logger.info("Updated %s/%d: %s -> %s", ns, jid, old_status, new_status)
 
     # Step 8: Mark DISPATCHED/RUNNING jobs with no K8s Job as FAILED
     disappeared_jobs = (

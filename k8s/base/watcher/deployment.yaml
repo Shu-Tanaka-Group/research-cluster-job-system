@@ -58,6 +58,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DEFAULT_FLAVOR
+            - name: CLUSTER_QUEUE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: CLUSTER_QUEUE_NAME
             - name: NODE_RESOURCE_SYNC_INTERVAL_SEC
               valueFrom:
                 configMapKeyRef:

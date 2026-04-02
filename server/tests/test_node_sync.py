@@ -237,6 +237,68 @@ class TestSyncNodeResources:
 
         assert _get_node_names(db_session) == ["cpu-node"]
 
+    def test_partial_failure_preserves_failed_flavor_nodes(self, mock_k8s, db_session):
+        """When one flavor query fails, its previously-synced nodes are preserved."""
+        from kubernetes.client.rest import ApiException
+
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+
+        # First sync: both flavors succeed
+        cpu_response = MagicMock()
+        cpu_response.items = [_make_node("cpu-node", cpu="32", memory="128Gi")]
+        gpu_response = MagicMock()
+        gpu_response.items = [_make_node("gpu-node", cpu="16", memory="64Gi", gpu_resources={"nvidia.com/gpu": "4"})]
+
+        mock_api.list_node.side_effect = [cpu_response, gpu_response]
+        sync_node_resources(db_session, _make_settings_multi_flavor())
+        assert sorted(_get_node_names(db_session)) == ["cpu-node", "gpu-node"]
+
+        # Second sync: cpu succeeds, gpu fails
+        cpu_response2 = MagicMock()
+        cpu_response2.items = [_make_node("cpu-node", cpu="32", memory="128Gi")]
+        mock_api.list_node.side_effect = [
+            cpu_response2,
+            ApiException(status=500, reason="Internal"),
+        ]
+        sync_node_resources(db_session, _make_settings_multi_flavor())
+
+        # Both nodes should still exist (gpu-node preserved from previous sync)
+        assert sorted(_get_node_names(db_session)) == ["cpu-node", "gpu-node"]
+        gpu_n = _get_node(db_session, "gpu-node")
+        assert gpu_n[3] == "gpu-a100"  # flavor preserved
+
+    def test_partial_failure_deletes_stale_nodes_in_successful_flavor(self, mock_k8s, db_session):
+        """Stale nodes from a successful flavor are still removed during partial failure."""
+        from kubernetes.client.rest import ApiException
+
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+
+        # First sync: cpu has two nodes, gpu has one node
+        cpu_response = MagicMock()
+        cpu_response.items = [
+            _make_node("cpu-node-1", cpu="32", memory="128Gi"),
+            _make_node("cpu-node-2", cpu="32", memory="128Gi"),
+        ]
+        gpu_response = MagicMock()
+        gpu_response.items = [_make_node("gpu-node", cpu="16", memory="64Gi", gpu_resources={"nvidia.com/gpu": "4"})]
+        mock_api.list_node.side_effect = [cpu_response, gpu_response]
+        sync_node_resources(db_session, _make_settings_multi_flavor())
+        assert len(_get_node_names(db_session)) == 3
+
+        # Second sync: cpu-node-2 removed, gpu query fails
+        cpu_response2 = MagicMock()
+        cpu_response2.items = [_make_node("cpu-node-1", cpu="32", memory="128Gi")]
+        mock_api.list_node.side_effect = [
+            cpu_response2,
+            ApiException(status=500, reason="Internal"),
+        ]
+        sync_node_resources(db_session, _make_settings_multi_flavor())
+
+        # cpu-node-2 should be deleted, gpu-node preserved
+        assert sorted(_get_node_names(db_session)) == ["cpu-node-1", "gpu-node"]
+
     def test_gpu_resource_name_from_flavor_definition(self, mock_k8s, db_session):
         """GPU count is read from the flavor's gpu_resource_name."""
         mock_api = MagicMock()

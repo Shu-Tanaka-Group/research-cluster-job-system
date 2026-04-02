@@ -50,8 +50,8 @@ cjob update                          # CLI バイナリの更新
 cjob config list                     # ユーザー設定の表示
 cjob config add <table> <key> <value>    # リスト型設定に要素を追加
 cjob config remove <table> <key> <value> # リスト型設定から要素を削除
-cjob config set <table> <key> <value>    # スカラー型設定の変更
-cjob config unset <table> <key>          # スカラー型設定の削除
+cjob config set <table> <key> <value>    # スカラー型設定の変更（未実装・将来対応予定）
+cjob config unset <table> <key>          # スカラー型設定の削除（未実装・将来対応予定）
 ```
 
 ## プロジェクト情報管理の基本方針

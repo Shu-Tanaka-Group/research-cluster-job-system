@@ -18,6 +18,7 @@ def sync_node_resources(session: Session, settings: Settings):
     tagged_items: list[tuple] = []
     seen_names: set[str] = set()
     successful_queries = 0
+    synced_flavors: set[str] = set()
 
     for flavor_def in settings.flavors:
         try:
@@ -30,6 +31,7 @@ def sync_node_resources(session: Session, settings: Settings):
             continue
 
         successful_queries += 1
+        synced_flavors.add(flavor_def.name)
         for node in nodes.items:
             if node.metadata.name not in seen_names:
                 tagged_items.append((node, flavor_def))
@@ -63,17 +65,28 @@ def sync_node_resources(session: Session, settings: Settings):
             {"name": name, "cpu": cpu, "mem": mem, "gpu": gpu, "flavor": flavor_def.name},
         )
 
-    # Delete nodes that no longer exist in K8s
-    if current_nodes:
-        # Build parameterised placeholders for the IN clause
-        placeholders = ", ".join(f":n{i}" for i in range(len(current_nodes)))
-        params = {f"n{i}": name for i, name in enumerate(current_nodes)}
-        session.execute(
-            text(f"DELETE FROM node_resources WHERE node_name NOT IN ({placeholders})"),
-            params,
-        )
-    else:
-        session.execute(text("DELETE FROM node_resources"))
+    # Delete stale nodes only for successfully-queried flavors.
+    # This preserves DB data for flavors whose K8s API queries failed.
+    if synced_flavors:
+        flavor_ph = ", ".join(f":f{i}" for i in range(len(synced_flavors)))
+        flavor_params = {f"f{i}": name for i, name in enumerate(synced_flavors)}
+
+        if current_nodes:
+            node_ph = ", ".join(f":n{i}" for i in range(len(current_nodes)))
+            node_params = {f"n{i}": name for i, name in enumerate(current_nodes)}
+            session.execute(
+                text(
+                    f"DELETE FROM node_resources "
+                    f"WHERE flavor IN ({flavor_ph}) "
+                    f"AND node_name NOT IN ({node_ph})"
+                ),
+                {**flavor_params, **node_params},
+            )
+        else:
+            session.execute(
+                text(f"DELETE FROM node_resources WHERE flavor IN ({flavor_ph})"),
+                flavor_params,
+            )
 
     session.commit()
     selectors = ", ".join(f"{f.name}({f.label_selector})" for f in settings.flavors)

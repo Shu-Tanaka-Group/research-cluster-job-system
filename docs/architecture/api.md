@@ -10,13 +10,17 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 | HTTP ステータス | 発生条件 | レスポンスボディ例 |
 |---|---|---|
 | 401 | JWT が無効・期限切れ・存在しない | `{ "detail": "Unauthorized" }` |
+| 403 | namespace に CJob ユーザー設定（`cjob.io/username` annotation）がない | `{ "detail": "Namespace is not configured as a CJob user namespace" }` |
 | 404 | 存在しない job_id、または他ユーザーの job_id | `{ "detail": "Job not found" }` |
 | 409 | リセット処理中（`DELETING` ジョブが存在する namespace への投入） | `{ "detail": "リセット処理中のためジョブを投入できません。しばらく待ってから再試行してください" }` |
+| 500 | namespace の読み取り失敗など内部エラー | `{ "detail": "Internal server error" }` |
 | 503 | DB 書き込み失敗など内部サービス一時不可 | `{ "detail": "Service temporarily unavailable" }` |
 
 **404 の方針**：他ユーザーのジョブへのアクセスも 404 を返す。ジョブの存在自体を隠すことで情報漏洩を防ぐ。
 
 **401 の方針**：TokenReview が失敗した場合（JWT 無効・期限切れ）に返す。レスポンスボディは固定文字列とし、詳細なエラー原因は含めない。
+
+**403 の方針**：JWT 認証は成功したが、namespace に `cjob.io/username` annotation が設定されておらず CJob ユーザーとして認識できない場合に返す。
 
 **レート制限の方針**：Submit API は各リクエストで K8s TokenReview API を呼ぶため、大量リクエストは K8s API サーバへの負荷につながりうる。ただし Submit API 自身の CPU/memory limit（500m / 512Mi）が事実上のスループット上限として機能するため、現在の規模（10 名程度）においては明示的なレート制限は不要と判断する。ユーザー数が数十名以上に拡大する場合は `slowapi` 等による namespace ごとのレート制限を検討すること。
 
@@ -139,6 +143,8 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 ## 2.1 POST /v1/sweep
 
 パラメータスイープジョブを 1 件投入する。K8s Indexed Job として実行され、各タスクは `$CJOB_INDEX`（0-origin）で識別される。
+
+`parallelism` は省略可能で、デフォルトは 1。
 
 ### request
 
@@ -694,6 +700,12 @@ GET /v1/cli/download?version=1.3.1-beta.1
 ```
 
 ### エラーレスポンス
+
+バージョン文字列の形式が不正な場合は 400 を返す。
+
+```json
+{ "detail": "Invalid version format" }
+```
 
 バイナリが存在しない場合は 404 を返す。
 
