@@ -754,11 +754,12 @@ async fn cmd_usage(client: &client::CjobClient) -> Result<()> {
 
     if let Some(ref q) = resp.resource_quota {
         println!("\nResource Quota:");
+        let used_cpu = q.used_cpu_millicores as f64 / 1000.0;
+        let hard_cpu = q.hard_cpu_millicores as f64 / 1000.0;
+        let remaining_cpu = (q.hard_cpu_millicores - q.used_cpu_millicores) as f64 / 1000.0;
         println!(
-            "  CPU:    {}m / {}m (remaining: {}m)",
-            q.used_cpu_millicores,
-            q.hard_cpu_millicores,
-            q.hard_cpu_millicores - q.used_cpu_millicores
+            "  CPU:    {:.0} / {:.0} (remaining: {:.0})",
+            used_cpu, hard_cpu, remaining_cpu
         );
         let used_gib = q.used_memory_mib as f64 / 1024.0;
         let hard_gib = q.hard_memory_mib as f64 / 1024.0;

@@ -669,7 +669,7 @@ Resource Usage (past 7 days)
 
 レスポンスの `resource_quota` が `null` でない場合、使用状況テーブルの前に Resource Quota セクションを表示する。`remaining` は `hard - used` で算出する。
 
-- CPU: ミリコアのまま表示（例: `280000m / 300000m`）
+- CPU: ミリコア → コア数に変換して表示（例: `280 / 300`）
 - メモリ: MiB → GiB に変換して表示（例: `800Gi / 1250Gi`）
 - GPU: 個数のまま表示（例: `1 / 4`）
 
@@ -679,7 +679,7 @@ GPU 行は `hard_gpu == 0` の場合は非表示とする。
 $ cjob usage
 
 Resource Quota:
-  CPU:    280000m / 300000m (remaining: 20000m)
+  CPU:    280 / 300 (remaining: 20)
   Memory: 800Gi / 1250Gi (remaining: 450Gi)
   GPU:    1 / 4 (remaining: 3)
 
