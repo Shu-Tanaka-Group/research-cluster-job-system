@@ -11,7 +11,7 @@ class ResourceSpec(BaseModel):
 
 
 class JobSubmitRequest(BaseModel):
-    command: str = Field(..., min_length=1)
+    command: str
     image: str
     cwd: str
     env: dict[str, str] = Field(default_factory=dict)
@@ -20,7 +20,7 @@ class JobSubmitRequest(BaseModel):
 
 
 class SweepSubmitRequest(BaseModel):
-    command: str = Field(..., min_length=1)
+    command: str
     image: str
     cwd: str
     env: dict[str, str] = Field(default_factory=dict)

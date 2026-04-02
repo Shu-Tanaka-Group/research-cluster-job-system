@@ -195,6 +195,11 @@ def _validate_common(
 def submit_job(
     session: Session, namespace: str, username: str, req: JobSubmitRequest
 ) -> JobSubmitResponse:
+    from fastapi import HTTPException
+
+    if not req.command:
+        raise HTTPException(status_code=400, detail="command は空にできません")
+
     settings = get_settings()
     time_limit, flavor = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
 
@@ -242,6 +247,9 @@ def submit_sweep(
     session: Session, namespace: str, username: str, req: SweepSubmitRequest
 ) -> JobSubmitResponse:
     from fastapi import HTTPException
+
+    if not req.command:
+        raise HTTPException(status_code=400, detail="command は空にできません")
 
     settings = get_settings()
     time_limit, flavor = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
