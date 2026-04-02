@@ -30,13 +30,13 @@ resources:
 images:
   - name: cjob-submit-api
     newName: your-registry/cjob-submit-api
-    newTag: "1.8.0"
+    newTag: "1.8.1"
   - name: cjob-dispatcher
     newName: your-registry/cjob-dispatcher
-    newTag: "1.8.0"
+    newTag: "1.8.1"
   - name: cjob-watcher
     newName: your-registry/cjob-watcher
-    newTag: "1.8.0"
+    newTag: "1.8.1"
 
 patches:
   # StorageClass の指定
