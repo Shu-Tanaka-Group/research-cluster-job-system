@@ -1,5 +1,8 @@
+from sqlalchemy import text
+
 from cjob.dispatcher.scheduler import (
     cas_update_to_dispatching,
+    filter_by_resource_quota,
     mark_dispatched,
     mark_failed,
     reset_stale_dispatching,
@@ -166,3 +169,122 @@ class TestResetStaleDispatching:
         job = db_session.get(Job, (NS, 1))
         assert job.status == "QUEUED"
         assert job.retry_after is None
+
+
+# ── filter_by_resource_quota ──
+
+
+def _insert_quota(session, namespace, hard_cpu, hard_mem, hard_gpu,
+                  used_cpu, used_mem, used_gpu):
+    session.execute(
+        text(
+            "INSERT INTO namespace_resource_quotas "
+            "(namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu, "
+            "used_cpu_millicores, used_memory_mib, used_gpu) "
+            "VALUES (:ns, :hc, :hm, :hg, :uc, :um, :ug)"
+        ),
+        {"ns": namespace, "hc": hard_cpu, "hm": hard_mem, "hg": hard_gpu,
+         "uc": used_cpu, "um": used_mem, "ug": used_gpu},
+    )
+    session.flush()
+
+
+class TestFilterByResourceQuota:
+    def test_no_quota_row_passes_all(self, db_session):
+        """Namespaces without quota rows should pass all candidates."""
+        j1 = _insert_job(db_session, 1, cpu_millicores=2000, memory_mib=4096)
+        j2 = _insert_job(db_session, 2, cpu_millicores=4000, memory_mib=8192)
+
+        result = filter_by_resource_quota(db_session, [j1, j2])
+
+        assert len(result) == 2
+
+    def test_sufficient_quota_passes(self, db_session):
+        """Jobs that fit within remaining quota should pass."""
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 20000, 80000, 0)
+        j1 = _insert_job(db_session, 1, cpu_millicores=2000, memory_mib=4096)
+
+        result = filter_by_resource_quota(db_session, [j1])
+
+        assert len(result) == 1
+
+    def test_insufficient_cpu_skips(self, db_session):
+        """Job requiring more CPU than remaining should be skipped."""
+        # remaining cpu = 300000 - 298000 = 2000
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 298000, 80000, 0)
+        j1 = _insert_job(db_session, 1, cpu_millicores=4000, memory_mib=1024)
+
+        result = filter_by_resource_quota(db_session, [j1])
+
+        assert len(result) == 0
+
+    def test_insufficient_memory_skips(self, db_session):
+        """Job requiring more memory than remaining should be skipped."""
+        # remaining mem = 1280000 - 1279000 = 1000
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 0, 1279000, 0)
+        j1 = _insert_job(db_session, 1, cpu_millicores=1000, memory_mib=2048)
+
+        result = filter_by_resource_quota(db_session, [j1])
+
+        assert len(result) == 0
+
+    def test_insufficient_gpu_skips(self, db_session):
+        """Job requiring more GPU than remaining should be skipped."""
+        # remaining gpu = 4 - 4 = 0
+        _insert_quota(db_session, NS, 300000, 1280000, 4, 0, 0, 4)
+        j1 = _insert_job(db_session, 1, cpu_millicores=1000, memory_mib=1024, gpu=1)
+
+        result = filter_by_resource_quota(db_session, [j1])
+
+        assert len(result) == 0
+
+    def test_sweep_multiplies_by_parallelism(self, db_session):
+        """Sweep jobs should multiply resource requirements by parallelism."""
+        # remaining cpu = 10000, job needs 2000 * 4 = 8000 -> fits
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 290000, 0, 0)
+        j1 = _insert_job(db_session, 1, cpu_millicores=2000, memory_mib=1024,
+                         completions=20, parallelism=4)
+
+        result = filter_by_resource_quota(db_session, [j1])
+        assert len(result) == 1
+
+        # remaining cpu = 6000, job needs 2000 * 4 = 8000 -> doesn't fit
+        db_session.execute(text("DELETE FROM namespace_resource_quotas"))
+        db_session.flush()
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 294000, 0, 0)
+
+        result = filter_by_resource_quota(db_session, [j1])
+        assert len(result) == 0
+
+    def test_cumulative_tracking(self, db_session):
+        """Second job should be skipped when cumulative resources exceed quota."""
+        # remaining cpu = 5000; j1 needs 3000, j2 needs 3000
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 295000, 0, 0)
+        j1 = _insert_job(db_session, 1, cpu_millicores=3000, memory_mib=1024)
+        j2 = _insert_job(db_session, 2, cpu_millicores=3000, memory_mib=1024)
+
+        result = filter_by_resource_quota(db_session, [j1, j2])
+
+        assert len(result) == 1
+        assert result[0].job_id == 1
+
+    def test_mixed_namespaces(self, db_session):
+        """Namespaces with and without quota rows should be handled correctly."""
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 299000, 0, 0)
+        # alice: remaining cpu = 1000 (insufficient for 2000)
+        j1 = _insert_job(db_session, 1, namespace=NS, cpu_millicores=2000,
+                         memory_mib=1024)
+        # bob: no quota row -> unrestricted
+        j2 = _insert_job(db_session, 1, namespace="bob", cpu_millicores=2000,
+                         memory_mib=1024)
+
+        result = filter_by_resource_quota(db_session, [j1, j2])
+
+        assert len(result) == 1
+        assert result[0].namespace == "bob"
+
+    def test_empty_candidates(self, db_session):
+        """Empty candidate list should return empty list."""
+        result = filter_by_resource_quota(db_session, [])
+
+        assert result == []

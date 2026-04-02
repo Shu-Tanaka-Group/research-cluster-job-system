@@ -333,6 +333,86 @@ def apply_gap_filling(
     return result
 
 
+def filter_by_resource_quota(
+    session: Session, candidates: list[Job]
+) -> list[Job]:
+    """Filter dispatch candidates by namespace ResourceQuota remaining capacity.
+
+    Jobs whose resource requirements exceed the remaining ResourceQuota
+    are excluded (left in QUEUED). Namespaces without a quota row are
+    treated as unrestricted.
+    """
+    if not candidates:
+        return candidates
+
+    # Load quota data for candidate namespaces
+    candidate_namespaces = list({c.namespace for c in candidates})
+    ph = ", ".join(f":n{i}" for i in range(len(candidate_namespaces)))
+    params = {f"n{i}": ns for i, ns in enumerate(candidate_namespaces)}
+    rows = session.execute(
+        text(
+            f"SELECT namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu, "
+            f"used_cpu_millicores, used_memory_mib, used_gpu "
+            f"FROM namespace_resource_quotas WHERE namespace IN ({ph})"
+        ),
+        params,
+    ).mappings().all()
+
+    quota_map = {}
+    for row in rows:
+        quota_map[row["namespace"]] = {
+            "remaining_cpu": row["hard_cpu_millicores"] - row["used_cpu_millicores"],
+            "remaining_mem": row["hard_memory_mib"] - row["used_memory_mib"],
+            "remaining_gpu": row["hard_gpu"] - row["used_gpu"],
+        }
+
+    # Track cumulative dispatched resources per namespace within this cycle
+    dispatched: dict[str, dict[str, int]] = {}
+    result = []
+
+    for job in candidates:
+        ns = job.namespace
+        if ns not in quota_map:
+            result.append(job)
+            continue
+
+        remaining = quota_map[ns]
+        prev = dispatched.get(ns, {"cpu": 0, "mem": 0, "gpu": 0})
+
+        multiplier = job.parallelism if job.completions is not None else 1
+        job_cpu = job.cpu_millicores * multiplier
+        job_mem = job.memory_mib * multiplier
+        job_gpu = job.gpu * multiplier
+
+        eff_cpu = remaining["remaining_cpu"] - prev["cpu"]
+        eff_mem = remaining["remaining_mem"] - prev["mem"]
+        eff_gpu = remaining["remaining_gpu"] - prev["gpu"]
+
+        if eff_cpu >= job_cpu and eff_mem >= job_mem and eff_gpu >= job_gpu:
+            result.append(job)
+            dispatched[ns] = {
+                "cpu": prev["cpu"] + job_cpu,
+                "mem": prev["mem"] + job_mem,
+                "gpu": prev["gpu"] + job_gpu,
+            }
+        else:
+            logger.debug(
+                "ResourceQuota: skipping %s/%d "
+                "(needs cpu=%d mem=%d gpu=%d, "
+                "remaining cpu=%d mem=%d gpu=%d)",
+                ns,
+                job.job_id,
+                job_cpu,
+                job_mem,
+                job_gpu,
+                eff_cpu,
+                eff_mem,
+                eff_gpu,
+            )
+
+    return result
+
+
 def reset_stale_dispatching(session: Session) -> int:
     """Reset DISPATCHING jobs to QUEUED on startup."""
     result = session.execute(
