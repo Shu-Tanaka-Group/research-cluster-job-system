@@ -33,7 +33,7 @@ cargo test
 | `tests/test_determine_status.py` | `watcher/reconciler.py::determine_status` | 9 | K8s Job の conditions から DB ステータスへのマッピング。SUCCEEDED / FAILED / RUNNING / DeadlineExceeded / 条件なし等 |
 | `tests/test_build_k8s_job.py` | `dispatcher/k8s_job.py::build_k8s_job`, `_parse_taint` | 27 | K8s Job マニフェスト生成。ラベル / activeDeadlineSeconds / リソース / 環境変数 / ボリューム / コマンドラッピング / toleration（デフォルト・カスタム・空）/ taint パース（正常系・異常系） |
 | `tests/test_services.py` | `api/services.py` 全関数 | 98 | submit_job（time_limit・リソース超過バリデーション・nominalQuota 考慮バリデーション・cpu_millicores / memory_mib 設定含む）/ list_jobs（time_limit_ge・time_limit_lt フィルター含む）/ get_job / cancel（HELD 含む）/ hold_single・hold_bulk / release_single・release_bulk / delete（HELD skip 含む）/ reset（HELD ブロック含む）/ get_usage（ResourceQuota あり・なし・namespace 分離含む）/ submit_sweep（クラスタ合計・nominalQuota 考慮バリデーション含む）/ list_flavors（quota 有無・nodes と quota の同時取得） |
-| `tests/test_reconciler.py` | `watcher/reconciler.py` | 40 | reconcile_cycle のステータス同期（started_at / finished_at / last_error / node_name 記録・RUNNING スキップ時の完了時取得・既存値の非上書き）/ CANCELLED 削除 / orphan 検出 / DELETING フェーズ 1・2 / namespace 分離 / RUNNING 遷移時の累計消費量加算（namespace_daily_usage）/ K8s Job 消失検出（DISPATCHED・RUNNING → FAILED 遷移・last_error・finished_at 設定）/ parse_cpu_millicores / parse_memory_mib |
+| `tests/test_reconciler.py` | `watcher/reconciler.py` | 42 | reconcile_cycle のステータス同期（started_at / finished_at / last_error / node_name 記録・RUNNING スキップ時の完了時取得・既存値の非上書き）/ CANCELLED 削除 / orphan 検出 / DELETING フェーズ 1・2 / namespace 分離 / RUNNING 遷移時の累計消費量加算（namespace_daily_usage）/ K8s Job 消失検出（DISPATCHED・RUNNING → FAILED 遷移・last_error・finished_at 設定）/ list_cjob_k8s_jobs の API エラー伝播・正常系 / parse_cpu_millicores / parse_memory_mib |
 | `tests/test_scheduler.py` | `dispatcher/scheduler.py` 5関数 | 22 | cas_update_to_dispatching / mark_dispatched / mark_failed / reset_stale_dispatching の CAS 動作・状態遷移 / filter_by_resource_quota の ResourceQuota 残リソースによる dispatch 候補フィルタリング（quota 行なし通過・CPU / メモリ / GPU 不足スキップ・sweep parallelism 倍計算・サイクル内累計追跡・namespace 混在・空リスト） |
 | `tests/test_gap_filling.py` | `dispatcher/scheduler.py::apply_gap_filling` | 7 | 隙間充填フィルタリング。無効時 / 滞留なし / 残り時間による候補選択 / RUNNING なし / namespace 混在 / 残り時間 0 / 候補なし |
 | `tests/test_resource_utils.py` | `resource_utils.py` | 12 | CPU・メモリ文字列のパース。整数 / 小数 / ミリコア / Gi / Mi / Ki / 大きな値等 |
@@ -51,7 +51,7 @@ cargo test
 | `src/cmd/cli_list.rs` | `parse_versions` / `sort_versions` | 9 | ls 出力パース（latest 除外 / 空入力 / パース不能エントリ）/ ソート（降順 / プレリリース優先 / 設計書出力例の再現） |
 | `src/cmd/cli_set_latest.rs` | `run`（バリデーション） | 2 | プレリリース版の拒否（beta / rc） |
 
-**合計: Python 276 + Rust (cli) 62 + Rust (cjobctl) 28 = 366 テスト**
+**合計: Python 278 + Rust (cli) 62 + Rust (cjobctl) 28 = 368 テスト**
 
 ### 未テスト
 
