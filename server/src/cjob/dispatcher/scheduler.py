@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from cjob.config import Settings
 from cjob.models import Job, JobEvent
+from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 
 logger = logging.getLogger(__name__)
 
@@ -287,6 +288,69 @@ def estimate_shortest_remaining(session: Session, namespace: str) -> int | None:
     return max(remaining, 0)
 
 
+def estimate_available_cluster_resources(
+    session: Session, settings: Settings
+) -> dict[str, dict[str, int]]:
+    """Estimate available ClusterQueue resources per flavor.
+
+    Returns a dict mapping flavor name to available {cpu, mem, gpu}.
+    Flavors not in flavor_quotas are omitted (treated as unrestricted).
+    """
+    # Load nominalQuota per flavor from flavor_quotas table
+    quota_rows = session.execute(
+        text("SELECT flavor, cpu, memory, gpu FROM flavor_quotas")
+    ).mappings().all()
+
+    if not quota_rows:
+        return {}
+
+    quotas: dict[str, dict[str, int]] = {}
+    for row in quota_rows:
+        quotas[row["flavor"]] = {
+            "cpu": parse_cpu_millicores(row["cpu"]),
+            "mem": parse_memory_mib(row["memory"]),
+            "gpu": int(row["gpu"]),
+        }
+
+    # Sum resources consumed by RUNNING jobs per flavor
+    running_rows = session.execute(
+        text(
+            "SELECT flavor, "
+            "  SUM(cpu_millicores"
+            "    * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END"
+            "  ) AS total_cpu, "
+            "  SUM(memory_mib"
+            "    * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END"
+            "  ) AS total_mem, "
+            "  SUM(gpu"
+            "    * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END"
+            "  ) AS total_gpu "
+            "FROM jobs "
+            "WHERE status = 'RUNNING' "
+            "GROUP BY flavor"
+        )
+    ).mappings().all()
+
+    running: dict[str, dict[str, int]] = {}
+    for row in running_rows:
+        running[row["flavor"]] = {
+            "cpu": int(row["total_cpu"] or 0),
+            "mem": int(row["total_mem"] or 0),
+            "gpu": int(row["total_gpu"] or 0),
+        }
+
+    available: dict[str, dict[str, int]] = {}
+    for flavor, quota in quotas.items():
+        used = running.get(flavor, {"cpu": 0, "mem": 0, "gpu": 0})
+        available[flavor] = {
+            "cpu": max(quota["cpu"] - used["cpu"], 0),
+            "mem": max(quota["mem"] - used["mem"], 0),
+            "gpu": max(quota["gpu"] - used["gpu"], 0),
+        }
+
+    return available
+
+
 def apply_gap_filling(
     session: Session, candidates: list[Job], settings: Settings
 ) -> list[Job]:
@@ -294,7 +358,8 @@ def apply_gap_filling(
 
     When stalled jobs (DISPATCHED for too long) exist in a namespace,
     only dispatch QUEUED jobs whose time_limit_seconds fits within the
-    estimated remaining time of RUNNING jobs in that namespace.
+    estimated remaining time of RUNNING jobs AND whose resource
+    requirements fit within available ClusterQueue resources.
     """
     if not settings.GAP_FILLING_ENABLED:
         return candidates
@@ -305,6 +370,8 @@ def apply_gap_filling(
     if not stalled_namespaces:
         return candidates
 
+    available = estimate_available_cluster_resources(session, settings)
+
     result = [c for c in candidates if c.namespace not in stalled_namespaces]
 
     for ns in stalled_namespaces:
@@ -314,21 +381,40 @@ def apply_gap_filling(
 
         remaining = estimate_shortest_remaining(session, ns)
 
-        if remaining is None:
-            # No RUNNING jobs: allow all candidates to avoid deadlock.
-            # Without this, a stalled large job with no RUNNING jobs
-            # would block all dispatch for this namespace indefinitely.
-            result.extend(ns_candidates)
-            continue
-
         for c in ns_candidates:
-            if c.time_limit_seconds <= remaining:
-                result.append(c)
-            else:
+            # Time check: skip if remaining is known and job doesn't fit.
+            # When remaining is None (no RUNNING jobs), skip time check
+            # to avoid deadlock.
+            if remaining is not None and c.time_limit_seconds > remaining:
                 logger.debug(
-                    "Gap filling: holding %s/%d (time_limit=%ds, remaining=%s)",
+                    "Gap filling: holding %s/%d (time_limit=%ds > remaining=%ds)",
                     ns, c.job_id, c.time_limit_seconds, remaining,
                 )
+                continue
+
+            # Resource check: skip if job exceeds available cluster resources.
+            multiplier = c.parallelism if c.completions is not None else 1
+            job_cpu = c.cpu_millicores * multiplier
+            job_mem = c.memory_mib * multiplier
+            job_gpu = c.gpu * multiplier
+
+            flavor_avail = available.get(c.flavor)
+            if flavor_avail is not None:
+                if (job_cpu > flavor_avail["cpu"]
+                        or job_mem > flavor_avail["mem"]
+                        or job_gpu > flavor_avail["gpu"]):
+                    logger.debug(
+                        "Gap filling: holding %s/%d "
+                        "(resource exceeds available for flavor=%s)",
+                        ns, c.job_id, c.flavor,
+                    )
+                    continue
+                # Track cumulative dispatch within this pass
+                flavor_avail["cpu"] -= job_cpu
+                flavor_avail["mem"] -= job_mem
+                flavor_avail["gpu"] -= job_gpu
+
+            result.append(c)
 
     return result
 
