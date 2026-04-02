@@ -308,25 +308,30 @@ CLI 側で以下のバリデーションを行う:
 | `DISPATCH_BUDGET_PER_NAMESPACE` | int | dispatcher |
 | `DISPATCH_BATCH_SIZE` | int | dispatcher |
 | `DISPATCH_ROUND_SIZE` | int | dispatcher |
-| `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` | int | dispatcher |
+| `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` | int | dispatcher, watcher |
 | `DISPATCH_RETRY_INTERVAL_SEC` | int | dispatcher |
 | `DISPATCH_MAX_RETRIES` | int | dispatcher |
 | `GAP_FILLING_ENABLED` | bool | dispatcher |
 | `GAP_FILLING_STALL_THRESHOLD_SEC` | int | dispatcher |
-| `FAIR_SHARE_WINDOW_DAYS` | int | dispatcher |
+| `FAIR_SHARE_WINDOW_DAYS` | int | dispatcher, submit-api |
 | `RESOURCE_FLAVORS` | json | dispatcher, watcher, submit-api |
 | `DEFAULT_FLAVOR` | string | submit-api |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | int | watcher |
+| `CLUSTER_QUEUE_NAME` | string | watcher |
+| `RESOURCE_QUOTA_NAME` | string | watcher |
+| `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` | int | watcher |
+| `USER_NAMESPACE_LABEL` | string | watcher |
 | `MAX_QUEUED_JOBS_PER_NAMESPACE` | int | submit-api |
 | `MAX_SWEEP_COMPLETIONS` | int | submit-api |
 | `DEFAULT_TIME_LIMIT_SECONDS` | int | submit-api |
 | `MAX_TIME_LIMIT_SECONDS` | int | submit-api |
-| `KUEUE_LOCAL_QUEUE_NAME` | string | submit-api |
-| `USER_NAMESPACE_LABEL` | string | dispatcher, watcher |
-| `WORKSPACE_MOUNT_PATH` | string | submit-api |
 | `LOG_BASE_DIR` | string | submit-api |
-| `TTL_SECONDS_AFTER_FINISHED` | int | submit-api |
-| `JOB_NODE_TAINT` | string | submit-api |
+| `CLI_BINARY_DIR` | string | submit-api |
+| `KUEUE_LOCAL_QUEUE_NAME` | string | dispatcher |
+| `WORKSPACE_MOUNT_PATH` | string | dispatcher |
+| `TTL_SECONDS_AFTER_FINISHED` | int | dispatcher |
+| `JOB_NODE_TAINT` | string | dispatcher |
+| `LOG_LEVEL` | string | dispatcher, watcher, submit-api |
 
 **更新不可キー:**
 
@@ -335,6 +340,8 @@ CLI 側で以下のバリデーションを行う:
 | `POSTGRES_HOST` | DB 接続変更はインフラ作業が必要 |
 | `POSTGRES_PORT` | DB 接続変更はインフラ作業が必要 |
 | `POSTGRES_DB` | DB 接続変更はインフラ作業が必要 |
+| `POSTGRES_USER` | DB 接続変更はインフラ作業が必要 |
+| `POSTGRES_PASSWORD` | DB 接続変更はインフラ作業が必要 |
 
 #### `cjobctl config dump`
 
