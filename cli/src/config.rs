@@ -36,8 +36,9 @@ pub fn config_path() -> Result<PathBuf> {
     let config_dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         PathBuf::from(xdg)
     } else {
-        dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("ホームディレクトリを特定できませんでした"))?
+        let home = std::env::var("HOME")
+            .map_err(|_| anyhow::anyhow!("HOME 環境変数が設定されていません"))?;
+        PathBuf::from(home).join(".config")
     };
     Ok(config_dir.join("cjob").join("config.toml"))
 }
