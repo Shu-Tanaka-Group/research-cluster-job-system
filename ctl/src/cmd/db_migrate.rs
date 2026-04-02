@@ -41,6 +41,16 @@ pub async fn migrate(client: &Client) -> Result<()> {
             memory TEXT NOT NULL, \
             gpu TEXT NOT NULL DEFAULT '0', \
             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW() \
+        ); \
+        CREATE TABLE IF NOT EXISTS namespace_resource_quotas ( \
+            namespace            TEXT PRIMARY KEY, \
+            hard_cpu_millicores  INTEGER NOT NULL, \
+            hard_memory_mib      INTEGER NOT NULL, \
+            hard_gpu             INTEGER NOT NULL DEFAULT 0, \
+            used_cpu_millicores  INTEGER NOT NULL, \
+            used_memory_mib      INTEGER NOT NULL, \
+            used_gpu             INTEGER NOT NULL DEFAULT 0, \
+            updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW() \
         );";
 
     client
