@@ -149,16 +149,21 @@ cpu              -      2          *
 gpu              yes    1
 ```
 
-各種類にどのノードが含まれているか、各ノードの CPU コア数やメモリ量を確認するには `cjob flavor info` を使います。
+各種類のリソースの上限を確認するには `cjob flavor info` を使います。
 
 ```
 $ cjob flavor info gpu
 name:   gpu
 GPU:    対応
 
-NODE                     CPU (cores)   Memory (GiB)    GPU
-gworker02                        128          503.6      4
+RESOURCE        QUOTA   TASK LIMIT
+CPU                32           32
+Memory          128Gi        128Gi
+GPU                 4            4
 ```
+
+- **QUOTA**: その種類のノード全体で使えるリソースの合計
+- **TASK LIMIT**: 1 つのジョブ（タスク）に指定できるリソースの上限
 
 ### 3.3 sweep での使い方
 
