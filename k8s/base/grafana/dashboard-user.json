@@ -386,7 +386,7 @@
         "overrides": [
           {
             "matcher": { "id": "byName", "options": "待機中" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "yellow", "mode": "fixed" } }]
+            "properties": [{ "id": "color", "value": { "fixedColor": "semi-dark-yellow", "mode": "fixed" } }]
           },
           {
             "matcher": { "id": "byName", "options": "投入中" },
@@ -398,15 +398,15 @@
           },
           {
             "matcher": { "id": "byName", "options": "実行中" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "blue", "mode": "fixed" } }]
+            "properties": [{ "id": "color", "value": { "fixedColor": "semi-dark-blue", "mode": "fixed" } }]
           },
           {
             "matcher": { "id": "byName", "options": "成功" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "green", "mode": "fixed" } }]
+            "properties": [{ "id": "color", "value": { "fixedColor": "semi-dark-green", "mode": "fixed" } }]
           },
           {
             "matcher": { "id": "byName", "options": "失敗" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "red", "mode": "fixed" } }]
+            "properties": [{ "id": "color", "value": { "fixedColor": "semi-dark-red", "mode": "fixed" } }]
           },
           {
             "matcher": { "id": "byName", "options": "キャンセル" },
