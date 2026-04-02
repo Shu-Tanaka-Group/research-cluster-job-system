@@ -1,10 +1,12 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import pytest
 from kubernetes.client import V1Job, V1JobCondition, V1JobStatus, V1ObjectMeta
+from kubernetes.client.rest import ApiException
 
 from cjob.models import Job, NamespaceDailyUsage, UserJobCounter
 from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
-from cjob.watcher.reconciler import reconcile_cycle
+from cjob.watcher.reconciler import list_cjob_k8s_jobs, reconcile_cycle
 
 
 NS = "alice"
@@ -602,3 +604,32 @@ class TestReconcileDisappearedJobs:
 
         job = db_session.get(Job, (NS, 1))
         assert job.status == "DISPATCHED"
+
+
+# ── K8s API failure propagation ──
+
+
+class TestListCjobK8sJobs:
+    """Test that list_cjob_k8s_jobs propagates API errors."""
+
+    @patch("cjob.watcher.reconciler.k8s_client.BatchV1Api")
+    def test_api_failure_propagates(self, mock_batch_cls):
+        mock_api = MagicMock()
+        mock_api.list_job_for_all_namespaces.side_effect = ApiException(
+            status=503, reason="Service Unavailable"
+        )
+        mock_batch_cls.return_value = mock_api
+
+        with pytest.raises(ApiException):
+            list_cjob_k8s_jobs()
+
+    @patch("cjob.watcher.reconciler.k8s_client.BatchV1Api")
+    def test_success_returns_items(self, mock_batch_cls):
+        mock_api = MagicMock()
+        mock_result = MagicMock()
+        mock_result.items = [MagicMock()]
+        mock_api.list_job_for_all_namespaces.return_value = mock_result
+        mock_batch_cls.return_value = mock_api
+
+        result = list_cjob_k8s_jobs()
+        assert len(result) == 1

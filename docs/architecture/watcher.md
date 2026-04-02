@@ -56,7 +56,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 
 ## 3. 最小アルゴリズム
 
-1. Kubernetes Job 一覧を定期監視（または watch API を使用）
+1. Kubernetes Job 一覧を定期監視（または watch API を使用）。**API 呼び出しが失敗した場合は reconcile サイクル全体をスキップする**（ステップ 2〜8 および DELETING Phase 2 は K8s Job 一覧が完全であることを前提としており、不完全な一覧で処理を続行するとステップ 8 が正常なジョブを FAILED に誤遷移させ、DELETING Phase 2 が K8s Job 残存のまま DB をクリーンアップする危険がある）
 2. Job の `status.conditions` を以下のルールで解釈する
 
    | K8s Job の `status.conditions` | DB status | 備考 |
