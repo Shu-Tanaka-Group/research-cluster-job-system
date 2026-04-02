@@ -313,7 +313,7 @@ CLI 側で以下のバリデーションを行う:
 | `DISPATCH_MAX_RETRIES` | int | dispatcher |
 | `GAP_FILLING_ENABLED` | bool | dispatcher |
 | `GAP_FILLING_STALL_THRESHOLD_SEC` | int | dispatcher |
-| `FAIR_SHARE_WINDOW_DAYS` | int | dispatcher |
+| `FAIR_SHARE_WINDOW_DAYS` | int | dispatcher, submit-api |
 | `RESOURCE_FLAVORS` | json | dispatcher, watcher, submit-api |
 | `DEFAULT_FLAVOR` | string | submit-api |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | int | watcher |
