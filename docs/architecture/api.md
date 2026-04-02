@@ -64,19 +64,29 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 { "detail": "指定された flavor 'xxx' は存在しません。利用可能な flavor: cpu, gpu-a100" }
 ```
 
-要求リソース（CPU / メモリ）が指定 flavor 内の最大ノードの allocatable を超える場合は 400 を返す。
-単一ノードに収まらないジョブは原理的に実行不可能であり、DISPATCHED 状態のまま無期限に滞留することを防ぐ。
+要求リソース（CPU / メモリ）が指定 flavor の有効上限を超える場合は 400 を返す。
+有効上限は `min(最大ノード allocatable, nominalQuota)` で決定される。
+単一ノードに収まらないジョブ、またはクォータを超えるジョブは Kueue が受理できず、DISPATCHED 状態のまま無期限に滞留することを防ぐ。
 指定 flavor のノードが `node_resources` テーブルに存在しない場合（Watcher 未起動等）はこのバリデーションをスキップする。
+`flavor_quotas` テーブルにデータがない場合は最大ノード allocatable のみでバリデーションする。
 
 ```json
-{ "detail": "要求 CPU (128) が flavor 'cpu' 内の最大ノード (64000m) を超えています" }
+{ "detail": "要求 CPU (128) が flavor 'cpu' の最大ノード (64000m) を超えています" }
 ```
 
 ```json
-{ "detail": "要求メモリ (2Ti) が flavor 'cpu' 内の最大ノード (262144Mi) を超えています" }
+{ "detail": "要求メモリ (2Ti) が flavor 'cpu' の最大ノード (262144Mi) を超えています" }
 ```
 
-`resources.gpu > 0` の場合、指定 flavor の `gpu_resource_name` が未設定（GPU なし flavor）なら 400 を返す。GPU ノードが登録されていなければ 400 を返す。要求 GPU が flavor 内の最大ノードの GPU 数を超える場合も 400 を返す。
+```json
+{ "detail": "要求 CPU (128) が flavor 'cpu' のクォータ (64000m) を超えています" }
+```
+
+```json
+{ "detail": "要求メモリ (2Ti) が flavor 'cpu' のクォータ (262144Mi) を超えています" }
+```
+
+`resources.gpu > 0` の場合、指定 flavor の `gpu_resource_name` が未設定（GPU なし flavor）なら 400 を返す。GPU ノードが登録されていなければ 400 を返す。要求 GPU が flavor の有効上限（`min(最大ノード GPU, nominalQuota GPU)`）を超える場合も 400 を返す。
 
 ```json
 { "detail": "flavor 'cpu' は GPU をサポートしていません" }
@@ -87,7 +97,11 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 ```
 
 ```json
-{ "detail": "要求 GPU (8) が flavor 'gpu-a100' 内の最大ノード (4) を超えています" }
+{ "detail": "要求 GPU (8) が flavor 'gpu-a100' の最大ノード (4) を超えています" }
+```
+
+```json
+{ "detail": "要求 GPU (8) が flavor 'gpu-a100' のクォータ (4) を超えています" }
 ```
 
 `time_limit_seconds` は省略可能。省略時はサーバ側デフォルト（ConfigMap: `DEFAULT_TIME_LIMIT_SECONDS`、デフォルト 86400 = 24時間）を使用する。
@@ -165,7 +179,7 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 - `completions` が `MAX_SWEEP_COMPLETIONS`（デフォルト 1000）を超える → 400
 - `parallelism` が 1 未満 → 400
 - `parallelism` が `completions` を超える → 400
-- `parallelism × Pod リソース` が指定 flavor の allocatable 合計を超える → 400
+- `parallelism × Pod リソース` が指定 flavor の有効上限（`min(allocatable 合計, nominalQuota)`）を超える → 400
 
 ```json
 { "detail": "completions は 1 以上 1000 以下で指定してください" }
