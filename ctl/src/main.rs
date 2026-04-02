@@ -77,7 +77,7 @@ enum JobsCommands {
         /// Filter by status
         #[arg(long)]
         status: Option<String>,
-        /// Sort by field (NAMESPACE, CREATED, FINISHED)
+        /// Sort by field (NAMESPACE, CREATED, DISPATCHED, STARTED, FINISHED)
         #[arg(long)]
         sort: Option<String>,
         /// Reverse sort order (descending)
