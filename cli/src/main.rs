@@ -7,7 +7,6 @@ mod logs;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::collections::HashMap;
 
 #[derive(Parser)]
 #[command(name = "cjob", about = "CJob - ジョブキューシステム CLI", version)]
@@ -408,8 +407,9 @@ async fn cmd_add(
         anyhow::bail!("CJOB_IMAGE または JUPYTER_IMAGE 環境変数が設定されていません");
     }
 
-    // Collect exported environment variables
-    let env: HashMap<String, String> = std::env::vars().collect();
+    // Collect exported environment variables, filtering by user config
+    let user_config = config::load()?;
+    let env = config::filter_env(std::env::vars().collect(), &user_config);
 
     let cmd_str = build_command_string(&command);
 
@@ -460,8 +460,9 @@ async fn cmd_sweep(
         anyhow::bail!("CJOB_IMAGE または JUPYTER_IMAGE 環境変数が設定されていません");
     }
 
-    // Collect exported environment variables
-    let env: HashMap<String, String> = std::env::vars().collect();
+    // Collect exported environment variables, filtering by user config
+    let user_config = config::load()?;
+    let env = config::filter_env(std::env::vars().collect(), &user_config);
 
     // Replace _INDEX_ placeholder with $CJOB_INDEX before quoting.
     // Double-quote strategy ensures $CJOB_INDEX expands in the Job Pod.
