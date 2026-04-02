@@ -33,6 +33,7 @@
 | [architecture/watcher.md](architecture/watcher.md) | Watcher / Reconciler 設計 |
 | [architecture/cjobctl.md](architecture/cjobctl.md) | 管理 CLI（cjobctl）設計 |
 | [architecture/roadmap.md](architecture/roadmap.md) | 将来拡張 |
+| [architecture/performance.md](architecture/performance.md) | パフォーマンス分析・スケーリング推定 |
 | [architecture/monitoring.md](architecture/monitoring.md) | モニタリング設計・Grafana ダッシュボード |
 
 関連ドキュメント:

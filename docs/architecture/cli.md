@@ -139,7 +139,7 @@ cjob delete --all
 
 ### `_INDEX_` プレースホルダー
 
-コマンド中の `_INDEX_` は Dispatcher がコマンドラッパーを構築する際に `$CJOB_INDEX` シェル変数に置換される。Job Pod 実行時に `CJOB_INDEX` 環境変数（= K8s の `JOB_COMPLETION_INDEX`）が展開され、各タスク固有のインデックス値となる。
+コマンド中の `_INDEX_` は CLI が Submit API に送信する前に `$CJOB_INDEX` シェル変数に置換される。Job Pod 実行時に `CJOB_INDEX` 環境変数（= K8s の `JOB_COMPLETION_INDEX`）が展開され、各タスク固有のインデックス値となる。
 
 - 0-origin（K8s の `JOB_COMPLETION_INDEX` と同一）
 - 値の範囲: `0` 〜 `completions - 1`
