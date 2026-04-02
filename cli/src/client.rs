@@ -175,6 +175,7 @@ pub struct UsageResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct FlavorNodeInfo {
     pub node_name: String,
     pub cpu_millicores: i64,
