@@ -96,6 +96,7 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 | `DEFAULT_FLAVOR` | ConfigMap | `cpu` | Submit API | 全体 | ユーザーが `--flavor` を省略した場合に使用されるデフォルトの flavor 名。`RESOURCE_FLAVORS` 内のいずれかの flavor 名と一致している必要がある |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | ConfigMap | 300 (5分) | Watcher | 全体 | ノードリソース同期間隔（秒）。Watcher のメインループの N サイクルに 1 回実行する |
 | `CLUSTER_QUEUE_NAME` | ConfigMap | `cjob-cluster-queue` | Watcher | 全体 | ClusterQueue の名前。Watcher が nominalQuota 同期時に使用する |
+| `RESOURCE_QUOTA_NAME` | ConfigMap | `computing-quota` | Watcher | 全体 | user namespace から読み取る ResourceQuota オブジェクトの名前。Watcher が ResourceQuota 同期時に使用する |
 
 #### `RESOURCE_FLAVORS` の設定例
 

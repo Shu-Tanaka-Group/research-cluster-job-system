@@ -37,6 +37,18 @@ Watcher は K8s API から ClusterQueue の nominalQuota を定期取得し、DB
 - `spec.resourceGroups[0].flavors[]` の各 flavor について、`resources[]` から nominalQuota を読み取る。リソース名 `cpu` → cpu 列、`memory` → memory 列、それ以外 → gpu 列にマッピングする
 - K8s API 呼び出し失敗時はログを出力してスキップし、次回サイクルで再試行する（DB の既存データはそのまま維持される）
 
+## 1.3 ResourceQuota 同期
+
+Watcher は K8s API から各 user namespace の ResourceQuota 使用状況を定期取得し、DB の `namespace_resource_quotas` テーブルに書き込む（[database.md](database.md) §8 参照）。
+
+- ノードリソース同期（§1.1）および nominalQuota 同期（§1.2）と同じサイクルで実行する
+- DB から active な namespace を取得する（`jobs` テーブルで `status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED', 'RUNNING', 'HELD')` のジョブが存在する namespace）
+- 各 namespace に対して `CoreV1Api.read_namespaced_resource_quota(name=RESOURCE_QUOTA_NAME, namespace=ns)` を呼び出す
+- `spec.hard` と `status.used` から `requests.cpu`、`requests.memory`、および GPU リソース（`RESOURCE_FLAVORS` 設定の `gpu_resource_name` を使用）を取得し、`parse_cpu_millicores()` / `parse_memory_mib()` でパースして UPSERT する
+- 404（ResourceQuota が存在しない namespace）の場合は DB の該当行を DELETE する。Dispatcher はその namespace に対して制限なしとして扱う
+- その他の K8s API エラーの場合はログを出力して当該 namespace をスキップし、DB の既存データを維持する
+- active でなくなった namespace（ジョブがすべて終了状態）の行を DELETE する
+
 ## 2. 必要性
 
 Dispatcher が DB スキャンで Job を作成しても、その後の実行状態（RUNNING / SUCCEEDED / FAILED）は Kubernetes 側でのみ確定する。
