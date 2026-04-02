@@ -41,13 +41,13 @@ Watcher は K8s API から ClusterQueue の nominalQuota を定期取得し、DB
 
 Watcher は K8s API から各 user namespace の ResourceQuota 使用状況を定期取得し、DB の `namespace_resource_quotas` テーブルに書き込む（[database.md](database.md) §8 参照）。
 
-- ノードリソース同期（§1.1）および nominalQuota 同期（§1.2）と同じサイクルで実行する
-- DB から active な namespace を取得する（`jobs` テーブルで `status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED', 'RUNNING', 'HELD')` のジョブが存在する namespace）
-- 各 namespace に対して `CoreV1Api.read_namespaced_resource_quota(name=RESOURCE_QUOTA_NAME, namespace=ns)` を呼び出す
-- `spec.hard` と `status.used` から `requests.cpu`、`requests.memory`、および GPU リソース（`RESOURCE_FLAVORS` 設定の `gpu_resource_name` を使用）を取得し、`parse_cpu_millicores()` / `parse_memory_mib()` でパースして UPSERT する
-- 404（ResourceQuota が存在しない namespace）の場合は DB の該当行を DELETE する。Dispatcher はその namespace に対して制限なしとして扱う
-- その他の K8s API エラーの場合はログを出力して当該 namespace をスキップし、DB の既存データを維持する
-- active でなくなった namespace（ジョブがすべて終了状態）の行を DELETE する
+- `RESOURCE_QUOTA_SYNC_INTERVAL_SEC`（デフォルト 10 秒）の間隔で実行する。ノードリソース同期（§1.1）や nominalQuota 同期（§1.2）とは独立したサイクルで動作する
+- `CoreV1Api.list_namespace(label_selector=USER_NAMESPACE_LABEL)` で全ユーザー namespace を取得する。ジョブの有無に関わらず全ユーザー namespace を追跡対象とする（JupyterHub 等の User Pod によるリソース消費をジョブ投入前から把握するため）
+- `CoreV1Api.list_resource_quota_for_all_namespaces(field_selector="metadata.name=RESOURCE_QUOTA_NAME")` で全 namespace の ResourceQuota を 1 回の API コールで取得する
+- 取得結果からユーザー namespace に該当するもののみを処理し、`spec.hard` と `status.used` から `requests.cpu`、`requests.memory`、および GPU リソース（`RESOURCE_FLAVORS` 設定の `gpu_resource_name` を使用）を取得し、`parse_cpu_millicores()` / `parse_memory_mib()` でパースして UPSERT する
+- ユーザー namespace に該当する ResourceQuota が取得結果に含まれない場合は DB の該当行を DELETE する。Dispatcher はその namespace に対して制限なしとして扱う
+- K8s API エラーの場合はログを出力して処理をスキップし、DB の既存データを維持する
+- ユーザー namespace でなくなった namespace（ラベル除去）の行を DELETE する
 
 ## 2. 必要性
 

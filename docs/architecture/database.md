@@ -340,7 +340,7 @@ CREATE TABLE namespace_resource_quotas (
 
 ### 8.1 同期処理
 
-Watcher が DB から active な namespace（`status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED', 'RUNNING', 'HELD')` のジョブが存在する namespace）を取得し、各 namespace の ResourceQuota を K8s API から読み取って UPSERT する。active でなくなった namespace の行は DELETE する。
+Watcher が K8s API から `USER_NAMESPACE_LABEL` ラベルを持つ全ユーザー namespace を取得し、各 namespace の ResourceQuota を K8s API から読み取って UPSERT する。ジョブの有無に関わらず全ユーザー namespace を追跡対象とする（JupyterHub 等の User Pod によるリソース消費をジョブ投入前から把握するため）。ユーザー namespace でなくなった namespace の行は DELETE する。
 
 ```sql
 -- UPSERT（namespace ごと）

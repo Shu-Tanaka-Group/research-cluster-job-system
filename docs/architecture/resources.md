@@ -97,6 +97,7 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | ConfigMap | 300 (5分) | Watcher | 全体 | ノードリソース同期間隔（秒）。Watcher のメインループの N サイクルに 1 回実行する |
 | `CLUSTER_QUEUE_NAME` | ConfigMap | `cjob-cluster-queue` | Watcher | 全体 | ClusterQueue の名前。Watcher が nominalQuota 同期時に使用する |
 | `RESOURCE_QUOTA_NAME` | ConfigMap | `computing-quota` | Watcher | 全体 | user namespace から読み取る ResourceQuota オブジェクトの名前。Watcher が ResourceQuota 同期時に使用する |
+| `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` | ConfigMap | 10 | Watcher | 全体 | ResourceQuota 同期間隔（秒）。Watcher のメインループの N サイクルに 1 回実行する。`NODE_RESOURCE_SYNC_INTERVAL_SEC` とは独立した間隔で動作する |
 
 #### `RESOURCE_FLAVORS` の設定例
 

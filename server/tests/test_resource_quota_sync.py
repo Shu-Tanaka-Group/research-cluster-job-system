@@ -30,35 +30,34 @@ def _make_settings_with_gpu():
     )
 
 
-def _make_resource_quota(hard, used):
-    """Build a mock K8s ResourceQuota object.
+def _make_namespace(name):
+    """Build a mock K8s Namespace object."""
+    ns = MagicMock()
+    ns.metadata.name = name
+    return ns
 
-    hard/used: dict of resource name -> value string,
-    e.g. {"requests.cpu": "300", "requests.memory": "1250Gi"}
-    """
+
+def _make_ns_list(names):
+    """Build a mock K8s NamespaceList."""
+    ns_list = MagicMock()
+    ns_list.items = [_make_namespace(n) for n in names]
+    return ns_list
+
+
+def _make_resource_quota(namespace, hard, used):
+    """Build a mock K8s ResourceQuota object."""
     rq = MagicMock()
+    rq.metadata.namespace = namespace
     rq.spec.hard = hard
     rq.status.used = used
     return rq
 
 
-def _insert_job(session, namespace, status="QUEUED"):
-    """Insert a minimal job to make a namespace 'active'."""
-    # Get next job_id for this namespace
-    row = session.execute(
-        text("SELECT COALESCE(MAX(job_id), 0) + 1 FROM jobs WHERE namespace = :ns"),
-        {"ns": namespace},
-    ).scalar()
-    session.execute(
-        text(
-            "INSERT INTO jobs (namespace, job_id, \"user\", image, command, cwd, "
-            "cpu, memory, gpu, time_limit_seconds, status) "
-            "VALUES (:ns, :jid, 'testuser', 'img', 'echo', '/tmp', "
-            "'1', '1Gi', 0, 3600, :status)"
-        ),
-        {"ns": namespace, "jid": row, "status": status},
-    )
-    session.flush()
+def _make_rq_list(items):
+    """Build a mock K8s ResourceQuotaList."""
+    rq_list = MagicMock()
+    rq_list.items = items
+    return rq_list
 
 
 def _get_quota_row(session, namespace):
@@ -79,25 +78,30 @@ def _get_all_namespaces(session):
     return [row[0] for row in rows]
 
 
+def _setup_mock_api(mock_k8s, user_namespaces, rq_items):
+    """Set up mock CoreV1Api with namespace list and ResourceQuota list."""
+    mock_api = MagicMock()
+    mock_k8s.CoreV1Api.return_value = mock_api
+    mock_api.list_namespace.return_value = _make_ns_list(user_namespaces)
+    mock_api.list_resource_quota_for_all_namespaces.return_value = _make_rq_list(rq_items)
+    return mock_api
+
+
 @patch("cjob.watcher.resource_quota_sync.k8s_client")
 class TestSyncResourceQuotas:
-    def test_inserts_for_active_namespaces(self, mock_k8s, db_session):
-        mock_api = MagicMock()
-        mock_k8s.CoreV1Api.return_value = mock_api
-
-        _insert_job(db_session, "user-alice", "QUEUED")
-        _insert_job(db_session, "user-bob", "RUNNING")
-
-        mock_api.read_namespaced_resource_quota.side_effect = [
+    def test_inserts_for_user_namespaces(self, mock_k8s, db_session):
+        _setup_mock_api(mock_k8s, ["user-alice", "user-bob"], [
             _make_resource_quota(
+                "user-alice",
                 {"requests.cpu": "300", "requests.memory": "1250Gi"},
                 {"requests.cpu": "20", "requests.memory": "80Gi"},
             ),
             _make_resource_quota(
+                "user-bob",
                 {"requests.cpu": "100", "requests.memory": "500Gi"},
                 {"requests.cpu": "50", "requests.memory": "200Gi"},
             ),
-        ]
+        ])
 
         sync_resource_quotas(db_session, _make_settings())
 
@@ -114,101 +118,114 @@ class TestSyncResourceQuotas:
         assert bob[3] == 50000
 
     def test_updates_existing_quotas(self, mock_k8s, db_session):
-        mock_api = MagicMock()
-        mock_k8s.CoreV1Api.return_value = mock_api
-
-        _insert_job(db_session, "user-alice", "QUEUED")
-
         # First sync
-        mock_api.read_namespaced_resource_quota.return_value = _make_resource_quota(
-            {"requests.cpu": "300", "requests.memory": "1250Gi"},
-            {"requests.cpu": "20", "requests.memory": "80Gi"},
-        )
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi"},
+                {"requests.cpu": "20", "requests.memory": "80Gi"},
+            ),
+        ])
         sync_resource_quotas(db_session, _make_settings())
-        assert _get_quota_row(db_session, "user-alice")[3] == 20000  # used_cpu
+        assert _get_quota_row(db_session, "user-alice")[3] == 20000
 
         # Second sync with changed usage
-        mock_api.read_namespaced_resource_quota.return_value = _make_resource_quota(
-            {"requests.cpu": "300", "requests.memory": "1250Gi"},
-            {"requests.cpu": "100", "requests.memory": "400Gi"},
-        )
-        sync_resource_quotas(db_session, _make_settings())
-        assert _get_quota_row(db_session, "user-alice")[3] == 100000  # used_cpu updated
-
-    def test_deletes_inactive_namespaces(self, mock_k8s, db_session):
-        mock_api = MagicMock()
-        mock_k8s.CoreV1Api.return_value = mock_api
-
-        _insert_job(db_session, "user-alice", "QUEUED")
-        _insert_job(db_session, "user-bob", "RUNNING")
-
-        mock_api.read_namespaced_resource_quota.side_effect = [
+        mock_api = mock_k8s.CoreV1Api.return_value
+        mock_api.list_resource_quota_for_all_namespaces.return_value = _make_rq_list([
             _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi"},
+                {"requests.cpu": "100", "requests.memory": "400Gi"},
+            ),
+        ])
+        sync_resource_quotas(db_session, _make_settings())
+        assert _get_quota_row(db_session, "user-alice")[3] == 100000
+
+    def test_deletes_removed_user_namespaces(self, mock_k8s, db_session):
+        # First sync: two namespaces
+        _setup_mock_api(mock_k8s, ["user-alice", "user-bob"], [
+            _make_resource_quota(
+                "user-alice",
                 {"requests.cpu": "300", "requests.memory": "1250Gi"},
                 {"requests.cpu": "20", "requests.memory": "80Gi"},
             ),
             _make_resource_quota(
+                "user-bob",
                 {"requests.cpu": "100", "requests.memory": "500Gi"},
                 {"requests.cpu": "50", "requests.memory": "200Gi"},
             ),
-        ]
+        ])
         sync_resource_quotas(db_session, _make_settings())
         assert len(_get_all_namespaces(db_session)) == 2
 
-        # Bob's job completes -> no longer active
-        db_session.execute(
-            text("UPDATE jobs SET status = 'SUCCEEDED' WHERE namespace = 'user-bob'")
-        )
-        db_session.flush()
-
-        mock_api.read_namespaced_resource_quota.side_effect = [
+        # Second sync: bob's namespace label removed
+        mock_api = mock_k8s.CoreV1Api.return_value
+        mock_api.list_namespace.return_value = _make_ns_list(["user-alice"])
+        mock_api.list_resource_quota_for_all_namespaces.return_value = _make_rq_list([
             _make_resource_quota(
+                "user-alice",
                 {"requests.cpu": "300", "requests.memory": "1250Gi"},
                 {"requests.cpu": "20", "requests.memory": "80Gi"},
             ),
-        ]
+        ])
         sync_resource_quotas(db_session, _make_settings())
 
         assert _get_all_namespaces(db_session) == ["user-alice"]
 
-    def test_404_deletes_row(self, mock_k8s, db_session):
-        mock_api = MagicMock()
-        mock_k8s.CoreV1Api.return_value = mock_api
-
-        _insert_job(db_session, "user-alice", "QUEUED")
-
+    def test_no_rq_for_namespace_deletes_row(self, mock_k8s, db_session):
         # First sync: ResourceQuota exists
-        mock_api.read_namespaced_resource_quota.return_value = _make_resource_quota(
-            {"requests.cpu": "300", "requests.memory": "1250Gi"},
-            {"requests.cpu": "20", "requests.memory": "80Gi"},
-        )
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi"},
+                {"requests.cpu": "20", "requests.memory": "80Gi"},
+            ),
+        ])
         sync_resource_quotas(db_session, _make_settings())
         assert _get_quota_row(db_session, "user-alice") is not None
 
-        # Second sync: ResourceQuota removed (404)
-        mock_api.read_namespaced_resource_quota.side_effect = ApiException(
-            status=404, reason="Not Found"
-        )
+        # Second sync: ResourceQuota removed
+        mock_api = mock_k8s.CoreV1Api.return_value
+        mock_api.list_resource_quota_for_all_namespaces.return_value = _make_rq_list([])
         sync_resource_quotas(db_session, _make_settings())
 
         assert _get_quota_row(db_session, "user-alice") is None
 
-    def test_api_error_preserves_existing_data(self, mock_k8s, db_session):
-        mock_api = MagicMock()
-        mock_k8s.CoreV1Api.return_value = mock_api
-
-        _insert_job(db_session, "user-alice", "QUEUED")
-
+    def test_namespace_list_api_error_preserves_data(self, mock_k8s, db_session):
         # First sync succeeds
-        mock_api.read_namespaced_resource_quota.return_value = _make_resource_quota(
-            {"requests.cpu": "300", "requests.memory": "1250Gi"},
-            {"requests.cpu": "20", "requests.memory": "80Gi"},
-        )
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi"},
+                {"requests.cpu": "20", "requests.memory": "80Gi"},
+            ),
+        ])
         sync_resource_quotas(db_session, _make_settings())
         assert _get_quota_row(db_session, "user-alice")[3] == 20000
 
-        # Second sync fails with 500
-        mock_api.read_namespaced_resource_quota.side_effect = ApiException(
+        # Second sync: namespace list fails
+        mock_api = mock_k8s.CoreV1Api.return_value
+        mock_api.list_namespace.side_effect = ApiException(status=500, reason="Internal")
+        sync_resource_quotas(db_session, _make_settings())
+
+        # Data preserved
+        assert _get_quota_row(db_session, "user-alice")[3] == 20000
+
+    def test_rq_list_api_error_preserves_data(self, mock_k8s, db_session):
+        # First sync succeeds
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi"},
+                {"requests.cpu": "20", "requests.memory": "80Gi"},
+            ),
+        ])
+        sync_resource_quotas(db_session, _make_settings())
+        assert _get_quota_row(db_session, "user-alice")[3] == 20000
+
+        # Second sync: ResourceQuota list fails
+        mock_api = mock_k8s.CoreV1Api.return_value
+        mock_api.list_resource_quota_for_all_namespaces.side_effect = ApiException(
             status=500, reason="Internal"
         )
         sync_resource_quotas(db_session, _make_settings())
@@ -216,10 +233,7 @@ class TestSyncResourceQuotas:
         # Data preserved
         assert _get_quota_row(db_session, "user-alice")[3] == 20000
 
-    def test_no_active_namespaces_clears_all(self, mock_k8s, db_session):
-        mock_api = MagicMock()
-        mock_k8s.CoreV1Api.return_value = mock_api
-
+    def test_no_user_namespaces_clears_all(self, mock_k8s, db_session):
         # Manually insert a stale row
         db_session.execute(
             text(
@@ -232,21 +246,19 @@ class TestSyncResourceQuotas:
         db_session.flush()
         assert len(_get_all_namespaces(db_session)) == 1
 
-        # No active jobs -> clears all
+        _setup_mock_api(mock_k8s, [], [])
         sync_resource_quotas(db_session, _make_settings())
 
         assert _get_all_namespaces(db_session) == []
 
     def test_parses_cpu_memory_correctly(self, mock_k8s, db_session):
-        mock_api = MagicMock()
-        mock_k8s.CoreV1Api.return_value = mock_api
-
-        _insert_job(db_session, "user-alice", "QUEUED")
-
-        mock_api.read_namespaced_resource_quota.return_value = _make_resource_quota(
-            {"requests.cpu": "4", "requests.memory": "16Gi"},
-            {"requests.cpu": "500m", "requests.memory": "2Gi"},
-        )
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "4", "requests.memory": "16Gi"},
+                {"requests.cpu": "500m", "requests.memory": "2Gi"},
+            ),
+        ])
         sync_resource_quotas(db_session, _make_settings())
 
         row = _get_quota_row(db_session, "user-alice")
@@ -256,34 +268,79 @@ class TestSyncResourceQuotas:
         assert row[4] == 2048    # used_mem: "2Gi" -> 2048 MiB
 
     def test_gpu_from_flavor_config(self, mock_k8s, db_session):
-        mock_api = MagicMock()
-        mock_k8s.CoreV1Api.return_value = mock_api
-
-        _insert_job(db_session, "user-alice", "QUEUED")
-
-        mock_api.read_namespaced_resource_quota.return_value = _make_resource_quota(
-            {"requests.cpu": "64", "requests.memory": "500Gi", "requests.nvidia.com/gpu": "4"},
-            {"requests.cpu": "16", "requests.memory": "128Gi", "requests.nvidia.com/gpu": "1"},
-        )
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "64", "requests.memory": "500Gi", "requests.nvidia.com/gpu": "4"},
+                {"requests.cpu": "16", "requests.memory": "128Gi", "requests.nvidia.com/gpu": "1"},
+            ),
+        ])
         sync_resource_quotas(db_session, _make_settings_with_gpu())
 
         row = _get_quota_row(db_session, "user-alice")
         assert row[2] == 4  # hard_gpu
         assert row[5] == 1  # used_gpu
 
-    def test_uses_resource_quota_name_from_settings(self, mock_k8s, db_session):
-        mock_api = MagicMock()
-        mock_k8s.CoreV1Api.return_value = mock_api
-
-        _insert_job(db_session, "user-alice", "QUEUED")
-
-        mock_api.read_namespaced_resource_quota.return_value = _make_resource_quota(
-            {"requests.cpu": "100", "requests.memory": "500Gi"},
-            {"requests.cpu": "10", "requests.memory": "50Gi"},
-        )
+    def test_uses_field_selector_with_resource_quota_name(self, mock_k8s, db_session):
+        mock_api = _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "100", "requests.memory": "500Gi"},
+                {"requests.cpu": "10", "requests.memory": "50Gi"},
+            ),
+        ])
 
         settings = _make_settings(RESOURCE_QUOTA_NAME="custom-quota")
         sync_resource_quotas(db_session, settings)
 
-        call_args = mock_api.read_namespaced_resource_quota.call_args
-        assert call_args.kwargs["name"] == "custom-quota"
+        call_args = mock_api.list_resource_quota_for_all_namespaces.call_args
+        assert call_args.kwargs["field_selector"] == "metadata.name=custom-quota"
+
+    def test_uses_user_namespace_label(self, mock_k8s, db_session):
+        mock_api = _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "100", "requests.memory": "500Gi"},
+                {"requests.cpu": "10", "requests.memory": "50Gi"},
+            ),
+        ])
+
+        settings = _make_settings(USER_NAMESPACE_LABEL="type=user")
+        sync_resource_quotas(db_session, settings)
+
+        call_args = mock_api.list_namespace.call_args
+        assert call_args.kwargs["label_selector"] == "type=user"
+
+    def test_ignores_non_user_namespaces_in_rq_list(self, mock_k8s, db_session):
+        """ResourceQuotas from non-user namespaces should be ignored."""
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi"},
+                {"requests.cpu": "20", "requests.memory": "80Gi"},
+            ),
+            _make_resource_quota(
+                "cjob-system",
+                {"requests.cpu": "100", "requests.memory": "500Gi"},
+                {"requests.cpu": "10", "requests.memory": "50Gi"},
+            ),
+        ])
+        sync_resource_quotas(db_session, _make_settings())
+
+        assert _get_all_namespaces(db_session) == ["user-alice"]
+
+    def test_tracks_namespace_without_active_jobs(self, mock_k8s, db_session):
+        """User namespaces should be tracked even without active CJob jobs."""
+        # No jobs inserted - namespace only exists in K8s
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi"},
+                {"requests.cpu": "200", "requests.memory": "800Gi"},
+            ),
+        ])
+        sync_resource_quotas(db_session, _make_settings())
+
+        row = _get_quota_row(db_session, "user-alice")
+        assert row is not None
+        assert row[3] == 200000  # used_cpu - JupyterHub consuming resources

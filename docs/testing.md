@@ -39,7 +39,7 @@ cargo test
 | `tests/test_resource_utils.py` | `resource_utils.py` | 12 | CPU・メモリ文字列のパース。整数 / 小数 / ミリコア / Gi / Mi / Ki / 大きな値等 |
 | `tests/test_node_sync.py` | `watcher/node_sync.py::sync_node_resources` | 14 | ノードリソース同期。挿入 / 更新 / 削除 / 全削除 / GPU パース / API エラー時のデータ保持 / ラベルセレクタ / 部分失敗時の失敗 flavor データ保持 / 部分失敗時の成功 flavor 古ノード削除 |
 | `tests/test_quota_sync.py` | `watcher/quota_sync.py::sync_flavor_quotas` | 7 | flavor quota 同期。挿入 / 複数 flavor / 更新 / 削除 / API エラー時のデータ保持 / 空 resourceGroups / ClusterQueue 名設定 |
-| `tests/test_resource_quota_sync.py` | `watcher/resource_quota_sync.py::sync_resource_quotas` | 9 | ResourceQuota 同期。active namespace への挿入 / 値更新 / inactive namespace の行削除 / 404 時の行削除 / API エラー時のデータ保持 / active namespace なしの全削除 / CPU・メモリパース / GPU リソース名取得 / ResourceQuota 名設定 |
+| `tests/test_resource_quota_sync.py` | `watcher/resource_quota_sync.py::sync_resource_quotas` | 13 | ResourceQuota 同期。ユーザー namespace への挿入 / 値更新 / ユーザー namespace 除去時の行削除 / ResourceQuota なし時の行削除 / namespace 一覧 API エラー時のデータ保持 / ResourceQuota 一覧 API エラー時のデータ保持 / ユーザー namespace なしの全削除 / CPU・メモリパース / GPU リソース名取得 / field_selector 設定 / USER_NAMESPACE_LABEL 設定 / 非ユーザー namespace の除外 / ジョブなし namespace の追跡 |
 | `tests/test_cli_endpoints.py` | `api/routes.py` CLI 配布エンドポイント | 17 | `/v1/cli/version`・`/v1/cli/versions`・`/v1/cli/download` の正常系 / 404 / 認証不要 / バージョンソート / バージョン指定ダウンロード / 無効ディレクトリ除外 / 不正バージョン文字列の拒否（パストラバーサル防止）の検証 |
 | `tests/test_cluster_totals.py` | `dispatcher/scheduler.py::_fetch_cluster_totals` | 3 | DRF 正規化用クラスタ合計取得。空テーブル / 単一ノード / 複数ノード合計 |
 | **Rust** | | | |
@@ -51,7 +51,7 @@ cargo test
 | `src/cmd/cli_list.rs` | `parse_versions` / `sort_versions` | 9 | ls 出力パース（latest 除外 / 空入力 / パース不能エントリ）/ ソート（降順 / プレリリース優先 / 設計書出力例の再現） |
 | `src/cmd/cli_set_latest.rs` | `run`（バリデーション） | 2 | プレリリース版の拒否（beta / rc） |
 
-**合計: Python 269 + Rust (cli) 62 + Rust (cjobctl) 28 = 359 テスト**
+**合計: Python 273 + Rust (cli) 62 + Rust (cjobctl) 28 = 363 テスト**
 
 ### 未テスト
 

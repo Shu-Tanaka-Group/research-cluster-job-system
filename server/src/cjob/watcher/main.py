@@ -41,10 +41,14 @@ def run():
     interval = settings.DISPATCH_BUDGET_CHECK_INTERVAL_SEC
     sync_interval = settings.NODE_RESOURCE_SYNC_INTERVAL_SEC
     cycles_per_sync = max(1, sync_interval // interval)
+    rq_sync_interval = settings.RESOURCE_QUOTA_SYNC_INTERVAL_SEC
+    cycles_per_rq_sync = max(1, rq_sync_interval // interval)
     logger.info(
-        "Watcher main loop started (interval=%ds, node_sync every %d cycles)",
+        "Watcher main loop started (interval=%ds, node_sync every %d cycles, "
+        "rq_sync every %d cycles)",
         interval,
         cycles_per_sync,
+        cycles_per_rq_sync,
     )
 
     cycle_count = 0
@@ -80,6 +84,8 @@ def run():
             finally:
                 session.close()
 
+        # Sync resource quotas on a separate (shorter) cycle
+        if cycle_count % cycles_per_rq_sync == 0:
             session = create_session()
             try:
                 sync_resource_quotas(session, settings)
