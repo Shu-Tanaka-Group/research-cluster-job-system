@@ -760,27 +760,41 @@ gpu              yes    1
 
 ### `cjob flavor info <name>`
 
-指定した flavor に属するノードの一覧とリソース情報を表示する。
+指定した flavor のリソース上限とタスクあたりの上限を表示する。
+
+QUOTA は ClusterQueue の nominalQuota（flavor 全体で共有するリソース総量）。TASK LIMIT はタスクあたりのリソース上限で、`min(max_node_allocatable, nominalQuota)` で計算される。GPU 非対応 flavor では GPU 行を省略する。
 
 ```
 $ cjob flavor info cpu
 name:   cpu
 GPU:    非対応
 
-NODE                     CPU (cores)   Memory (GiB)
-worker07                         128          503.4
-worker08                         128          503.4
+RESOURCE      QUOTA    TASK LIMIT
+CPU             256           128
+Memory       1000Gi       503.4Gi
 ```
 
-GPU 対応 flavor の場合は GPU 列も表示する。
+GPU 対応 flavor の場合は GPU 行も表示する。
 
 ```
 $ cjob flavor info gpu
 name:   gpu
 GPU:    対応
 
-NODE                     CPU (cores)   Memory (GiB)    GPU
-gworker02                        128          503.6      4
+RESOURCE      QUOTA    TASK LIMIT
+CPU              64            64
+Memory        500Gi         500Gi
+GPU               4             4
+```
+
+Watcher 未同期で quota 情報がない場合はメッセージを表示する。
+
+```
+$ cjob flavor info cpu
+name:   cpu
+GPU:    非対応
+
+（リソース情報がまだ取得されていません）
 ```
 
 存在しない flavor を指定した場合はエラーを表示する。

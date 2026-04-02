@@ -262,7 +262,56 @@ WHERE flavor = :flavor;
 - **テーブルが空の場合のフォールバック**: Watcher 未起動時は `node_resources` が空となる。Submit API はバリデーションをスキップし、Dispatcher は DRF ソートを無効化して namespace 名順にフォールバックする。これにより Watcher 起動前でもシステムが動作する
 - **flavor 名の統一**: `node_resources.flavor` と `jobs.flavor` の値は Kueue ResourceFlavor の `metadata.name` と一致させる。これにより DB クエリと Kueue API の間で名前変換が不要になる
 
-## 7. 状態遷移
+## 7. `flavor_quotas` テーブル
+
+ClusterQueue の各 ResourceFlavor に対する nominalQuota を記録する。Watcher が K8s API から ClusterQueue を定期取得（`node_resources` と同じサイクル）し、UPSERT で更新する。
+
+```sql
+CREATE TABLE IF NOT EXISTS flavor_quotas (
+    flavor      TEXT PRIMARY KEY,
+    cpu         TEXT NOT NULL,
+    memory      TEXT NOT NULL,
+    gpu         TEXT NOT NULL DEFAULT '0',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+`cpu`・`memory`・`gpu` は nominalQuota の値を K8s リソース量文字列のまま保存する（例: `"256"`、`"1000Gi"`、`"4"`）。CLI でそのまま表示に使用するため、パース→復元による情報損失を避ける。
+
+### 7.1 同期処理
+
+Watcher が `CustomObjectsApi.get_cluster_custom_object()` で ClusterQueue を取得し、`spec.resourceGroups[0].flavors[]` の各 flavor について `resources[]` から nominalQuota を読み取り、UPSERT する。DB に存在するが ClusterQueue にない flavor は DELETE する。
+
+```sql
+-- UPSERT（flavor ごと）
+INSERT INTO flavor_quotas (flavor, cpu, memory, gpu, updated_at)
+VALUES (:flavor, :cpu, :memory, :gpu, NOW())
+ON CONFLICT (flavor) DO UPDATE SET
+    cpu = :cpu,
+    memory = :memory,
+    gpu = :gpu,
+    updated_at = NOW();
+
+-- ClusterQueue から消えた flavor の削除
+DELETE FROM flavor_quotas WHERE flavor != ALL(:current_flavors);
+```
+
+### 7.2 参照パターン
+
+**Submit API（`GET /v1/flavors`）**: 各 flavor の nominalQuota を取得し、CLI に返す。CLI は `node_resources` の MAX 値と合わせて、タスクあたりのリソース上限（`min(max_node_allocatable, nominalQuota)`）を計算・表示する。
+
+```sql
+SELECT flavor, cpu, memory, gpu
+FROM flavor_quotas;
+```
+
+### 7.3 設計判断
+
+- **TEXT 保存**: nominalQuota を K8s リソース量文字列のまま保存する。CLI の表示で "1000Gi" をそのまま使用でき、数値パース→復元の情報損失（例: 1000Gi → 1024000 MiB → 復元不可）を回避する。DB 上でのリソース量演算は不要
+- **テーブルが空の場合のフォールバック**: Watcher 未同期時は `flavor_quotas` が空となる。API は `quota: null` を返し、CLI は「リソース情報がまだ取得されていません」と表示する
+- **行数の見積もり**: flavor 数と同数。2〜5 flavor 程度を想定しており、クエリのコストは無視できる
+
+## 8. 状態遷移
 
 ```text
 QUEUED
