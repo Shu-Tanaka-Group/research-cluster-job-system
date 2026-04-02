@@ -752,6 +752,31 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
 async fn cmd_usage(client: &client::CjobClient) -> Result<()> {
     let resp = client.get_usage().await?;
 
+    if let Some(ref q) = resp.resource_quota {
+        println!("\nResource Quota:");
+        println!(
+            "  CPU:    {}m / {}m (remaining: {}m)",
+            q.used_cpu_millicores,
+            q.hard_cpu_millicores,
+            q.hard_cpu_millicores - q.used_cpu_millicores
+        );
+        let used_gib = q.used_memory_mib as f64 / 1024.0;
+        let hard_gib = q.hard_memory_mib as f64 / 1024.0;
+        let remaining_gib = (q.hard_memory_mib - q.used_memory_mib) as f64 / 1024.0;
+        println!(
+            "  Memory: {:.0}Gi / {:.0}Gi (remaining: {:.0}Gi)",
+            used_gib, hard_gib, remaining_gib
+        );
+        if q.hard_gpu > 0 {
+            println!(
+                "  GPU:    {} / {} (remaining: {})",
+                q.used_gpu,
+                q.hard_gpu,
+                q.hard_gpu - q.used_gpu
+            );
+        }
+    }
+
     println!(
         "\nResource Usage (past {} days)",
         resp.window_days

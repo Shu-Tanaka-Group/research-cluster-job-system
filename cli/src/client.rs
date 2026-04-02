@@ -166,12 +166,23 @@ pub struct DailyUsage {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ResourceQuota {
+    pub hard_cpu_millicores: i64,
+    pub hard_memory_mib: i64,
+    pub hard_gpu: i64,
+    pub used_cpu_millicores: i64,
+    pub used_memory_mib: i64,
+    pub used_gpu: i64,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct UsageResponse {
     pub window_days: u32,
     pub daily: Vec<DailyUsage>,
     pub total_cpu_millicores_seconds: i64,
     pub total_memory_mib_seconds: i64,
     pub total_gpu_seconds: i64,
+    pub resource_quota: Option<ResourceQuota>,
 }
 
 #[derive(Debug, Deserialize)]
