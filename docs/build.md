@@ -152,4 +152,6 @@ kubectl port-forward svc/postgres 5432:5432 -n cjob-system
 ## Job Pod のランタイムイメージ
 
 Job Pod が使用するランタイムイメージ（`your-registry/cjob-jupyter:2.1.0` 等）は本リポジトリの管理対象外である。
-JupyterHub の User Pod と同一のイメージが使用される（CLI が `JUPYTER_IMAGE` 環境変数から自動取得する）。
+CLI が `CJOB_IMAGE` 環境変数からイメージ名を取得する。`CJOB_IMAGE` が未設定の場合は `JUPYTER_IMAGE` にフォールバックする。いずれも未設定の場合はエラーとなる。
+
+通常、JupyterHub の User Pod では `JUPYTER_IMAGE` が自動的に設定されるため、User Pod と同一イメージで Job Pod が実行される。User Pod とは異なるイメージで Job を実行したい場合は `CJOB_IMAGE` を明示的に設定する。
