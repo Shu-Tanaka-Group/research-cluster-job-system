@@ -336,3 +336,38 @@ export OMP_NUM_THREADS=4
 cjob add --cpu 4 -- python main.py
 cjob sweep -n 50 --parallel 5 --cpu 4 -- python main.py --trial _INDEX_
 ```
+
+## 6. ユーザー設定の管理（`cjob config`）
+
+`cjob config` コマンドを使って、CJob の動作をカスタマイズできます。設定は `~/.config/cjob/config.toml` に保存されます（環境変数 `XDG_CONFIG_HOME` が設定されている場合は `$XDG_CONFIG_HOME/cjob/config.toml`）。
+
+### 6.1 環境変数の除外設定
+
+CJob はジョブ投入時にシェルの環境変数をすべて引き継ぎますが、引き継ぎたくない変数がある場合は除外リストに追加できます。
+
+```bash
+# 除外する環境変数を追加
+cjob config add env exclude MY_SECRET_TOKEN
+cjob config add env exclude AWS_SECRET_ACCESS_KEY
+
+# 除外リストから削除
+cjob config remove env exclude MY_SECRET_TOKEN
+```
+
+除外リストに追加した環境変数は、`cjob add` や `cjob sweep` でジョブを投入する際にサーバーへ送信されなくなります。
+
+### 6.2 現在の設定を確認する
+
+```bash
+cjob config list
+```
+
+```
+[env]
+exclude = [
+    "MY_SECRET_TOKEN",
+    "AWS_SECRET_ACCESS_KEY",
+]
+```
+
+設定ファイルが存在しない場合や何も設定していない場合は、デフォルト値（空のリスト）が表示されます。

@@ -27,7 +27,7 @@
 - PVC 名はユーザー名と一致している
 - 実行 shell は `/bin/bash -lc` を基本とする
 - 作業ディレクトリは `${WORKSPACE_MOUNT_PATH}` 配下に限定する
-- export 済み環境変数のみ再現対象とする（仮想環境の `PATH` / `VIRTUAL_ENV` を含む）
+- export 済み環境変数のみ再現対象とする（仮想環境の `PATH` / `VIRTUAL_ENV` を含む。ユーザー設定の `env.exclude` で除外指定した変数を除く）
 - shell function / alias / shell option は再現対象外とする
 - ユーザーは `${WORKSPACE_MOUNT_PATH}` 配下に Python 仮想環境を作成して管理する
 - Job Pod と User Pod は同一 image のため、venv 内の C 拡張ライブラリ互換性が保たれる
