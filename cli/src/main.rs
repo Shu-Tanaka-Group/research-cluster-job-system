@@ -1,5 +1,6 @@
 mod auth;
 mod client;
+mod config;
 mod display;
 mod job_ids;
 mod logs;
