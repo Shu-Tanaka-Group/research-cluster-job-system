@@ -10,6 +10,7 @@ uv run python -m pytest tests/ -v
 ```
 
 初回実行時、`uv` が仮想環境の作成と依存インストールを自動で行う。
+FastAPI の HTTPException を使うテストがあるため `fastapi` も必要（`uv pip install fastapi`）。
 
 > **注意**: `uv run pytest` はエントリポイントスクリプトが見つからず `Failed to spawn: pytest` エラーになることがある。`uv run python -m pytest` を使うこと。
 
