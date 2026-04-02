@@ -43,14 +43,14 @@ cargo test
 | `tests/test_cluster_totals.py` | `dispatcher/scheduler.py::_fetch_cluster_totals` | 3 | DRF 正規化用クラスタ合計取得。空テーブル / 単一ノード / 複数ノード合計 |
 | **Rust** | | | |
 | `src/job_ids.rs` | `parse_job_ids` | 7 | ジョブ ID 式のパース（単体 / 範囲 / リスト / 組み合わせ / 重複除去 / エラー） |
-| `src/main.rs` | `parse_duration` / `parse_time_limit_range` | 24 | 時間指定のパース（秒数 / s / m / h / d サフィックス / 空白 / 不正値 / オーバーフロー / 7日超過エラー）/ time_limit 範囲指定のパース（h / m / d / 混合単位 / 秒数 / 片端省略 / コロンなし / 空範囲 / 不正値 / 下限≧上限エラー） |
+| `src/main.rs` | `parse_duration` / `parse_time_limit_range` | 23 | 時間指定のパース（秒数 / s / m / h / d サフィックス / 空白 / 不正値 / オーバーフロー）/ time_limit 範囲指定のパース（h / m / d / 混合単位 / 秒数 / 片端省略 / コロンなし / 空範囲 / 不正値 / 下限≧上限エラー） |
 | `src/display.rs` | `format_duration` / `format_time_limit` | 9 | 時間表示フォーマット（日 / 時間 / 分）/ RUNNING 時の残り時間計算 / 非 RUNNING / 不正日付のフォールバック |
 | **Rust (cjobctl)** | | | |
 | `src/cmd/cli_deploy.rs` | `run`（バリデーション） | 4 | --release + プレリリースのエラー / 安定版・プレリリース × release フラグのバリデーション順序 |
 | `src/cmd/cli_list.rs` | `parse_versions` / `sort_versions` | 9 | ls 出力パース（latest 除外 / 空入力 / パース不能エントリ）/ ソート（降順 / プレリリース優先 / 設計書出力例の再現） |
 | `src/cmd/cli_set_latest.rs` | `run`（バリデーション） | 2 | プレリリース版の拒否（beta / rc） |
 
-**合計: Python 251 + Rust (cli) 63 + Rust (cjobctl) 28 = 342 テスト**
+**合計: Python 251 + Rust (cli) 62 + Rust (cjobctl) 28 = 341 テスト**
 
 ### 未テスト
 

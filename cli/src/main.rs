@@ -332,14 +332,9 @@ fn build_command_string(args: &[String]) -> String {
         .join(" ")
 }
 
-const MAX_TIME_LIMIT_SECONDS: u32 = 604800; // 7 days
-
 fn parse_duration(s: &str) -> Result<u32> {
     let s = s.trim();
     if let Ok(secs) = s.parse::<u32>() {
-        if secs > MAX_TIME_LIMIT_SECONDS {
-            anyhow::bail!("時間指定が上限（7日 = 604800秒）を超えています: {}", s);
-        }
         return Ok(secs);
     }
     let (num_str, multiplier) = if s.ends_with('d') {
@@ -356,12 +351,8 @@ fn parse_duration(s: &str) -> Result<u32> {
     let num: u32 = num_str.parse().map_err(|_| {
         anyhow::anyhow!("不正な時間指定です: {}（例: 3600, 30m, 1h, 6h, 1d, 3d）", s)
     })?;
-    let secs = num.checked_mul(multiplier)
-        .ok_or_else(|| anyhow::anyhow!("時間指定が大きすぎます: {}", s))?;
-    if secs > MAX_TIME_LIMIT_SECONDS {
-        anyhow::bail!("時間指定が上限（7日 = 604800秒）を超えています: {}", s);
-    }
-    Ok(secs)
+    num.checked_mul(multiplier)
+        .ok_or_else(|| anyhow::anyhow!("時間指定が大きすぎます: {}", s))
 }
 
 fn parse_time_limit_range(s: &str) -> Result<(Option<u32>, Option<u32>)> {
@@ -1174,14 +1165,6 @@ mod tests {
     fn test_parse_duration_invalid_number() {
         assert!(parse_duration("abch").is_err());
         assert!(parse_duration("-1h").is_err());
-    }
-
-    #[test]
-    fn test_parse_duration_exceeds_7_days() {
-        assert!(parse_duration("8d").is_err());
-        assert!(parse_duration("604801").is_err());
-        // Exactly 7 days is allowed
-        assert_eq!(parse_duration("7d").unwrap(), 604800);
     }
 
     #[test]
