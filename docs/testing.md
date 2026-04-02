@@ -66,6 +66,7 @@ cargo test
 | `dispatcher/main.py` | メインループ。K8s `load_incluster_config()` やシグナルハンドリングに依存し、ユニットテストが困難 |
 | `watcher/main.py` | 同上 |
 | `cli/src/client.rs` | HTTP クライアント。テストには httpmock 等のモックライブラリ追加が必要 |
+| `ctl/src/cmd/usage.rs::quota` | DB SELECT + K8s namespace 一覧の突き合わせ表示のみ。テスト可能な純粋関数なし |
 
 ## 3. テスト基盤の技術的制約
 

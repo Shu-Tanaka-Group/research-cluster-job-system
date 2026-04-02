@@ -180,6 +180,100 @@ pub async fn reset(client: &Client, namespace: Option<&str>, all: bool) -> Resul
     Ok(())
 }
 
+pub async fn quota(client: &Client, user_namespaces: &[String], namespace: Option<&str>) -> Result<()> {
+    // Filter user namespaces if --namespace is specified
+    let targets: Vec<&str> = if let Some(ns) = namespace {
+        if user_namespaces.iter().any(|n| n == ns) {
+            vec![ns]
+        } else {
+            println!("Namespace '{}' not found in user namespaces.", ns);
+            return Ok(());
+        }
+    } else {
+        let mut ns: Vec<&str> = user_namespaces.iter().map(|s| s.as_str()).collect();
+        ns.sort();
+        ns
+    };
+
+    if targets.is_empty() {
+        println!("No user namespaces found.");
+        return Ok(());
+    }
+
+    // Fetch all ResourceQuota rows from DB
+    let rows = client
+        .query(
+            "SELECT namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu, \
+                    used_cpu_millicores, used_memory_mib, used_gpu, updated_at \
+             FROM namespace_resource_quotas \
+             ORDER BY namespace",
+            &[],
+        )
+        .await?;
+
+    let mut quota_map = std::collections::HashMap::new();
+    for row in &rows {
+        let ns: &str = row.get(0);
+        quota_map.insert(ns.to_string(), row);
+    }
+
+    let now = chrono::Utc::now();
+
+    println!(
+        "{:<20} {:<22} {:<24} {:<18} {}",
+        "Namespace", "CPU (used/hard)", "Memory (used/hard)", "GPU (used/hard)", "Updated"
+    );
+    for ns in &targets {
+        if let Some(row) = quota_map.get(*ns) {
+            let hard_cpu: i32 = row.get(1);
+            let hard_mem: i32 = row.get(2);
+            let hard_gpu: i32 = row.get(3);
+            let used_cpu: i32 = row.get(4);
+            let used_mem: i32 = row.get(5);
+            let used_gpu: i32 = row.get(6);
+            let updated_at: chrono::DateTime<chrono::Utc> = row.get(7);
+
+            let cpu_str = format!(
+                "{:.1} / {:.1}",
+                used_cpu as f64 / 1000.0,
+                hard_cpu as f64 / 1000.0
+            );
+            let mem_str = format!(
+                "{}Gi / {}Gi",
+                used_mem / 1024,
+                hard_mem / 1024
+            );
+            let gpu_str = format!("{} / {}", used_gpu, hard_gpu);
+            let age = format_age(now - updated_at);
+
+            println!(
+                "{:<20} {:<22} {:<24} {:<18} {}",
+                ns, cpu_str, mem_str, gpu_str, age
+            );
+        } else {
+            println!(
+                "{:<20} {:<22} {:<24} {:<18} {}",
+                ns, "-", "-", "-", "-"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn format_age(duration: chrono::Duration) -> String {
+    let secs = duration.num_seconds();
+    if secs < 60 {
+        format!("{}s ago", secs)
+    } else if secs < 3600 {
+        format!("{}m ago", secs / 60)
+    } else if secs < 86400 {
+        format!("{}h ago", secs / 3600)
+    } else {
+        format!("{}d ago", secs / 86400)
+    }
+}
+
 pub struct ClusterTotals {
     pub cpu_millicores: i64,
     pub memory_mib: i64,
