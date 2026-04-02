@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import text
 
 from cjob.api.schemas import JobSubmitRequest, ResourceSpec, SweepSubmitRequest
 from cjob.api.services import (
@@ -753,6 +754,21 @@ def _insert_usage(session, namespace, usage_date, cpu=0, mem=0, gpu=0):
     session.flush()
 
 
+def _insert_quota(session, namespace, hard_cpu, hard_mem, hard_gpu,
+                   used_cpu, used_mem, used_gpu):
+    session.execute(
+        text(
+            "INSERT INTO namespace_resource_quotas "
+            "(namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu, "
+            "used_cpu_millicores, used_memory_mib, used_gpu) "
+            "VALUES (:ns, :hc, :hm, :hg, :uc, :um, :ug)"
+        ),
+        {"ns": namespace, "hc": hard_cpu, "hm": hard_mem, "hg": hard_gpu,
+         "uc": used_cpu, "um": used_mem, "ug": used_gpu},
+    )
+    session.flush()
+
+
 class TestGetUsage:
     def test_empty(self, db_session):
         resp = get_usage(db_session, NS)
@@ -782,6 +798,29 @@ class TestGetUsage:
         resp = get_usage(db_session, NS)
         assert len(resp.daily) == 1
         assert resp.total_cpu_millicores_seconds == 1000
+
+    def test_resource_quota_present(self, db_session):
+        _insert_quota(db_session, NS, 300000, 1280000, 4, 280000, 819200, 1)
+
+        resp = get_usage(db_session, NS)
+        q = resp.resource_quota
+        assert q is not None
+        assert q.hard_cpu_millicores == 300000
+        assert q.hard_memory_mib == 1280000
+        assert q.hard_gpu == 4
+        assert q.used_cpu_millicores == 280000
+        assert q.used_memory_mib == 819200
+        assert q.used_gpu == 1
+
+    def test_resource_quota_absent(self, db_session):
+        resp = get_usage(db_session, NS)
+        assert resp.resource_quota is None
+
+    def test_resource_quota_namespace_isolation(self, db_session):
+        _insert_quota(db_session, "other-ns", 300000, 1280000, 4, 280000, 819200, 1)
+
+        resp = get_usage(db_session, NS)
+        assert resp.resource_quota is None
 
 
 # ── submit_sweep ──
