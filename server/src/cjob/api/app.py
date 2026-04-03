@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from prometheus_client import make_asgi_app
 from sqlalchemy.exc import OperationalError
 
 from cjob.config import get_settings
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="CJob Submit API", lifespan=lifespan)
     app.include_router(router)
+    app.mount("/metrics", make_asgi_app())
 
     @app.exception_handler(OperationalError)
     async def db_operational_error_handler(request, exc):

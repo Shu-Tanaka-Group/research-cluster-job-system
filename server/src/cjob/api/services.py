@@ -4,6 +4,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from cjob.config import get_settings
+from cjob.metrics import JOBS_COMPLETED_TOTAL, JOBS_SUBMITTED_TOTAL
 from cjob.models import Job, JobEvent, UserJobCounter
 from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 
@@ -240,6 +241,7 @@ def submit_job(
     session.add(event)
 
     session.flush()
+    JOBS_SUBMITTED_TOTAL.inc()
 
     return JobSubmitResponse(job_id=job_id, status="QUEUED")
 
@@ -367,6 +369,7 @@ def submit_sweep(
     session.add(event)
 
     session.flush()
+    JOBS_SUBMITTED_TOTAL.inc()
 
     return JobSubmitResponse(job_id=job_id, status="QUEUED")
 
@@ -467,6 +470,7 @@ def cancel_single(
             JobEvent(namespace=namespace, job_id=job_id, event_type="CANCELLED")
         )
         session.flush()
+        JOBS_COMPLETED_TOTAL.labels(status="cancelled").inc()
         return {"job_id": job_id, "status": "CANCELLED"}
 
     return {"job_id": job_id, "status": job.status, "skipped": True}

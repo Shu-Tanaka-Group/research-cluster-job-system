@@ -6,6 +6,7 @@ from kubernetes.client.rest import ApiException
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
+from cjob.metrics import JOBS_COMPLETED_TOTAL
 from cjob.models import Job, JobEvent
 from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 
@@ -205,6 +206,7 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
                 db_job.node_name = _fetch_node_name(ns, kj.metadata.name)
             if new_status in ("SUCCEEDED", "FAILED"):
                 db_job.finished_at = func.now()
+                JOBS_COMPLETED_TOTAL.labels(status=new_status.lower()).inc()
             if new_status == "FAILED" and reason == "DeadlineExceeded":
                 db_job.last_error = "time limit exceeded"
             session.add(
@@ -225,6 +227,7 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
                 "K8s Job not found (TTL expired or manually deleted)"
             )
             job.finished_at = func.now()
+            JOBS_COMPLETED_TOTAL.labels(status="failed").inc()
             session.add(
                 JobEvent(
                     namespace=job.namespace,

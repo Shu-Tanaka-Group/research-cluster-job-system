@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     WORKSPACE_MOUNT_PATH: str = "/home/jovyan"
     LOG_BASE_DIR: str = "/home/jovyan/.cjob/logs"
 
+    # Metrics
+    WATCHER_METRICS_PORT: int = 9090
+
     # Logging
     LOG_LEVEL: str = "INFO"
 

@@ -4,6 +4,7 @@ import pytest
 from kubernetes.client import V1Job, V1JobCondition, V1JobStatus, V1ObjectMeta
 from kubernetes.client.rest import ApiException
 
+from cjob.metrics import JOBS_COMPLETED_TOTAL
 from cjob.models import Job, NamespaceDailyUsage, UserJobCounter
 from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 from cjob.watcher.reconciler import list_cjob_k8s_jobs, reconcile_cycle
@@ -633,3 +634,36 @@ class TestListCjobK8sJobs:
 
         result = list_cjob_k8s_jobs()
         assert len(result) == 1
+
+
+# ── Prometheus metrics ──
+
+
+@patch("cjob.watcher.reconciler._fetch_node_name", return_value=None)
+@patch("cjob.watcher.reconciler._delete_k8s_job")
+class TestMetrics:
+    def test_succeeded_increments_completed_counter(self, mock_delete, mock_fetch_node, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+        k8s_jobs = [
+            _make_k8s_job(NS, 1, "cjob-alice-1",
+                          conditions=[V1JobCondition(type="Complete", status="True")])
+        ]
+        before = JOBS_COMPLETED_TOTAL.labels(status="succeeded")._value.get()
+        reconcile_cycle(db_session, k8s_jobs)
+        assert JOBS_COMPLETED_TOTAL.labels(status="succeeded")._value.get() - before == 1
+
+    def test_failed_increments_completed_counter(self, mock_delete, mock_fetch_node, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+        k8s_jobs = [
+            _make_k8s_job(NS, 1, "cjob-alice-1",
+                          conditions=[V1JobCondition(type="Failed", status="True")])
+        ]
+        before = JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get()
+        reconcile_cycle(db_session, k8s_jobs)
+        assert JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get() - before == 1
+
+    def test_disappeared_job_increments_failed_counter(self, mock_delete, mock_fetch_node, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+        before = JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get()
+        reconcile_cycle(db_session, [])
+        assert JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get() - before == 1

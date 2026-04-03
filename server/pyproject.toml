@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "kubernetes>=29.0",
     "packaging>=23.0",
+    "prometheus_client>=0.20",
 ]
 
 [project.optional-dependencies]
