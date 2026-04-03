@@ -11,7 +11,7 @@ def _make_settings(**overrides):
     defaults = dict(
         POSTGRES_PASSWORD="test",
         RESOURCE_FLAVORS=json.dumps([
-            {"name": "cpu", "label_selector": "cluster-job=true"},
+            {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
         ]),
         DEFAULT_FLAVOR="cpu",
         NODE_RESOURCE_SYNC_INTERVAL_SEC=300,
@@ -23,8 +23,8 @@ def _make_settings(**overrides):
 def _make_settings_multi_flavor():
     return _make_settings(
         RESOURCE_FLAVORS=json.dumps([
-            {"name": "cpu", "label_selector": "cluster-job=true"},
-            {"name": "gpu-a100", "label_selector": "cluster-gpu-a100=true", "gpu_resource_name": "nvidia.com/gpu"},
+            {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+            {"name": "gpu-a100", "label_selector": "cjob.io/flavor=gpu-a100", "gpu_resource_name": "nvidia.com/gpu"},
         ]),
     )
 
@@ -165,8 +165,8 @@ class TestSyncNodeResources:
 
         calls = mock_api.list_node.call_args_list
         assert len(calls) == 2
-        assert calls[0].kwargs["label_selector"] == "cluster-job=true"
-        assert calls[1].kwargs["label_selector"] == "cluster-gpu-a100=true"
+        assert calls[0].kwargs["label_selector"] == "cjob.io/flavor=cpu"
+        assert calls[1].kwargs["label_selector"] == "cjob.io/flavor=gpu-a100"
 
     def test_multi_flavor_merges_nodes(self, mock_k8s, db_session):
         """Multiple flavors fetch nodes with correct flavor tags."""
@@ -216,7 +216,7 @@ class TestSyncNodeResources:
 
         sync_node_resources(db_session, _make_settings())
 
-        mock_api.list_node.assert_called_once_with(label_selector="cluster-job=true")
+        mock_api.list_node.assert_called_once_with(label_selector="cjob.io/flavor=cpu")
 
     def test_flavor_api_error_still_syncs_other_flavors(self, mock_k8s, db_session):
         """API failure for one flavor should not prevent other flavor sync."""
@@ -307,7 +307,7 @@ class TestSyncNodeResources:
         # Flavor with amd.com/gpu resource name
         settings = _make_settings(
             RESOURCE_FLAVORS=json.dumps([
-                {"name": "gpu-amd", "label_selector": "cluster-gpu-amd=true", "gpu_resource_name": "amd.com/gpu"},
+                {"name": "gpu-amd", "label_selector": "cjob.io/flavor=gpu-amd", "gpu_resource_name": "amd.com/gpu"},
             ]),
         )
 

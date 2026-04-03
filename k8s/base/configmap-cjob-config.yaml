@@ -20,8 +20,8 @@ data:
   FAIR_SHARE_WINDOW_DAYS: "7"
   RESOURCE_FLAVORS: |
     [
-      {"name": "cpu", "label_selector": "cluster-job=true"},
-      {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"}
+      {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+      {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu"}
     ]
   DEFAULT_FLAVOR: cpu
   NODE_RESOURCE_SYNC_INTERVAL_SEC: "300"

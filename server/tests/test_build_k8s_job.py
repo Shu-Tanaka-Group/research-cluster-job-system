@@ -92,8 +92,8 @@ class TestBuildK8sJob:
         import json
         job = _make_job(gpu=2, flavor="gpu")
         settings = _make_settings(RESOURCE_FLAVORS=json.dumps([
-            {"name": "cpu", "label_selector": "cluster-job=true"},
-            {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"},
+            {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+            {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu"},
         ]))
         manifest = build_k8s_job(job, settings)
 
@@ -109,7 +109,7 @@ class TestBuildK8sJob:
         import json
         job = _make_job(gpu=1, flavor="gpu-amd")
         settings = _make_settings(RESOURCE_FLAVORS=json.dumps([
-            {"name": "gpu-amd", "label_selector": "cluster-gpu-amd=true", "gpu_resource_name": "amd.com/gpu"},
+            {"name": "gpu-amd", "label_selector": "cjob.io/flavor=gpu-amd", "gpu_resource_name": "amd.com/gpu"},
         ]))
         manifest = build_k8s_job(job, settings)
 
@@ -217,19 +217,19 @@ class TestBuildK8sJob:
         settings = _make_settings()
         manifest = build_k8s_job(job, settings)
 
-        assert manifest.spec.template.spec.node_selector == {"cluster-job": "true"}
+        assert manifest.spec.template.spec.node_selector == {"cjob.io/flavor": "cpu"}
 
     def test_node_selector_gpu_flavor_without_gpu(self):
         """GPU flavor with gpu=0 should still get GPU node selector."""
         import json
         job = _make_job(gpu=0, flavor="gpu")
         settings = _make_settings(RESOURCE_FLAVORS=json.dumps([
-            {"name": "cpu", "label_selector": "cluster-job=true"},
-            {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"},
+            {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+            {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu"},
         ]))
         manifest = build_k8s_job(job, settings)
 
-        assert manifest.spec.template.spec.node_selector == {"cluster-gpu-job": "true"}
+        assert manifest.spec.template.spec.node_selector == {"cjob.io/flavor": "gpu"}
 
     def test_node_selector_unknown_flavor(self):
         """Unknown flavor should result in no node selector."""
