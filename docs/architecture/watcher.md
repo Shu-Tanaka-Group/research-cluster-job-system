@@ -11,6 +11,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - `DELETING` ジョブの K8s Job 削除・DB レコード削除・カウンターリセット
 - orphan Job 検出
 - DB と Kubernetes のズレ修正
+- Prometheus カウンターメトリクス（`cjob_jobs_completed_total`）の提供（`WATCHER_METRICS_PORT` で `/metrics` エンドポイント）
 
 Watcher のメインループは各スキャンサイクル完了時に `/tmp/liveness` ファイルをタッチする。Kubernetes の Liveness probe がこのファイルの最終更新時刻を確認し、ループ停止を検知して再起動できるようにする（[deployment.md](../deployment.md) §13.5 参照）。
 

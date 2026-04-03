@@ -125,7 +125,7 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 |---|---|---|---|
 | Flavor 別キュー使用状況 | Table | PostgreSQL | flavor ごとの実行中・待機中・保留中ジョブ数 |
 | キュー内ジョブ数の推移 | Time series | Prometheus | 実行中（admitted_active）と待機中（pending）の推移 |
-| ジョブ投入・完了の推移 | Time series (bar) | Prometheus | 時間帯別の投入数と完了数 |
+| ジョブ投入・完了の推移 | Time series (line) | Prometheus | 時間帯別の投入数と完了数 |
 
 #### Row 4: CPU Flavor の詳細
 
