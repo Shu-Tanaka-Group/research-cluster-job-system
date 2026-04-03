@@ -95,6 +95,7 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: WATCHER_METRICS_PORT
+                  optional: true
           resources:
             requests:
               cpu: "100m"
