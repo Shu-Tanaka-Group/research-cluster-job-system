@@ -902,11 +902,13 @@
       "targets": [
         {
           "expr": "sum(increase(cjob_jobs_submitted_total[1h]))",
+          "interval": "1h",
           "legendFormat": "投入",
           "refId": "A"
         },
         {
           "expr": "sum(increase(cjob_jobs_completed_total[1h]))",
+          "interval": "1h",
           "legendFormat": "完了",
           "refId": "B"
         }
