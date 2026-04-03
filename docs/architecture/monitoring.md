@@ -93,24 +93,25 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | ジョブ状態の内訳 | Pie chart | PostgreSQL | 直近 24 時間のジョブ状態内訳 |
 | 実行中ジョブ数 | Stat | PostgreSQL | 全ユーザー合計の実行中ジョブ数 |
 | 成功率（直近 24 時間） | Stat | PostgreSQL | SUCCEEDED / (SUCCEEDED + FAILED) |
-| Flavor 別キュー使用状況 | Table | PostgreSQL | flavor ごとの実行中・待機中・保留中ジョブ数 |
+| アクティブユーザー数 | Stat | PostgreSQL | RUNNING ジョブを持つユーザー（namespace）数 |
 | クラスタノード数 | Stat | PostgreSQL | node_resources テーブルのレコード数 |
 
 #### Row 3: キューの状態
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
+| Flavor 別キュー使用状況 | Table | PostgreSQL | flavor ごとの実行中・待機中・保留中ジョブ数 |
 | キュー内ジョブ数の推移 | Time series | Prometheus | 実行中（admitted_active）と待機中（pending）の推移 |
 | ジョブ投入・完了の推移 | Time series (bar) | PostgreSQL | 時間帯別の投入数と完了数 |
 
-#### Row 4: CPU リソースの詳細
+#### Row 4: CPU Flavor の詳細
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
 | CPU 予約量の推移 | Time series | Prometheus | cpu の CPU 予約量 vs クォータ上限 |
 | メモリ予約量の推移 | Time series | Prometheus | cpu のメモリ予約量 vs クォータ上限（GiB 表示） |
 
-#### Row 5: GPU リソースの詳細
+#### Row 5: GPU Flavor の詳細
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
@@ -263,6 +264,9 @@ ORDER BY
 
 -- 実行中ジョブ数
 SELECT COUNT(*) AS "実行中" FROM jobs WHERE status = 'RUNNING';
+
+-- アクティブユーザー数
+SELECT COUNT(DISTINCT namespace) AS "ユーザー数" FROM jobs WHERE status = 'RUNNING';
 
 -- Flavor 別キュー使用状況（flavor 追加時もクエリ変更不要）
 SELECT
