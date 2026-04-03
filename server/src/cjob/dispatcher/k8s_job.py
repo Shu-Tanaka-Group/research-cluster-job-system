@@ -133,8 +133,15 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
     toleration = _parse_taint(settings.JOB_NODE_TAINT)
     tolerations = [toleration] if toleration else None
 
+    flavor_def = settings.get_flavor_definition(job.flavor)
+    node_selector = None
+    if flavor_def:
+        key, value = flavor_def.label_selector.split("=", 1)
+        node_selector = {key: value}
+
     pod_spec = k8s_client.V1PodSpec(
         restart_policy="Never",
+        node_selector=node_selector,
         tolerations=tolerations,
         containers=[container],
         volumes=[
