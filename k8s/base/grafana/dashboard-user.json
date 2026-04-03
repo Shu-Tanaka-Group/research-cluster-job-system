@@ -901,14 +901,14 @@
       "id": 6,
       "targets": [
         {
-          "expr": "sum(increase(cjob_jobs_submitted_total[1h]))",
-          "interval": "1h",
+          "expr": "sum(increase(cjob_jobs_submitted_total[10m]))",
+          "interval": "10m",
           "legendFormat": "投入",
           "refId": "A"
         },
         {
-          "expr": "sum(increase(cjob_jobs_completed_total[1h]))",
-          "interval": "1h",
+          "expr": "sum(increase(cjob_jobs_completed_total[10m]))",
+          "interval": "10m",
           "legendFormat": "完了",
           "refId": "B"
         }
