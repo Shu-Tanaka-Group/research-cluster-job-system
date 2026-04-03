@@ -667,21 +667,31 @@ Resource Usage (past 7 days)
 
 ### Resource Quota の表示
 
-レスポンスの `resource_quota` が `null` でない場合、使用状況テーブルの前に Resource Quota セクションを表示する。`remaining` は `hard - used` で算出する。
+レスポンスの `resource_quota` が `null` でない場合、使用状況テーブルの前に Resource Quota セクションをテーブル形式で表示する。
 
-- CPU: ミリコア → コア数に変換して表示（例: `280 / 300`）
-- メモリ: MiB → GiB に変換して表示（例: `800Gi / 1250Gi`）
-- GPU: 個数のまま表示（例: `1 / 4`）
+各列の意味:
+- **Resource**: リソース種別（CPU / Memory / GPU）
+- **Used**: 現在の使用量
+- **Hard**: クォータ上限
+- **Remaining**: 残り（`hard - used`）
+- **Use%**: 使用率（`used / hard * 100`）、小数点以下1桁
+
+単位変換:
+- CPU: ミリコア → コア数、小数点以下1桁（例: `280.0`）
+- メモリ: MiB → GiB、整数（例: `800Gi`）
+- GPU: 個数のまま（例: `1`）
 
 GPU 行は `hard_gpu == 0` の場合は非表示とする。
 
 ```
 $ cjob usage
 
-Resource Quota:
-  CPU:    280 / 300 (remaining: 20)
-  Memory: 800Gi / 1250Gi (remaining: 450Gi)
-  GPU:    1 / 4 (remaining: 3)
+Resource Quota
+──────────────────────────────────────────────────
+  Resource       Used       Hard  Remaining    Use%
+  CPU           280.0      300.0       20.0   93.3%
+  Memory        800Gi     1250Gi      450Gi   64.0%
+  GPU               1          4          3   25.0%
 
 Resource Usage (past 7 days)
 ──────────────────────────────────────────────────
