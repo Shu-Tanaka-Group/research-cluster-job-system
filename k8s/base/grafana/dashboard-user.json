@@ -356,7 +356,7 @@
           "refId": "A"
         }
       ],
-      "title": "Kueue Admission 待ち (P50)",
+      "title": "リソース割当て待ち (P50)",
       "type": "stat"
     },
     {
@@ -1508,7 +1508,7 @@
           "refId": "B"
         }
       ],
-      "title": "Kueue Admission 待ち時間の推移 (P50 / P95)",
+      "title": "リソース割当て待ち時間の推移 (P50 / P95)",
       "type": "timeseries"
     },
     {
