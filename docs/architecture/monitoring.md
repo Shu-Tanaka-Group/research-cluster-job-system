@@ -93,7 +93,7 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | ジョブ状態の内訳 | Pie chart | PostgreSQL | 直近 24 時間のジョブ状態内訳 |
 | 実行中ジョブ数 | Stat | PostgreSQL | 全ユーザー合計の実行中ジョブ数 |
 | 成功率（直近 24 時間） | Stat | PostgreSQL | SUCCEEDED / (SUCCEEDED + FAILED) |
-| Flavor 別キュー使用状況 | Bar gauge | PostgreSQL | flavor ごとの実行中・待機中ジョブ数 |
+| Flavor 別キュー使用状況 | Table | PostgreSQL | flavor ごとの実行中・待機中・保留中ジョブ数 |
 | クラスタノード数 | Stat | PostgreSQL | node_resources テーブルのレコード数 |
 
 #### Row 3: キューの状態
@@ -264,15 +264,16 @@ ORDER BY
 -- 実行中ジョブ数
 SELECT COUNT(*) AS "実行中" FROM jobs WHERE status = 'RUNNING';
 
--- Flavor 別キュー使用状況（flavor ごとに独立クエリ、refId 順で表示）
--- refId A:
-SELECT COUNT(*) AS "cpu 実行中" FROM jobs WHERE flavor = 'cpu' AND status = 'RUNNING';
--- refId B:
-SELECT COUNT(*) AS "cpu 待機中" FROM jobs WHERE flavor = 'cpu' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');
--- refId C:
-SELECT COUNT(*) AS "gpu 実行中" FROM jobs WHERE flavor = 'gpu-a100' AND status = 'RUNNING';
--- refId D:
-SELECT COUNT(*) AS "gpu 待機中" FROM jobs WHERE flavor = 'gpu-a100' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');
+-- Flavor 別キュー使用状況（flavor 追加時もクエリ変更不要）
+SELECT
+  flavor AS "Flavor",
+  COUNT(*) FILTER (WHERE status = 'RUNNING') AS "実行中",
+  COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED')) AS "待機中",
+  COUNT(*) FILTER (WHERE status = 'HELD') AS "保留中"
+FROM jobs
+WHERE status IN ('RUNNING', 'QUEUED', 'DISPATCHING', 'DISPATCHED', 'HELD')
+GROUP BY flavor
+ORDER BY flavor;
 
 -- 成功率（直近 24 時間）
 SELECT

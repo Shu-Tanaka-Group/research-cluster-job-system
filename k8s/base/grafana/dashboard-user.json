@@ -416,7 +416,7 @@
       },
       "gridPos": {
         "h": 5,
-        "w": 6,
+        "w": 8,
         "x": 0,
         "y": 6
       },
@@ -474,7 +474,7 @@
       "gridPos": {
         "h": 5,
         "w": 4,
-        "x": 6,
+        "x": 8,
         "y": 6
       },
       "id": 15,
@@ -541,7 +541,7 @@
       "gridPos": {
         "h": 5,
         "w": 4,
-        "x": 10,
+        "x": 12,
         "y": 6
       },
       "id": 17,
@@ -571,6 +571,57 @@
         }
       ],
       "title": "成功率（直近 24 時間）",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_CJOB_DB}"
+      },
+      "description": "現在 RUNNING 状態のジョブを持つユーザー数。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "purple",
+            "mode": "fixed"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 4,
+        "x": 16,
+        "y": 6
+      },
+      "id": 21,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(DISTINCT namespace) AS \"ユーザー数\" FROM jobs WHERE status = 'RUNNING';",
+          "refId": "A"
+        }
+      ],
+      "title": "アクティブユーザー数",
       "type": "stat"
     },
     {
@@ -620,58 +671,34 @@
         ]
       },
       "gridPos": {
-        "h": 5,
-        "w": 6,
-        "x": 14,
-        "y": 6
+        "h": 4,
+        "w": 24,
+        "x": 0,
+        "y": 12
       },
       "id": 19,
       "options": {
-        "displayMode": "basic",
-        "maxVizHeight": 300,
-        "minVizHeight": 16,
-        "minVizWidth": 8,
-        "namePlacement": "left",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "enablePagination": false,
           "fields": "",
-          "values": true
+          "reducer": ["sum"],
+          "show": false
         },
-        "showUnfilled": true,
-        "sizing": "auto",
-        "valueMode": "color"
+        "showHeader": true,
+        "sortBy": []
       },
       "targets": [
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS \"cpu 実行中\" FROM jobs WHERE flavor = 'cpu' AND status = 'RUNNING';",
+          "rawSql": "SELECT flavor AS \"Flavor\", COUNT(*) FILTER (WHERE status = 'RUNNING') AS \"実行中\", COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED')) AS \"待機中\", COUNT(*) FILTER (WHERE status = 'HELD') AS \"保留中\" FROM jobs WHERE status IN ('RUNNING', 'QUEUED', 'DISPATCHING', 'DISPATCHED', 'HELD') GROUP BY flavor ORDER BY flavor;",
           "refId": "A"
-        },
-        {
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS \"cpu 待機中\" FROM jobs WHERE flavor = 'cpu' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');",
-          "refId": "B"
-        },
-        {
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS \"gpu 実行中\" FROM jobs WHERE flavor = 'gpu-a100' AND status = 'RUNNING';",
-          "refId": "C"
-        },
-        {
-          "format": "table",
-          "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS \"gpu 待機中\" FROM jobs WHERE flavor = 'gpu-a100' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');",
-          "refId": "D"
         }
       ],
       "title": "Flavor 別キュー使用状況",
-      "type": "bargauge"
+      "type": "table"
     },
     {
       "datasource": {
@@ -898,7 +925,7 @@
         "y": 18
       },
       "id": 102,
-      "title": "CPU リソースの詳細",
+      "title": "CPU Flavor の詳細",
       "type": "row"
     },
     {
@@ -1106,7 +1133,7 @@
         "y": 25
       },
       "id": 103,
-      "title": "GPU リソースの詳細",
+      "title": "GPU Flavor の詳細",
       "type": "row"
     },
     {
