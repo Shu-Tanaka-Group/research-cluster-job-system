@@ -117,6 +117,8 @@ kind: Service
 metadata:
   name: submit-api
   namespace: cjob-system
+  labels:
+    app: submit-api
 spec:
   selector:
     app: submit-api
