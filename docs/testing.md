@@ -37,7 +37,7 @@ cargo test
 | `tests/test_reconciler.py` | `watcher/reconciler.py` | 45 | reconcile_cycle のステータス同期（started_at / finished_at / last_error / node_name 記録・RUNNING スキップ時の完了時取得・既存値の非上書き）/ CANCELLED 削除 / orphan 検出 / DELETING フェーズ 1・2 / namespace 分離 / RUNNING 遷移時の累計消費量加算（namespace_daily_usage）/ K8s Job 消失検出（DISPATCHED・RUNNING → FAILED 遷移・last_error・finished_at 設定）/ list_cjob_k8s_jobs の API エラー伝播・正常系 / parse_cpu_millicores / parse_memory_mib / Prometheus カウンター（SUCCEEDED / FAILED 遷移・K8s Job 消失で完了カウンター増加） |
 | `tests/test_scheduler.py` | `dispatcher/scheduler.py` 5関数 | 22 | cas_update_to_dispatching / mark_dispatched / mark_failed / reset_stale_dispatching の CAS 動作・状態遷移 / filter_by_resource_quota の ResourceQuota 残リソースによる dispatch 候補フィルタリング（quota 行なし通過・CPU / メモリ / GPU 不足スキップ・sweep parallelism 倍計算・サイクル内累計追跡・namespace 混在・空リスト） |
 | `tests/test_gap_filling.py` | `dispatcher/scheduler.py::apply_gap_filling` | 7 | 隙間充填フィルタリング。無効時 / 滞留なし / 残り時間による候補選択 / RUNNING なし / namespace 混在 / 残り時間 0 / 候補なし |
-| `tests/test_resource_utils.py` | `resource_utils.py` | 12 | CPU・メモリ文字列のパース。整数 / 小数 / ミリコア / Gi / Mi / Ki / 大きな値等 |
+| `tests/test_resource_utils.py` | `resource_utils.py` | 18 | CPU・メモリ文字列のパース。整数 / 小数 / ミリコア / Gi / Mi / Ki / Ti / milli-bytes / 10 進接頭辞(k, M, G, T) / 大きな値等 |
 | `tests/test_node_sync.py` | `watcher/node_sync.py::sync_node_resources` | 14 | ノードリソース同期。挿入 / 更新 / 削除 / 全削除 / GPU パース / API エラー時のデータ保持 / ラベルセレクタ / 部分失敗時の失敗 flavor データ保持 / 部分失敗時の成功 flavor 古ノード削除 |
 | `tests/test_quota_sync.py` | `watcher/quota_sync.py::sync_flavor_quotas` | 7 | flavor quota 同期。挿入 / 複数 flavor / 更新 / 削除 / API エラー時のデータ保持 / 空 resourceGroups / ClusterQueue 名設定 |
 | `tests/test_resource_quota_sync.py` | `watcher/resource_quota_sync.py::sync_resource_quotas` | 13 | ResourceQuota 同期。ユーザー namespace への挿入 / 値更新 / ユーザー namespace 除去時の行削除 / ResourceQuota なし時の行削除 / namespace 一覧 API エラー時のデータ保持 / ResourceQuota 一覧 API エラー時のデータ保持 / ユーザー namespace なしの全削除 / CPU・メモリパース / GPU リソース名取得 / field_selector 設定 / USER_NAMESPACE_LABEL 設定 / 非ユーザー namespace の除外 / ジョブなし namespace の追跡 |
@@ -52,7 +52,7 @@ cargo test
 | `src/cmd/cli_list.rs` | `parse_versions` / `sort_versions` | 9 | ls 出力パース（latest 除外 / 空入力 / パース不能エントリ）/ ソート（降順 / プレリリース優先 / 設計書出力例の再現） |
 | `src/cmd/cli_set_latest.rs` | `run`（バリデーション） | 2 | プレリリース版の拒否（beta / rc） |
 
-**合計: Python 285 + Rust (cli) 62 + Rust (cjobctl) 28 = 375 テスト**
+**合計: Python 291 + Rust (cli) 62 + Rust (cjobctl) 28 = 381 テスト**
 
 ### 未テスト
 

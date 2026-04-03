@@ -39,3 +39,26 @@ class TestParseMemoryMib:
 
     def test_fractional_gi(self):
         assert parse_memory_mib("1.5Gi") == 1536
+
+    def test_ti_suffix(self):
+        assert parse_memory_mib("1Ti") == 1048576  # 1 TiB = 1024^2 MiB
+
+    def test_milli_bytes_suffix(self):
+        # 265428978892800m = 265428978892.8 bytes ≈ 253133 MiB
+        assert parse_memory_mib("265428978892800m") == 253133
+
+    def test_decimal_k_suffix(self):
+        # 1048576k = 1048576000 bytes ≈ 1000 MiB
+        assert parse_memory_mib("1048576k") == 1000
+
+    def test_decimal_M_suffix(self):
+        # 1000M = 10^9 bytes ≈ 954 MiB
+        assert parse_memory_mib("1000M") == 954
+
+    def test_decimal_G_suffix(self):
+        # 4G = 4 * 10^9 bytes ≈ 3815 MiB
+        assert parse_memory_mib("4G") == 3815
+
+    def test_decimal_T_suffix(self):
+        # 1T = 10^12 bytes ≈ 953674 MiB
+        assert parse_memory_mib("1T") == 953675
