@@ -12,7 +12,7 @@ def _make_settings(**overrides):
     defaults = dict(
         POSTGRES_PASSWORD="test",
         RESOURCE_FLAVORS=json.dumps([
-            {"name": "cpu", "label_selector": "cluster-job=true"},
+            {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
         ]),
         DEFAULT_FLAVOR="cpu",
         NODE_RESOURCE_SYNC_INTERVAL_SEC=300,
@@ -24,8 +24,8 @@ def _make_settings(**overrides):
 def _make_settings_with_gpu():
     return _make_settings(
         RESOURCE_FLAVORS=json.dumps([
-            {"name": "cpu", "label_selector": "cluster-job=true"},
-            {"name": "gpu-a100", "label_selector": "cluster-gpu-a100=true", "gpu_resource_name": "nvidia.com/gpu"},
+            {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+            {"name": "gpu-a100", "label_selector": "cjob.io/flavor=gpu-a100", "gpu_resource_name": "nvidia.com/gpu"},
         ]),
     )
 

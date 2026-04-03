@@ -9,7 +9,7 @@ from cjob.watcher.quota_sync import sync_flavor_quotas
 def _make_settings(**overrides):
     defaults = dict(
         POSTGRES_PASSWORD="test",
-        RESOURCE_FLAVORS='[{"name": "cpu", "label_selector": "cluster-job=true"}]',
+        RESOURCE_FLAVORS='[{"name": "cpu", "label_selector": "cjob.io/flavor=cpu"}]',
         DEFAULT_FLAVOR="cpu",
         CLUSTER_QUEUE_NAME="cjob-cluster-queue",
     )

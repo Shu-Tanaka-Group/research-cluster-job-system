@@ -103,9 +103,9 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 
 ```json
 [
-  {"name": "cpu", "label_selector": "cluster-job=true"},
-  {"name": "gpu-a100", "label_selector": "cluster-gpu-a100=true", "gpu_resource_name": "nvidia.com/gpu"},
-  {"name": "gpu-h100", "label_selector": "cluster-gpu-h100=true", "gpu_resource_name": "nvidia.com/gpu"}
+  {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+  {"name": "gpu-a100", "label_selector": "cjob.io/flavor=gpu-a100", "gpu_resource_name": "nvidia.com/gpu"},
+  {"name": "gpu-h100", "label_selector": "cjob.io/flavor=gpu-h100", "gpu_resource_name": "nvidia.com/gpu"}
 ]
 ```
 
@@ -114,7 +114,7 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 | フィールド | 必須 | 説明 |
 |---|---|---|
 | `name` | 必須 | flavor 名。Kueue ResourceFlavor 名・DB の `jobs.flavor` / `node_resources.flavor` と一致させる |
-| `label_selector` | 必須 | K8s ノードの label selector。Kueue ResourceFlavor の `nodeLabels` と一致させる |
+| `label_selector` | 必須 | K8s ノードの label selector。全 flavor で共通キー `cjob.io/flavor` を使用し、値に flavor 名を設定する。Kueue ResourceFlavor の `nodeLabels` と一致させる |
 | `gpu_resource_name` | 任意 | GPU リソースの K8s リソース名（例: `nvidia.com/gpu`、`amd.com/gpu`）。省略時はその flavor を GPU なし flavor として扱い、`gpu > 0` のジョブ投入を拒否する |
 
 flavor の `name` は Kueue ResourceFlavor の `metadata.name` と一致させる。これにより `cjobctl cluster set-quota --flavor <name>` で指定する名前と DB の flavor 値が統一され、変換処理が不要になる。

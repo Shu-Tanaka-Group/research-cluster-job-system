@@ -56,8 +56,8 @@ def settings():
         DEFAULT_TIME_LIMIT_SECONDS=86400,
         MAX_TIME_LIMIT_SECONDS=604800,
         RESOURCE_FLAVORS=json.dumps([
-            {"name": "cpu", "label_selector": "cluster-job=true"},
-            {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"},
+            {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+            {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu"},
         ]),
         DEFAULT_FLAVOR="cpu",
     )

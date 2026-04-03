@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     FAIR_SHARE_WINDOW_DAYS: int = 7
 
     # ResourceFlavor
-    RESOURCE_FLAVORS: str = '[{"name": "cpu", "label_selector": "cluster-job=true"}]'
+    RESOURCE_FLAVORS: str = '[{"name": "cpu", "label_selector": "cjob.io/flavor=cpu"}]'
     DEFAULT_FLAVOR: str = "cpu"
     NODE_RESOURCE_SYNC_INTERVAL_SEC: int = 300     # 5 minutes
 

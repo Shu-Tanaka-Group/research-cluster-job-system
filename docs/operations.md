@@ -81,7 +81,7 @@ cjobctl cluster resources
 
 ノードの追加・撤去は Watcher が `NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）間隔で自動反映する。手動更新は不要。
 
-テーブルが空の場合は Watcher が未起動または対象ノードが存在しない状態を示す。計算ノードに `cluster-job=true` ラベルが付与されていることを確認すること（[deployment.md](deployment.md) §16 参照）。
+テーブルが空の場合は Watcher が未起動または対象ノードが存在しない状態を示す。計算ノードに `cjob.io/flavor=<flavor名>` ラベルが付与されていることを確認すること（[deployment.md](deployment.md) §16 参照）。
 
 ### 1.8 ClusterQueue の nominalQuota 確認
 
@@ -263,11 +263,11 @@ cjobctl db migrate
 新しい CPU ノードには以下のラベルと taint を付与する。taint の値は ConfigMap `cjob-config` の `JOB_NODE_TAINT` に合わせること（デフォルト: `role=computing:NoSchedule`）。
 
 ```bash
-kubectl label node <node-name> cluster-job=true
+kubectl label node <node-name> cjob.io/flavor=cpu
 kubectl taint node <node-name> role=computing:NoSchedule
 ```
 
-ラベル `cluster-job=true` は ConfigMap `cjob-config` の `RESOURCE_FLAVORS` で定義された該当 flavor の `label_selector` と一致している必要がある。値を変更している場合は、ConfigMap の設定に合わせること。
+ラベル `cjob.io/flavor=cpu` は ConfigMap `cjob-config` の `RESOURCE_FLAVORS` で定義された該当 flavor の `label_selector` と一致している必要がある。全 flavor で共通キー `cjob.io/flavor` を使用し、値に flavor 名を設定する。
 
 ```bash
 # 現在の設定を確認（RESOURCE_FLAVORS, JOB_NODE_TAINT）
@@ -285,10 +285,10 @@ taint はジョブ以外の Pod が計算ノードにスケジュールされる
 
 ### 7.1.1 GPU ノードのラベル・taint の付与
 
-GPU ノードには CPU ノードとは異なるラベル（例: `cluster-gpu-job=true`）を付与する。taint は CPU ノードと同じ値を使用する。
+GPU ノードには CPU ノードと同じキー `cjob.io/flavor` を使用し、値に GPU flavor 名を設定する。taint は CPU ノードと同じ値を使用する。
 
 ```bash
-kubectl label node <gpu-node-name> cluster-gpu-job=true
+kubectl label node <gpu-node-name> cjob.io/flavor=gpu
 kubectl taint node <gpu-node-name> role=computing:NoSchedule
 ```
 
