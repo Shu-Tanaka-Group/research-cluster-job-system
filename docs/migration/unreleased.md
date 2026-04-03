@@ -4,23 +4,47 @@
 
 ## Prometheus メトリクスの有効化（#121）
 
-### 1. ConfigMap の確認
+### 1. イメージの再ビルド
 
-ConfigMap `cjob-config` に `WATCHER_METRICS_PORT` キーが追加された。デフォルト値は `"9090"`。overlay でカスタマイズしている場合は値を追加する。
+Submit API と Watcher に `prometheus_client` 依存とメトリクス計装が追加された。Docker イメージを再ビルドし push する。
 
-### 2. NetworkPolicy の確認
+```bash
+read -r VERSION < VERSION
+docker build -t your-registry/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
+docker build -t your-registry/cjob-watcher:${VERSION} -f server/Dockerfile.watcher server/
+docker push your-registry/cjob-submit-api:${VERSION}
+docker push your-registry/cjob-watcher:${VERSION}
+```
 
-Prometheus namespace から Submit API への metrics scrape を許可する NetworkPolicy `allow-metrics-scrape` が追加された。base のデフォルトは `kubernetes.io/metadata.name: monitoring` ラベルで namespace を識別する。
+### 2. overlay の確認
 
-Prometheus が `monitoring` 以外の namespace で動作している場合は、overlay で NetworkPolicy の `namespaceSelector.matchLabels` をパッチする（`overlay-example/kustomization.yaml` 参照）。
+base に以下の変更が追加された。デフォルト値と異なる場合は overlay で上書きする。
 
-### 3. Prometheus scrape の確認
+| 項目 | デフォルト値 | overlay での上書き方法 |
+|---|---|---|
+| `WATCHER_METRICS_PORT` | `9090` | ConfigMap パッチ |
+| `PROMETHEUS_NAMESPACE_LABEL` | `kubernetes.io/metadata.name=monitoring` | ConfigMap パッチ |
+| NetworkPolicy `allow-metrics-scrape` の namespace ラベル | `kubernetes.io/metadata.name: monitoring` | NetworkPolicy パッチ（`overlay-example/kustomization.yaml` 参照） |
+| RBAC `rbac-prometheus.yaml` の Prometheus SA | `prometheus-k8s` / namespace `monitoring` | RoleBinding パッチ（`overlay-example/kustomization.yaml` 参照） |
+
+### 3. K8s リソースの適用
+
+```bash
+kubectl apply -k /path/to/my-overlay
+kubectl rollout restart deployment/submit-api deployment/watcher -n cjob-system
+```
+
+### 4. Prometheus scrape の確認
 
 Pod テンプレートに `prometheus.io/scrape` アノテーションが追加された。Annotation-based discovery 環境では自動的に scrape される。
 
-Prometheus Operator 環境では、overlay の `kustomization.yaml` に ServiceMonitor / PodMonitor を追加する（`overlay-example/kustomization.yaml` 参照）。適用後、Grafana の Explore 画面で `cjob_jobs_submitted_total` が表示されることを確認する。
+Prometheus Operator 環境では、overlay の `kustomization.yaml` の resources に `base/prometheus-operator` ディレクトリを追加する（`overlay-example/kustomization.yaml` 参照）。
 
-### 4. Grafana ダッシュボードの再インポート
+適用後、Grafana の Explore 画面で `cjob_jobs_submitted_total` が表示されることを確認する。表示されない場合は以下を確認する:
+- Prometheus Operator が `cjob-system` namespace の ServiceMonitor / PodMonitor を監視対象に含んでいるか
+- Prometheus の ServiceAccount が `cjob-system` namespace のリソースを読み取れるか（`rbac-prometheus.yaml` が適用済みか）
+
+### 5. Grafana ダッシュボードの再インポート
 
 `k8s/base/grafana/dashboard-user.json` が更新された。Grafana UI の `Dashboards > Import` から JSON ファイルを再インポートする。
 
