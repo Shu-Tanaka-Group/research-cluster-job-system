@@ -877,7 +877,7 @@
             "axisPlacement": "auto",
             "barAlignment": 0,
             "drawStyle": "bars",
-            "fillOpacity": 40,
+            "fillOpacity": 30,
             "gradientMode": "none",
             "lineWidth": 1,
             "pointSize": 5,
