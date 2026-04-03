@@ -1668,7 +1668,7 @@
       },
       "targets": [
         {
-          "expr": "avg_over_time(sum(increase(cjob_jobs_submitted_total[1h]))[7d:24h])",
+          "expr": "avg_over_time((sum(increase(cjob_jobs_submitted_total[1h])) or vector(0))[7d:24h])",
           "legendFormat": "平均ジョブ数",
           "refId": "A"
         }

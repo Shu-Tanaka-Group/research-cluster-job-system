@@ -185,7 +185,7 @@ sum(increase(cjob_jobs_submitted_total[10m]))
 sum(increase(cjob_jobs_completed_total[10m]))
 
 # 時間帯別混雑度（過去 7 日平均、パネル時間範囲: 24h）
-avg_over_time(sum(increase(cjob_jobs_submitted_total[1h]))[7d:24h])
+avg_over_time((sum(increase(cjob_jobs_submitted_total[1h])) or vector(0))[7d:24h])
 ```
 
 ```promql
