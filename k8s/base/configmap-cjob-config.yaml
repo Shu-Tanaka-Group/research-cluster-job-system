@@ -31,6 +31,8 @@ data:
   MAX_TIME_LIMIT_SECONDS: "604800"
   CLUSTER_QUEUE_NAME: cjob-cluster-queue
   KUEUE_LOCAL_QUEUE_NAME: default
+  RESOURCE_QUOTA_NAME: computing-quota
+  RESOURCE_QUOTA_SYNC_INTERVAL_SEC: "10"
   USER_NAMESPACE_LABEL: cjob.io/user-namespace=true
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
