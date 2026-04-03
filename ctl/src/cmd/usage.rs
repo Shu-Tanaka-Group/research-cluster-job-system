@@ -219,10 +219,10 @@ pub async fn quota(client: &Client, user_namespaces: &[String], namespace: Optio
 
     let now = chrono::Utc::now();
 
-    println!(
-        "{:<20} {:<22} {:<24} {:<18} {}",
-        "Namespace", "CPU (used/hard)", "Memory (used/hard)", "GPU (used/hard)", "Updated"
-    );
+    let headers = ["Namespace", "CPU (used/hard)", "Memory (used/hard)", "GPU (used/hard)", "Updated"];
+
+    // Pass 1: collect formatted data
+    let mut table_rows: Vec<[String; 5]> = Vec::new();
     for ns in &targets {
         if let Some(row) = quota_map.get(*ns) {
             let hard_cpu: i32 = row.get(1);
@@ -233,29 +233,56 @@ pub async fn quota(client: &Client, user_namespaces: &[String], namespace: Optio
             let used_gpu: i32 = row.get(6);
             let updated_at: chrono::DateTime<chrono::Utc> = row.get(7);
 
-            let cpu_str = format!(
-                "{:.1} / {:.1}",
-                used_cpu as f64 / 1000.0,
-                hard_cpu as f64 / 1000.0
-            );
-            let mem_str = format!(
-                "{}Gi / {}Gi",
-                used_mem / 1024,
-                hard_mem / 1024
-            );
-            let gpu_str = format!("{} / {}", used_gpu, hard_gpu);
-            let age = format_age(now - updated_at);
-
-            println!(
-                "{:<20} {:<22} {:<24} {:<18} {}",
-                ns, cpu_str, mem_str, gpu_str, age
-            );
+            table_rows.push([
+                ns.to_string(),
+                format!("{:.1} / {:.1}", used_cpu as f64 / 1000.0, hard_cpu as f64 / 1000.0),
+                format!("{}Gi / {}Gi", used_mem / 1024, hard_mem / 1024),
+                format!("{} / {}", used_gpu, hard_gpu),
+                format_age(now - updated_at),
+            ]);
         } else {
-            println!(
-                "{:<20} {:<22} {:<24} {:<18} {}",
-                ns, "-", "-", "-", "-"
-            );
+            table_rows.push([
+                ns.to_string(),
+                "-".to_string(),
+                "-".to_string(),
+                "-".to_string(),
+                "-".to_string(),
+            ]);
         }
+    }
+
+    // Calculate dynamic column widths
+    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
+    for row in &table_rows {
+        for (i, cell) in row.iter().enumerate() {
+            widths[i] = widths[i].max(cell.len());
+        }
+    }
+
+    // Pass 2: print header and rows
+    let sep = "   ";
+    for (i, h) in headers.iter().enumerate() {
+        if i > 0 { print!("{}", sep); }
+        if i == headers.len() - 1 {
+            print!("{}", h);
+        } else {
+            print!("{:<width$}", h, width = widths[i]);
+        }
+    }
+    println!();
+    for row in &table_rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i > 0 { print!("{}", sep); }
+            if i == headers.len() - 1 {
+                print!("{}", cell);
+            } else if (1..=3).contains(&i) {
+                // Right-align numeric columns for easier comparison
+                print!("{:>width$}", cell, width = widths[i]);
+            } else {
+                print!("{:<width$}", cell, width = widths[i]);
+            }
+        }
+        println!();
     }
 
     Ok(())

@@ -134,13 +134,15 @@ dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 - DB に行がない namespace（ResourceQuota 未設定）は各列を `-` で表示
 - ユーザー namespace が存在しない場合は "No user namespaces found." を表示
 
+各列は動的カラム幅で整形する（ヘッダーとデータの最大幅に合わせて列幅を決定し、列間はスペース3つ）。
+
 出力例:
 
 ```
-Namespace        CPU (used/hard)      Memory (used/hard)       GPU (used/hard)  Updated
-user-alice       20.0 / 300.0         80Gi / 1250Gi            0 / 4            2m ago
-user-bob         260.0 / 300.0        800Gi / 1250Gi           1 / 4            2m ago
-user-charlie     -                    -                        -                -
+Namespace      CPU (used/hard)   Memory (used/hard)   GPU (used/hard)   Updated
+user-alice      20.0 / 300.0      80Gi / 1250Gi       0 / 4             2m ago
+user-bob       260.0 / 300.0     800Gi / 1250Gi       1 / 4             2m ago
+user-charlie   -                 -                    -                 -
 ```
 
 ### 5.3 namespace weight 管理
