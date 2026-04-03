@@ -53,7 +53,31 @@ cd ctl/ && cargo generate-lockfile && cd ..
 cd server/ && uv lock && cd ..
 ```
 
-### Step 4: 移行手順書のリネーム
+### Step 4: 移行手順の記載漏れ確認
+
+前バージョンのタグからの差分を確認し、`docs/migration/unreleased.md` に記載すべき移行手順が漏れていないか確認する。
+
+```bash
+# 前バージョンのタグと現在の差分を確認
+git diff <old-tag>..HEAD --stat
+
+# 特に以下の変更を重点的に確認する
+git diff <old-tag>..HEAD -- k8s/base/configmap-cjob-config.yaml  # ConfigMap のキー追加・変更
+git diff <old-tag>..HEAD -- server/src/cjob/models.py            # DB スキーマの変更
+git diff <old-tag>..HEAD -- docs/architecture/kueue.md           # Kueue リソースの変更
+git diff <old-tag>..HEAD -- docs/deployment.md                   # デプロイ手順の変更
+```
+
+以下に該当する変更がある場合、`docs/migration/unreleased.md` に移行手順を追加する（ファイルが存在しない場合は新規作成する）:
+
+- ConfigMap のキー追加・デフォルト値の変更（overlay への反映が必要）
+- DB スキーマの変更（`cjobctl db migrate` の実行が必要）
+- Kueue リソース（ResourceFlavor / ClusterQueue）の設定変更
+- ノードラベル・Taint の変更
+- RBAC や Kyverno ポリシーの変更
+- 手動での設定変更やデータ移行が必要なその他の変更
+
+### Step 5: 移行手順書のリネーム
 
 `docs/migration/unreleased.md` が存在する場合、バージョン名にリネームする。
 
@@ -65,7 +89,7 @@ mv docs/migration/unreleased.md docs/migration/vX.Y.Z.md
 
 `unreleased.md` に記載がない（大きな変更がない）場合はこのステップをスキップしてよい。
 
-### Step 5: コミット
+### Step 6: コミット
 
 バージョン更新は 1 コミットにまとめる。対象ファイル:
 
