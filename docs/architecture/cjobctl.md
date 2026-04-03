@@ -187,7 +187,7 @@ FLAVOR      CPU (cores)   Memory (GiB)   GPU
 cpu              128         512.0          0
 gpu-a100          32         128.0          4
 
-=== Per-Flavor Max per Node (Submit API rejection threshold) ===
+=== Per-Flavor Max Node Allocatable ===
 FLAVOR      CPU (cores)   Memory (GiB)   GPU
 cpu               64         256.0          0
 gpu-a100          32         128.0          4

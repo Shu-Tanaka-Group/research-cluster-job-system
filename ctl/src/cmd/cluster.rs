@@ -95,7 +95,7 @@ pub async fn resources(client: &Client) -> Result<()> {
         }
 
         println!();
-        println!("=== Per-Flavor Max per Node (Submit API rejection threshold) ===");
+        println!("=== Per-Flavor Max Node Allocatable ===");
         println!(
             "{:<14} {:>12} {:>14} {:>6}",
             "FLAVOR", "CPU (cores)", "Memory (GiB)", "GPU"

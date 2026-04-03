@@ -214,7 +214,7 @@ enum WeightCommands {
 
 #[derive(Subcommand)]
 enum ClusterCommands {
-    /// Show node resources, cluster totals, and rejection thresholds
+    /// Show node resources, cluster totals, and max node allocatable per flavor
     Resources,
     /// Show ResourceFlavor resource usage
     FlavorUsage,
