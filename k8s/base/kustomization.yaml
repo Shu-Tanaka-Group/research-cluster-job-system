@@ -8,6 +8,7 @@ resources:
   - pvc-cli-binary.yaml
   - rbac-submit-api.yaml
   - rbac-dispatcher.yaml
+  - rbac-prometheus.yaml
   - networkpolicy-allow-submit-api.yaml
   - networkpolicy-allow-metrics-scrape.yaml
   - postgres/statefulset.yaml

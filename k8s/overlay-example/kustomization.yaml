@@ -57,6 +57,18 @@ patches:
     target:
       kind: StatefulSet
       name: postgres
+  # Prometheus の ServiceAccount 名または namespace が異なる場合に上書きする
+  # base のデフォルト: ServiceAccount prometheus-k8s / namespace monitoring
+  # - patch: |
+  #     - op: replace
+  #       path: /subjects/0/name
+  #       value: your-prometheus-sa
+  #     - op: replace
+  #       path: /subjects/0/namespace
+  #       value: your-monitoring-namespace
+  #   target:
+  #     kind: RoleBinding
+  #     name: prometheus-k8s
   # Prometheus namespace のラベルが異なる場合に上書きする
   # base のデフォルト: kubernetes.io/metadata.name: monitoring
   # - patch: |
