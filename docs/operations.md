@@ -426,6 +426,7 @@ cjobctl system stop
    - DISPATCHING / DISPATCHED → QUEUED に戻す
    - RUNNING → FAILED（`last_error: system shutdown`）
    - QUEUED → 変更なし（起動後に自動的に再 dispatch される）
+   - HELD → 変更なし（ユーザーが `cjob release` するまで保留を維持）
 3. 全ユーザー namespace の K8s Job を削除
 4. Dispatcher、Watcher を replicas=0 にスケールダウン
 

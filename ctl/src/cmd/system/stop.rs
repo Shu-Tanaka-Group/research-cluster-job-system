@@ -22,9 +22,10 @@ pub async fn run(
                 COUNT(*) FILTER (WHERE status = 'QUEUED') AS queued, \
                 COUNT(*) FILTER (WHERE status = 'DISPATCHING') AS dispatching, \
                 COUNT(*) FILTER (WHERE status = 'DISPATCHED') AS dispatched, \
-                COUNT(*) FILTER (WHERE status = 'RUNNING') AS running \
+                COUNT(*) FILTER (WHERE status = 'RUNNING') AS running, \
+                COUNT(*) FILTER (WHERE status = 'HELD') AS held \
              FROM jobs \
-             WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED', 'RUNNING')",
+             WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED', 'RUNNING', 'HELD')",
             &[],
         )
         .await?;
@@ -33,13 +34,14 @@ pub async fn run(
     let dispatching: i64 = counts.get("dispatching");
     let dispatched: i64 = counts.get("dispatched");
     let running: i64 = counts.get("running");
-    let total = queued + dispatching + dispatched + running;
+    let held: i64 = counts.get("held");
+    let total = queued + dispatching + dispatched + running + held;
 
     let revert_count = dispatching + dispatched;
 
     println!(
-        "Active jobs: {} (QUEUED: {}, DISPATCHING: {}, DISPATCHED: {}, RUNNING: {})",
-        total, queued, dispatching, dispatched, running
+        "Active jobs: {} (QUEUED: {}, DISPATCHING: {}, DISPATCHED: {}, RUNNING: {}, HELD: {})",
+        total, queued, dispatching, dispatched, running, held
     );
     println!("This will:");
     println!("  - Scale down submit-api, dispatcher, watcher to 0 replicas");
@@ -61,6 +63,12 @@ pub async fn run(
         println!(
             "  - {} QUEUED job(s) will be re-dispatched on next start",
             queued_after
+        );
+    }
+    if held > 0 {
+        println!(
+            "  - {} HELD job(s) will remain held (use cjob release to resume)",
+            held
         );
     }
 
