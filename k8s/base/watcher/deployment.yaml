@@ -68,6 +68,21 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: NODE_RESOURCE_SYNC_INTERVAL_SEC
+            - name: RESOURCE_QUOTA_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RESOURCE_QUOTA_NAME
+            - name: RESOURCE_QUOTA_SYNC_INTERVAL_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: RESOURCE_QUOTA_SYNC_INTERVAL_SEC
+            - name: USER_NAMESPACE_LABEL
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: USER_NAMESPACE_LABEL
           resources:
             requests:
               cpu: "100m"

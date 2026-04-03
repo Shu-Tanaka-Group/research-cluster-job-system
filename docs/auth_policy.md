@@ -110,24 +110,14 @@ roleRef:
 
 ---
 
-## 4. namespace 作成スクリプトへの追加
+## 4. namespace 作成時の設定
 
-既存の namespace 作成スクリプトに ServiceAccount 作成を追加する。
+ユーザー namespace の作成手順は [deployment.md §11](../docs/deployment.md#11-namespace-作成スクリプト完成版) を参照。認証・認可に関わる要点を以下にまとめる。
 
-```bash
-# namespace 作成
-kubectl create namespace ${NS_NAME}
-
-# ラベル・アノテーション付与
-kubectl label namespace ${NS_NAME} cjob.io/user-namespace=true
-kubectl annotate namespace ${NS_NAME} cjob.io/username=${USERNAME}
-
-# ServiceAccount 作成
-kubectl create serviceaccount computing-user -n ${NS_NAME}
-```
-
-- `${NS_NAME}`: namespace 名（任意。例: `alice`, `user-alice`, `lab-physics`）
-- `${USERNAME}`: ユーザー名（PVC claim 名と一致させる必要がある）
+- 各 namespace に `computing-user` ServiceAccount を作成し、JupyterHub KubeSpawner で User Pod に付与する
+- namespace にラベル `cjob.io/user-namespace=true` を付与することで、NetworkPolicy が Submit API への通信を許可する
+- namespace にアノテーション `cjob.io/username` を付与することで、Submit API がユーザー名を解決できる
+- namespace 名は任意（例: `user-alice`, `lab-physics`）。識別はラベルとアノテーションで行う
 
 ---
 

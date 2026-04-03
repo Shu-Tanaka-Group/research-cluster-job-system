@@ -139,7 +139,7 @@ Submit API・Dispatcher・Watcher が共通で参照する。
 
 設計上の要点:
 - base にデフォルト値を定義し、環境固有の値は overlay の patches で上書きする（`k8s/overlay-example/` 参照）
-- `USER_NAMESPACE_LABEL` はサーバーコンポーネント（Submit API / Dispatcher / Watcher）の env には注入しない。NetworkPolicy の `namespaceSelector` と cjobctl の `weight exclusive` コマンドが参照する
+- `USER_NAMESPACE_LABEL` はサーバーコンポーネントのうち Submit API / Dispatcher の env には注入しない。Watcher は ResourceQuota 同期（[watcher.md](architecture/watcher.md) §1.3）で使用するため env に注入する。NetworkPolicy の `namespaceSelector` と cjobctl の `weight exclusive` コマンドも参照する
 - 各設定値の意味と設計根拠は [resources.md](architecture/resources.md) を参照
 
 ### 6.2 各コンポーネントへの注入パターン
@@ -173,7 +173,7 @@ env:
 | cjobctl | `cjob-config`（`config show` で参照） | - |
 | NetworkPolicy | -（`USER_NAMESPACE_LABEL` の値を YAML にハードコード） | - |
 
-`USER_NAMESPACE_LABEL` はサーバーコンポーネント（Submit API / Dispatcher / Watcher）の env には注入しない。NetworkPolicy の `namespaceSelector` と cjobctl の `weight exclusive` コマンドが参照する。
+`USER_NAMESPACE_LABEL` は Submit API / Dispatcher の env には注入しない。Watcher は ResourceQuota 同期で使用するため env に注入する。NetworkPolicy の `namespaceSelector` と cjobctl の `weight exclusive` コマンドも参照する。
 
 ---
 
