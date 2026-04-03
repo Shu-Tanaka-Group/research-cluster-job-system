@@ -53,7 +53,19 @@ cd ctl/ && cargo generate-lockfile && cd ..
 cd server/ && uv lock && cd ..
 ```
 
-### Step 4: コミット
+### Step 4: 移行手順書のリネーム
+
+`docs/migration/unreleased.md` が存在する場合、バージョン名にリネームする。
+
+```bash
+mv docs/migration/unreleased.md docs/migration/vX.Y.Z.md
+```
+
+`docs/migration.md` 末尾のリンクも更新する（`unreleased` → `vX.Y.Z`）。
+
+`unreleased.md` に記載がない（大きな変更がない）場合はこのステップをスキップしてよい。
+
+### Step 5: コミット
 
 バージョン更新は 1 コミットにまとめる。対象ファイル:
 
@@ -65,6 +77,8 @@ cd server/ && uv lock && cd ..
 - `ctl/Cargo.lock`
 - `server/uv.lock`
 - `k8s/overlay-example/kustomization.yaml`
+- `docs/migration/vX.Y.Z.md`（リネームした場合）
+- `docs/migration.md`（リンクを更新した場合）
 
 ## 備考
 
