@@ -543,7 +543,7 @@ kubectl apply -f kueue/cluster-queue.yaml
 
 ## 16. 計算ノードの準備
 
-計算ノードには flavor ごとに一意のラベルを付与する。各ラベルは Kueue ResourceFlavor の `nodeLabels` および ConfigMap `RESOURCE_FLAVORS` の `label_selector` と一致させる。Taint の値は ConfigMap `cjob-config` の `JOB_NODE_TAINT` で設定する（デフォルト: `role=computing:NoSchedule`）。
+計算ノードには共通キー `cjob.io/flavor` のラベルを付与し、値に flavor 名を設定する。このラベルは Kueue ResourceFlavor の `nodeLabels` および ConfigMap `RESOURCE_FLAVORS` の `label_selector` と一致させる。全 flavor で同一キーを使用することで、Kueue が cross-flavor の矛盾を検出し、誤った flavor へのスケジューリングを防止する。Taint の値は ConfigMap `cjob-config` の `JOB_NODE_TAINT` で設定する（デフォルト: `role=computing:NoSchedule`）。
 
 **重要:** ConfigMap `JOB_NODE_TAINT`・Kueue ResourceFlavor の `nodeTaints`・ノードの Taint の 3 箇所は同じ値に統一する必要がある。不一致の場合、Job Pod がスケジュールされない。
 
@@ -553,27 +553,27 @@ kubectl apply -f kueue/cluster-queue.yaml
 
 ```bash
 # CPU 計算ノードにラベルと Taint を付与する
-kubectl label node <node-name> cluster-job=true
+kubectl label node <node-name> cjob.io/flavor=cpu
 kubectl taint node <node-name> role=computing:NoSchedule
 
 # 確認
-kubectl get nodes -l cluster-job=true
+kubectl get nodes -l cjob.io/flavor=cpu
 ```
 
 ### 16.2 GPU ノード
 
-GPU ノードには CPU ノードとは異なるラベル（例: `cluster-gpu-job=true`）を付与する。Taint は CPU ノードと同じ値を使用する。
+GPU ノードには CPU ノードと同じキー `cjob.io/flavor` を使用し、値に GPU flavor 名を設定する。Taint は CPU ノードと同じ値を使用する。
 
 ```bash
 # GPU ノードにラベルと Taint を付与する
-kubectl label node <gpu-node-name> cluster-gpu-job=true
+kubectl label node <gpu-node-name> cjob.io/flavor=gpu
 kubectl taint node <gpu-node-name> role=computing:NoSchedule
 
 # 確認
-kubectl get nodes -l cluster-gpu-job=true
+kubectl get nodes -l cjob.io/flavor=gpu
 ```
 
-ノードの振り分けは Dispatcher が flavor の `label_selector` を K8s Job の `nodeSelector` として設定し、Kueue がそれにマッチする ResourceFlavor の `nodeLabels` に基づいてノードにスケジュールすることで行われる。
+ノードの振り分けは共通キー `cjob.io/flavor` のラベル値で制御される。Dispatcher が flavor の `label_selector` を K8s Job の `nodeSelector` として設定し、Kueue がそれにマッチする ResourceFlavor の `nodeLabels` に基づいてノードにスケジュールする。
 
 計算ノードを追加・撤去した場合、Watcher が `node_resources` テーブルを自動的に同期するため、Dispatcher や Submit API の設定変更は不要である。
 
@@ -584,7 +584,7 @@ kubectl get nodes -l cluster-gpu-job=true
 #### 1. ノードにラベルと Taint を付与する
 
 ```bash
-kubectl label node <node-name> <label-key>=true    # 例: cluster-gpu-h100=true
+kubectl label node <node-name> cjob.io/flavor=<flavor名>    # 例: cjob.io/flavor=gpu-h100
 kubectl taint node <node-name> role=computing:NoSchedule
 ```
 
@@ -597,7 +597,7 @@ metadata:
   name: <flavor名>         # 例: gpu-h100（DB の flavor 値と一致させる）
 spec:
   nodeLabels:
-    <label-key>: "true"    # ステップ 1 で付与したラベルと一致させる
+    cjob.io/flavor: "<flavor名>"    # ステップ 1 で付与したラベルと一致させる
   nodeTaints:
     - key: "role"
       value: "computing"
@@ -626,7 +626,7 @@ kubectl edit configmap cjob-config -n cjob-system
 `RESOURCE_FLAVORS` の JSON 配列に新しい flavor 定義を追加する。GPU を持つ flavor は `gpu_resource_name` を指定する。
 
 ```json
-{"name": "gpu-h100", "label_selector": "cluster-gpu-h100=true", "gpu_resource_name": "nvidia.com/gpu"}
+{"name": "gpu-h100", "label_selector": "cjob.io/flavor=gpu-h100", "gpu_resource_name": "nvidia.com/gpu"}
 ```
 
 #### 5. コンポーネントを再起動する

@@ -10,7 +10,7 @@ ResourceFlavor の `metadata.name` は、DB の `node_resources.flavor` / `jobs.
 
 各 ResourceFlavor はノードのラベルセレクタで対象ノード群を識別する。flavor の追加は以下の手順で行う:
 
-1. 対象ノードに一意のラベル（例: `cluster-gpu-a100=true`）を付与する
+1. 対象ノードに共通キー `cjob.io/flavor` のラベル（例: `cjob.io/flavor=gpu-a100`）を付与する
 2. Kueue ResourceFlavor オブジェクトを作成する
 3. ClusterQueue の `resourceGroups[0].flavors` リストに追加する
 4. ConfigMap `RESOURCE_FLAVORS` に flavor 定義を追加する
@@ -24,7 +24,7 @@ metadata:
   name: <flavor名>        # DB の flavor 値と一致させる
 spec:
   nodeLabels:
-    <ラベルキー>: "true"    # 対象ノードを識別するラベル
+    cjob.io/flavor: "<flavor名>"    # 対象ノードを識別するラベル（値は flavor 名と一致させる）
   nodeTaints:               # Taint を使う場合のみ（JOB_NODE_TAINT と一致させる）
     - key: "role"
       value: "computing"
@@ -49,7 +49,7 @@ metadata:
   name: cpu
 spec:
   nodeLabels:
-    cluster-job: "true"
+    cjob.io/flavor: "cpu"
   nodeTaints:
     - key: "role"
       value: "computing"
@@ -70,7 +70,7 @@ metadata:
   name: gpu-a100
 spec:
   nodeLabels:
-    cluster-gpu-a100: "true"
+    cjob.io/flavor: "gpu-a100"
   nodeTaints:
     - key: "role"
       value: "computing"
@@ -82,7 +82,7 @@ spec:
       effect: "NoSchedule"
 ```
 
-GPU ノードには CPU ノードと同じ taint（`role=computing:NoSchedule`）を付与する。追加の taint は不要。Dispatcher 側の toleration 設定も変更不要であり、ノードの振り分けは Kueue の ResourceFlavor `nodeLabels` が担う。
+GPU ノードには CPU ノードと同じ taint（`role=computing:NoSchedule`）を付与する。追加の taint は不要。Dispatcher 側の toleration 設定も変更不要であり、ノードの振り分けは Kueue の ResourceFlavor `nodeLabels` が担う。全 flavor が共通キー `cjob.io/flavor` を使用するため、Kueue は同一キー・異なる値の矛盾を検出し、cross-flavor の admit を防止できる。
 
 ## 2. ClusterQueue
 
@@ -197,7 +197,7 @@ spec:
     spec:
       restartPolicy: Never
       nodeSelector:                           # RESOURCE_FLAVORS の label_selector から Dispatcher が動的に設定
-        cluster-job: "true"
+        cjob.io/flavor: "cpu"
       tolerations:                            # JOB_NODE_TAINT の値から Dispatcher が動的に生成（空の場合は省略）
         - key: "role"
           operator: "Equal"
