@@ -183,7 +183,7 @@ $ cjob add --flavor cpu --gpu 1 -- python train.py
 Error: flavor 'cpu' は GPU をサポートしていません
 ```
 
-CPU やメモリの要求量がその種類のノードの最大容量を超える場合もエラーになります。
+CPU やメモリの要求量が `cjob flavor info` で表示される **TASK LIMIT** を超える場合もエラーになります。
 
 ### 3.5 ジョブの種類を確認する
 
