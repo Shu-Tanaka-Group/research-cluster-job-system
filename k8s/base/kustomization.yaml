@@ -9,6 +9,7 @@ resources:
   - rbac-submit-api.yaml
   - rbac-dispatcher.yaml
   - networkpolicy-allow-submit-api.yaml
+  - networkpolicy-allow-metrics-scrape.yaml
   - postgres/statefulset.yaml
   - submit-api/deployment.yaml
   - dispatcher/deployment.yaml

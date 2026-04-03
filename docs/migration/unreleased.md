@@ -8,11 +8,17 @@
 
 ConfigMap `cjob-config` に `WATCHER_METRICS_PORT` キーが追加された。デフォルト値は `"9090"`。overlay でカスタマイズしている場合は値を追加する。
 
-### 2. Prometheus scrape 設定の確認
+### 2. NetworkPolicy の確認
+
+Prometheus namespace から Submit API への metrics scrape を許可する NetworkPolicy `allow-metrics-scrape` が追加された。base のデフォルトは `kubernetes.io/metadata.name: monitoring` ラベルで namespace を識別する。
+
+Prometheus が `monitoring` 以外の namespace で動作している場合は、overlay で NetworkPolicy の `namespaceSelector.matchLabels` をパッチする（`overlay-example/kustomization.yaml` 参照）。
+
+### 3. Prometheus scrape 設定の確認
 
 Submit API と Watcher の Pod テンプレートに `prometheus.io/scrape` アノテーションが追加された。Prometheus が annotation-based service discovery を使用している場合は自動的に scrape される。ServiceMonitor を使用している場合は、別途設定を追加する。
 
-### 3. Grafana ダッシュボードの再インポート
+### 4. Grafana ダッシュボードの再インポート
 
 `k8s/base/grafana/dashboard-user.json` が更新された。Grafana UI の `Dashboards > Import` から JSON ファイルを再インポートする。
 

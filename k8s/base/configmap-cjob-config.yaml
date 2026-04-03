@@ -36,4 +36,5 @@ data:
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
   TTL_SECONDS_AFTER_FINISHED: "300"
   WATCHER_METRICS_PORT: "9090"
+  PROMETHEUS_NAMESPACE_LABEL: kubernetes.io/metadata.name=monitoring
   JOB_NODE_TAINT: "role=computing:NoSchedule"
