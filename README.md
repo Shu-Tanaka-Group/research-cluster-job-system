@@ -234,16 +234,13 @@ $ cjob help
 
 ## インストール
 
-`gh` コマンドが使えるなら次の一連のコマンドで `cjob` をインストールできます。
+次のコマンドで最新の `cjob` をインストールできます。
 
 ```bash
-gh release download --repo Shu-Tanaka-Group/stg-cluster-job-system --pattern "cjob" -D /tmp
+curl -fsSL https://github.com/Shu-Tanaka-Group/research-cluster-job-system/releases/latest/download/cjob -o /tmp/cjob
 chmod u+x /tmp/cjob
 mv /tmp/cjob ~/.local/bin/cjob
 ```
-
-手動で `cjob` ファイルをインストールする場合は、[リリースページ](https://github.com/Shu-Tanaka-Group/stg-cluster-job-system/releases)から最新の `cjob` ファイルをダウンロードしてください。
-計算環境に `cjob` をアップロードしたら、実行権限の付与（`chmod u+x <cjob file>`）と実行パス上への配置（`mv <cjob file> ~/.local/bin/`）を行ってください。
 
 ## アップデート
 
