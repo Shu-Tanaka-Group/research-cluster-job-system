@@ -11,7 +11,7 @@
 - Kueue を Kubernetes クラスタに導入する
 - 状態管理用に PostgreSQL を使用する（新規デプロイ）
 - ReadWriteMany 対応の StorageClass を導入済み（例: NFS subdir external provisioner）
-- ジョブキューシステム専用ノードには `cluster-job=true` ラベルと `role=computing:NoSchedule` Taint が付与されている
+- ジョブキューシステム専用ノードには `cjob.io/flavor=<flavor名>` ラベルと `role=computing:NoSchedule` Taint が付与されている
 - 想定規模：現在はユーザー数 10 名・ノード 2 台。ノード数をユーザー数に比例して増設する運用で、長時間ジョブ中心のワークロードでは 100〜150 名まで対応可能（詳細は [performance.md](architecture/performance.md) §6 参照）
 
 ## 2. 実行環境前提

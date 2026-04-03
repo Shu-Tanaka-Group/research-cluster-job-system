@@ -81,7 +81,7 @@ cjobctl cluster resources
 
 ノードの追加・撤去は Watcher が `NODE_RESOURCE_SYNC_INTERVAL_SEC`（デフォルト 300 秒）間隔で自動反映する。手動更新は不要。
 
-テーブルが空の場合は Watcher が未起動または対象ノードが存在しない状態を示す。計算ノードに `cluster-job=true` ラベルが付与されていることを確認すること（[deployment.md](deployment.md) §16 参照）。
+テーブルが空の場合は Watcher が未起動または対象ノードが存在しない状態を示す。計算ノードに `cjob.io/flavor=<flavor名>` ラベルが付与されていることを確認すること（[deployment.md](deployment.md) §16 参照）。
 
 ### 1.8 ClusterQueue の nominalQuota 確認
 
