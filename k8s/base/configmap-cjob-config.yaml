@@ -35,4 +35,5 @@ data:
   WORKSPACE_MOUNT_PATH: /home/jovyan
   LOG_BASE_DIR: /home/jovyan/.cjob/logs
   TTL_SECONDS_AFTER_FINISHED: "300"
+  WATCHER_METRICS_PORT: "9090"
   JOB_NODE_TAINT: "role=computing:NoSchedule"

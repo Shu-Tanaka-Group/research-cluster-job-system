@@ -2,6 +2,20 @@
 
 [標準移行手順](../migration.md) に加えて、以下の追加作業が必要。
 
+## Prometheus メトリクスの有効化（#121）
+
+### 1. ConfigMap の確認
+
+ConfigMap `cjob-config` に `WATCHER_METRICS_PORT` キーが追加された。デフォルト値は `"9090"`。overlay でカスタマイズしている場合は値を追加する。
+
+### 2. Prometheus scrape 設定の確認
+
+Submit API と Watcher の Pod テンプレートに `prometheus.io/scrape` アノテーションが追加された。Prometheus が annotation-based service discovery を使用している場合は自動的に scrape される。ServiceMonitor を使用している場合は、別途設定を追加する。
+
+### 3. Grafana ダッシュボードの再インポート
+
+`k8s/base/grafana/dashboard-user.json` が更新された。Grafana UI の `Dashboards > Import` から JSON ファイルを再インポートする。
+
 ## flavor ノードラベルのキー統一（#119）
 
 ノードラベルのキーを flavor ごとに異なるキー（`cluster-job=true`, `cluster-gpu-job=true` 等）から共通キー `cjob.io/flavor` に統一する。3 箇所（ノードラベル・Kueue ResourceFlavor・ConfigMap）を同時に変更する必要があるため、メンテナンスウィンドウでの適用が望ましい。
