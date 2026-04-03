@@ -218,7 +218,7 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"nvidia.com/gpu\"}\n/\nkueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"nvidia.com/gpu\"}",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-a100\", resource=\"nvidia.com/gpu\"}\n/\nkueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-a100\", resource=\"nvidia.com/gpu\"}",
           "legendFormat": "GPU 予約率",
           "refId": "A"
         }
@@ -660,13 +660,13 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS \"gpu 実行中\" FROM jobs WHERE flavor = 'gpu' AND status = 'RUNNING';",
+          "rawSql": "SELECT COUNT(*) AS \"gpu 実行中\" FROM jobs WHERE flavor = 'gpu-a100' AND status = 'RUNNING';",
           "refId": "C"
         },
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS \"gpu 待機中\" FROM jobs WHERE flavor = 'gpu' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');",
+          "rawSql": "SELECT COUNT(*) AS \"gpu 待機中\" FROM jobs WHERE flavor = 'gpu-a100' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');",
           "refId": "D"
         }
       ],
@@ -1195,12 +1195,12 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"nvidia.com/gpu\"}",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-a100\", resource=\"nvidia.com/gpu\"}",
           "legendFormat": "予約中",
           "refId": "A"
         },
         {
-          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"nvidia.com/gpu\"}",
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-a100\", resource=\"nvidia.com/gpu\"}",
           "legendFormat": "クォータ上限",
           "refId": "B"
         }
@@ -1293,12 +1293,12 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"cpu\"}",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-a100\", resource=\"cpu\"}",
           "legendFormat": "予約中",
           "refId": "A"
         },
         {
-          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"cpu\"}",
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-a100\", resource=\"cpu\"}",
           "legendFormat": "クォータ上限",
           "refId": "B"
         }
@@ -1391,12 +1391,12 @@
       },
       "targets": [
         {
-          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-a100\", resource=\"memory\"} / 1024 / 1024 / 1024",
           "legendFormat": "予約中",
           "refId": "A"
         },
         {
-          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"gpu-a100\", resource=\"memory\"} / 1024 / 1024 / 1024",
           "legendFormat": "クォータ上限",
           "refId": "B"
         }

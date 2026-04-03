@@ -154,9 +154,9 @@ kueue_cluster_queue_resource_usage{cluster_queue="cjob-cluster-queue", flavor="c
 kueue_cluster_queue_nominal_quota{cluster_queue="cjob-cluster-queue", flavor="cpu", resource="cpu"}
 
 # GPU 使用率ゲージ
-kueue_cluster_queue_resource_usage{cluster_queue="cjob-cluster-queue", flavor="gpu", resource="nvidia.com/gpu"}
+kueue_cluster_queue_resource_usage{cluster_queue="cjob-cluster-queue", flavor="gpu-a100", resource="nvidia.com/gpu"}
 /
-kueue_cluster_queue_nominal_quota{cluster_queue="cjob-cluster-queue", flavor="gpu", resource="nvidia.com/gpu"}
+kueue_cluster_queue_nominal_quota{cluster_queue="cjob-cluster-queue", flavor="gpu-a100", resource="nvidia.com/gpu"}
 
 # 待ち時間 P50（直近 1 時間）
 histogram_quantile(0.5, rate(kueue_admission_wait_time_seconds_bucket{cluster_queue="cjob-cluster-queue"}[1h]))
@@ -270,9 +270,9 @@ SELECT COUNT(*) AS "cpu 実行中" FROM jobs WHERE flavor = 'cpu' AND status = '
 -- refId B:
 SELECT COUNT(*) AS "cpu 待機中" FROM jobs WHERE flavor = 'cpu' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');
 -- refId C:
-SELECT COUNT(*) AS "gpu 実行中" FROM jobs WHERE flavor = 'gpu' AND status = 'RUNNING';
+SELECT COUNT(*) AS "gpu 実行中" FROM jobs WHERE flavor = 'gpu-a100' AND status = 'RUNNING';
 -- refId D:
-SELECT COUNT(*) AS "gpu 待機中" FROM jobs WHERE flavor = 'gpu' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');
+SELECT COUNT(*) AS "gpu 待機中" FROM jobs WHERE flavor = 'gpu-a100' AND status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');
 
 -- 成功率（直近 24 時間）
 SELECT
