@@ -547,13 +547,8 @@ exit $EXIT_CODE
 
 1. ユーザーが `--flavor` で flavor を指定する（省略時は `DEFAULT_FLAVOR`）
 2. Submit API が `jobs.flavor` に記録する
-3. Dispatcher が `jobs.flavor` を参照して K8s Job を作成し、Kueue の LocalQueue に投入する。GPU ジョブの場合は対応する `gpu_resource_name` をリソース要求に追加する（§4.1 参照）。CPU ジョブの場合は CPU とメモリのみを設定し、flavor の選択は Kueue に委ねる
-4. Kueue が ClusterQueue 内の flavor リストからジョブのリソース要求を満たせる flavor を選択し、その `nodeLabels` に基づいてノードにスケジュールする
-
-Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。ノードの振り分けは Kueue の ResourceFlavor が担う。
-
-> [!NOTE]
-> 現在 CPU flavor は1つのみであるため、CPU ジョブの flavor 振り分けは Kueue の自動選択に委ねている。CPU flavor が複数になった場合、Kueue はリスト上位の flavor を優先するため、ユーザーが指定した flavor に確実にスケジュールするには `build_k8s_job` で flavor の `label_selector` を `nodeSelector` として K8s Job に追加する必要がある。`FlavorDefinition` に `label_selector` フィールドは既に存在する（`config.py`）ため、変更は小規模で済む。
+3. Dispatcher が `jobs.flavor` を参照して K8s Job を作成し、Kueue の LocalQueue に投入する。GPU ジョブの場合は対応する `gpu_resource_name` をリソース要求に追加する（§4.1 参照）。全ジョブ共通で、flavor の `label_selector`（`RESOURCE_FLAVORS` 設定で定義）を K8s Job の `nodeSelector` として設定する
+4. Kueue が ClusterQueue 内の flavor リストから、`nodeSelector` にマッチする `nodeLabels` を持つ flavor を選択し、ノードにスケジュールする
 
 ### 4.1 GPU リソースの設定
 

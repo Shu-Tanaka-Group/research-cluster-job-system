@@ -196,6 +196,8 @@ spec:
   template:
     spec:
       restartPolicy: Never
+      nodeSelector:                           # RESOURCE_FLAVORS の label_selector から Dispatcher が動的に設定
+        cluster-job: "true"
       tolerations:                            # JOB_NODE_TAINT の値から Dispatcher が動的に生成（空の場合は省略）
         - key: "role"
           operator: "Equal"
