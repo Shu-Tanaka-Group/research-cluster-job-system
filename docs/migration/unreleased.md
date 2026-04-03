@@ -14,9 +14,11 @@ Prometheus namespace から Submit API への metrics scrape を許可する Net
 
 Prometheus が `monitoring` 以外の namespace で動作している場合は、overlay で NetworkPolicy の `namespaceSelector.matchLabels` をパッチする（`overlay-example/kustomization.yaml` 参照）。
 
-### 3. Prometheus scrape 設定の確認
+### 3. Prometheus scrape の確認
 
-Submit API と Watcher の Pod テンプレートに `prometheus.io/scrape` アノテーションが追加された。Prometheus が annotation-based service discovery を使用している場合は自動的に scrape される。ServiceMonitor を使用している場合は、別途設定を追加する。
+Submit API 用の ServiceMonitor と Watcher 用の PodMonitor が Kustomize base に追加された。`kubectl apply -k` で自動適用される。
+
+適用後、Prometheus Operator が `cjob-system` namespace を監視対象に含んでいることを確認する。Grafana の Explore 画面で `cjob_jobs_submitted_total` が表示されれば正常。
 
 ### 4. Grafana ダッシュボードの再インポート
 

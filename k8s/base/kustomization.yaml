@@ -12,5 +12,7 @@ resources:
   - networkpolicy-allow-metrics-scrape.yaml
   - postgres/statefulset.yaml
   - submit-api/deployment.yaml
+  - submit-api/servicemonitor.yaml
   - dispatcher/deployment.yaml
   - watcher/deployment.yaml
+  - watcher/podmonitor.yaml

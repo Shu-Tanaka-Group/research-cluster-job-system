@@ -1,0 +1,12 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: watcher
+  namespace: cjob-system
+spec:
+  selector:
+    matchLabels:
+      app: watcher
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics

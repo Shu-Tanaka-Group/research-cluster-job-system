@@ -56,7 +56,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana_read
 
 ### 2.3 CJob アプリケーションメトリクスの scrape 確認
 
-Submit API と Watcher は Prometheus カウンターメ��リクスを提供する。Pod テンプレートに `prometheus.io/scrape: "true"` アノテーション��付与し、Prometheus が自動検出できるようにする。
+Submit API と Watcher は Prometheus カウンターメトリクスを提供する。Prometheus Operator の ServiceMonitor / PodMonitor で scrape を設定する。
 
 | コンポーネント | ポート | パス | 備考 |
 |---|---|---|---|

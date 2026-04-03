@@ -503,13 +503,28 @@ integrations:
 
 ### 15.1 Prometheus メトリクスの scrape 設定
 
+#### CJob アプリケーションメトリクス
+
+Submit API と Watcher の Prometheus メトリクスは Kustomize base に含まれる ServiceMonitor / PodMonitor で自動的に scrape される。
+
+| リソース | 対象 | ポート | パス |
+|---|---|---|---|
+| ServiceMonitor `submit-api` | Submit API Service | `http` (8080) | `/metrics` |
+| PodMonitor `watcher` | Watcher Pod | `metrics` (9090) | `/metrics` |
+
+Prometheus Operator の `serviceMonitorNamespaceSelector` / `podMonitorNamespaceSelector` が `cjob-system` namespace を監視対象に含んでいることを確認する。
+
+適用後、Grafana の Explore 画面で `cjob_jobs_submitted_total` を検索し、メトリクスが表示されることを確認する。
+
+#### Kueue メトリクス
+
 Kueue メトリクスを Prometheus で収集するための ServiceMonitor を作成する。これがないと Grafana ダッシュボードの Kueue 関連パネルが表示されない。
 
 ```bash
 kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases/download/v0.16.4/prometheus.yaml
 ```
 
-適用後、Grafana の Explore 画面（データソース: Prometheus）で `kueue_pending_workloads` を検索し、メトリクスが表示されることを確認する。
+適用後、Grafana の Explore 画面で `kueue_pending_workloads` を検索し、メトリクスが表示されることを確認する。
 
 ### 15.2 ClusterQueue リソースメトリクスの有効化
 
