@@ -185,7 +185,15 @@ sum(increase(cjob_jobs_submitted_total[10m]))
 sum(increase(cjob_jobs_completed_total[10m]))
 
 # 時間帯別混雑度（過去 7 日平均、パネル時間範囲: 24h）
-avg_over_time((sum(increase(cjob_jobs_submitted_total[1h])) or vector(0))[7d:24h])
+(
+  sum(increase(cjob_jobs_submitted_total[1h]))
+  + (sum(increase(cjob_jobs_submitted_total[1h] offset 1d)) or vector(0))
+  + (sum(increase(cjob_jobs_submitted_total[1h] offset 2d)) or vector(0))
+  + (sum(increase(cjob_jobs_submitted_total[1h] offset 3d)) or vector(0))
+  + (sum(increase(cjob_jobs_submitted_total[1h] offset 4d)) or vector(0))
+  + (sum(increase(cjob_jobs_submitted_total[1h] offset 5d)) or vector(0))
+  + (sum(increase(cjob_jobs_submitted_total[1h] offset 6d)) or vector(0))
+) / 7
 ```
 
 ```promql

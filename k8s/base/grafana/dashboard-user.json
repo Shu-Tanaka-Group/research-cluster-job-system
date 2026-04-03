@@ -1668,7 +1668,8 @@
       },
       "targets": [
         {
-          "expr": "avg_over_time((sum(increase(cjob_jobs_submitted_total[1h])) or vector(0))[7d:24h])",
+          "expr": "(sum(increase(cjob_jobs_submitted_total[1h])) + (sum(increase(cjob_jobs_submitted_total[1h] offset 1d)) or vector(0)) + (sum(increase(cjob_jobs_submitted_total[1h] offset 2d)) or vector(0)) + (sum(increase(cjob_jobs_submitted_total[1h] offset 3d)) or vector(0)) + (sum(increase(cjob_jobs_submitted_total[1h] offset 4d)) or vector(0)) + (sum(increase(cjob_jobs_submitted_total[1h] offset 5d)) or vector(0)) + (sum(increase(cjob_jobs_submitted_total[1h] offset 6d)) or vector(0))) / 7",
+          "interval": "1h",
           "legendFormat": "平均ジョブ数",
           "refId": "A"
         }
