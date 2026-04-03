@@ -573,7 +573,7 @@ kubectl taint node <gpu-node-name> role=computing:NoSchedule
 kubectl get nodes -l cluster-gpu-job=true
 ```
 
-ノードの振り分けは Kueue の ResourceFlavor `nodeLabels` が担う。Dispatcher 側で `nodeSelector` や追加の `tolerations` を設定する必要はない。
+ノードの振り分けは Dispatcher が flavor の `label_selector` を K8s Job の `nodeSelector` として設定し、Kueue がそれにマッチする ResourceFlavor の `nodeLabels` に基づいてノードにスケジュールすることで行われる。
 
 計算ノードを追加・撤去した場合、Watcher が `node_resources` テーブルを自動的に同期するため、Dispatcher や Submit API の設定変更は不要である。
 

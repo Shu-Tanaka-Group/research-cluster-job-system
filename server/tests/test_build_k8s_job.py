@@ -212,6 +212,33 @@ class TestBuildK8sJob:
 
         assert manifest.spec.template.spec.tolerations is None
 
+    def test_node_selector_cpu_flavor(self):
+        job = _make_job(flavor="cpu")
+        settings = _make_settings()
+        manifest = build_k8s_job(job, settings)
+
+        assert manifest.spec.template.spec.node_selector == {"cluster-job": "true"}
+
+    def test_node_selector_gpu_flavor_without_gpu(self):
+        """GPU flavor with gpu=0 should still get GPU node selector."""
+        import json
+        job = _make_job(gpu=0, flavor="gpu")
+        settings = _make_settings(RESOURCE_FLAVORS=json.dumps([
+            {"name": "cpu", "label_selector": "cluster-job=true"},
+            {"name": "gpu", "label_selector": "cluster-gpu-job=true", "gpu_resource_name": "nvidia.com/gpu"},
+        ]))
+        manifest = build_k8s_job(job, settings)
+
+        assert manifest.spec.template.spec.node_selector == {"cluster-gpu-job": "true"}
+
+    def test_node_selector_unknown_flavor(self):
+        """Unknown flavor should result in no node selector."""
+        job = _make_job(flavor="nonexistent")
+        settings = _make_settings()
+        manifest = build_k8s_job(job, settings)
+
+        assert manifest.spec.template.spec.node_selector is None
+
 
 class TestParseTaint:
     def test_valid_taint(self):
