@@ -27,7 +27,7 @@ User Pod (JupyterHub) → cjob CLI → Submit API → PostgreSQL
 ```
 
 - システムコンポーネントは `cjob-system` namespace に配置
-- ユーザーごとに `user-<username>` namespace が分離されている
+- ユーザーごとに namespace が分離されている（例: `user-alice`）
 - job_id はユーザー（namespace）ごとの連番（1, 2, 3...）
 - ジョブログは PVC 上（`/home/jovyan/.cjob/logs/<job_id>/`）に保存し、CLI が直接読む
 - submit 時の `cwd`・export 済み環境変数（`PATH` / `VIRTUAL_ENV` 含む）・コマンドを Job Pod で再現
@@ -45,6 +45,8 @@ cjob release <job-id>                # 保留の解除（範囲・複数・--all
 cjob logs <job-id>                   # ログ表示（--follow / --index）
 cjob delete <job-id>                 # 完了済みジョブの削除（--all で全件削除）
 cjob usage                           # リソース使用状況の表示
+cjob flavor list                     # 利用可能な flavor 一覧
+cjob flavor info <name>              # 指定 flavor のリソース上限
 cjob reset                           # 全ジョブ履歴・ログ削除、job_id を 1 に戻す
 cjob update                          # CLI バイナリの更新
 cjob config list                     # ユーザー設定の表示

@@ -210,6 +210,8 @@ spec:
           command: ["/bin/bash", "-lc"]
           args:
             - |
+              # 通常ジョブ: LOG_DIR=/home/jovyan/.cjob/logs/<job_id>
+              # sweep ジョブ: LOG_DIR=/home/jovyan/.cjob/logs/<job_id>/$CJOB_INDEX
               LOG_DIR=/home/jovyan/.cjob/logs/1
               mkdir -p "${LOG_DIR}"
               exec > >(tee "${LOG_DIR}/stdout.log") \

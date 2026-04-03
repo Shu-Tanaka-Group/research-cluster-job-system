@@ -19,6 +19,7 @@
 - `cjob logs`（`--follow` / `--index` オプション含む）
 - `cjob flavor`
 - `cjob update`
+- `cjob config`
 
 ### 1.2 submit 機能
 
