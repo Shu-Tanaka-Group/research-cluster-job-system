@@ -770,7 +770,7 @@ async fn cmd_usage(client: &client::CjobClient) -> Result<()> {
             0.0
         };
         println!(
-            "  {:<10} {:>10.0} {:>10.0} {:>10.0} {:>7.1}%",
+            "  {:<10} {:>10.1} {:>10.1} {:>10.1} {:>7.1}%",
             "CPU", used_cpu, hard_cpu, remaining_cpu, pct_cpu
         );
 
