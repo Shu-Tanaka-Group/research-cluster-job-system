@@ -1675,6 +1675,20 @@
         }
       ],
       "timeFrom": "24h",
+      "transformations": [
+        {
+          "id": "convertFieldType",
+          "options": {
+            "conversions": [
+              {
+                "targetField": "Time",
+                "destinationType": "string",
+                "dateFormat": "HH:mm"
+              }
+            ]
+          }
+        }
+      ],
       "title": "時間帯別の混雑度（過去 7 日平均）",
       "type": "barchart"
     }
