@@ -28,8 +28,7 @@ resources:
   - ../stg-cluster-job-system/k8s/base
   # Prometheus Operator を使用している場合は以下を追加する
   # （ServiceMonitor / PodMonitor の CRD が必要）
-  - ../stg-cluster-job-system/k8s/base/submit-api/servicemonitor.yaml
-  - ../stg-cluster-job-system/k8s/base/watcher/podmonitor.yaml
+  - ../stg-cluster-job-system/k8s/base/prometheus-operator
 
 images:
   - name: cjob-submit-api
