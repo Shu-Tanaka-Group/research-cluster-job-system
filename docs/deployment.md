@@ -505,12 +505,14 @@ integrations:
 
 #### CJob アプリケーションメトリクス
 
-Submit API と Watcher の Prometheus メトリクスは Kustomize base に含まれる ServiceMonitor / PodMonitor で自動的に scrape される。
+Submit API と Watcher は Pod テンプレートに `prometheus.io/scrape` アノテーションを持つ。Annotation-based discovery を使用する Prometheus 環境ではこれだけで自動的に scrape される。
 
-| リソース | 対象 | ポート | パス |
-|---|---|---|---|
-| ServiceMonitor `submit-api` | Submit API Service | `http` (8080) | `/metrics` |
-| PodMonitor `watcher` | Watcher Pod | `metrics` (9090) | `/metrics` |
+Prometheus Operator を使用する環境では、overlay に ServiceMonitor / PodMonitor を追加する（`overlay-example/kustomization.yaml` 参照）。
+
+| リソース | ファイル | 対象 | ポート | パス |
+|---|---|---|---|---|
+| ServiceMonitor `submit-api` | `submit-api/servicemonitor.yaml` | Submit API Service | `http` (8080) | `/metrics` |
+| PodMonitor `watcher` | `watcher/podmonitor.yaml` | Watcher Pod | `metrics` (9090) | `/metrics` |
 
 Prometheus Operator の `serviceMonitorNamespaceSelector` / `podMonitorNamespaceSelector` が `cjob-system` namespace を監視対象に含んでいることを確認する。
 
