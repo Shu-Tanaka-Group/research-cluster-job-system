@@ -753,27 +753,50 @@ async fn cmd_usage(client: &client::CjobClient) -> Result<()> {
     let resp = client.get_usage().await?;
 
     if let Some(ref q) = resp.resource_quota {
-        println!("\nResource Quota:");
+        println!("\nResource Quota");
+        println!("{}", "─".repeat(50));
+        println!(
+            "  {:<10} {:>10} {:>10} {:>10} {:>8}",
+            "Resource", "Used", "Hard", "Remaining", "Use%"
+        );
+
+        // CPU row
         let used_cpu = q.used_cpu_millicores as f64 / 1000.0;
         let hard_cpu = q.hard_cpu_millicores as f64 / 1000.0;
         let remaining_cpu = (q.hard_cpu_millicores - q.used_cpu_millicores) as f64 / 1000.0;
+        let pct_cpu = if q.hard_cpu_millicores > 0 {
+            used_cpu / hard_cpu * 100.0
+        } else {
+            0.0
+        };
         println!(
-            "  CPU:    {:.0} / {:.0} (remaining: {:.0})",
-            used_cpu, hard_cpu, remaining_cpu
+            "  {:<10} {:>10.0} {:>10.0} {:>10.0} {:>7.1}%",
+            "CPU", used_cpu, hard_cpu, remaining_cpu, pct_cpu
         );
+
+        // Memory row
         let used_gib = q.used_memory_mib as f64 / 1024.0;
         let hard_gib = q.hard_memory_mib as f64 / 1024.0;
         let remaining_gib = (q.hard_memory_mib - q.used_memory_mib) as f64 / 1024.0;
+        let pct_mem = if q.hard_memory_mib > 0 {
+            used_gib / hard_gib * 100.0
+        } else {
+            0.0
+        };
+        let used_mem_str = format!("{:.0}Gi", used_gib);
+        let hard_mem_str = format!("{:.0}Gi", hard_gib);
+        let remaining_mem_str = format!("{:.0}Gi", remaining_gib);
         println!(
-            "  Memory: {:.0}Gi / {:.0}Gi (remaining: {:.0}Gi)",
-            used_gib, hard_gib, remaining_gib
+            "  {:<10} {:>10} {:>10} {:>10} {:>7.1}%",
+            "Memory", used_mem_str, hard_mem_str, remaining_mem_str, pct_mem
         );
+
+        // GPU row (hidden when hard_gpu == 0)
         if q.hard_gpu > 0 {
+            let pct_gpu = q.used_gpu as f64 / q.hard_gpu as f64 * 100.0;
             println!(
-                "  GPU:    {} / {} (remaining: {})",
-                q.used_gpu,
-                q.hard_gpu,
-                q.hard_gpu - q.used_gpu
+                "  {:<10} {:>10} {:>10} {:>10} {:>7.1}%",
+                "GPU", q.used_gpu, q.hard_gpu, q.hard_gpu - q.used_gpu, pct_gpu
             );
         }
     }
