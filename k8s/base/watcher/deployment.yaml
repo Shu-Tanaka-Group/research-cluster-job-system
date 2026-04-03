@@ -12,11 +12,18 @@ spec:
     metadata:
       labels:
         app: watcher
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: dispatcher-sa
       containers:
         - name: watcher
           image: cjob-watcher
+          ports:
+            - containerPort: 9090
+              name: metrics
           env:
             - name: POSTGRES_HOST
               valueFrom:
@@ -83,6 +90,12 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: USER_NAMESPACE_LABEL
+            - name: WATCHER_METRICS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: WATCHER_METRICS_PORT
+                  optional: true
           resources:
             requests:
               cpu: "100m"

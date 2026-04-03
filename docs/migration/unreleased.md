@@ -2,6 +2,52 @@
 
 [標準移行手順](../migration.md) に加えて、以下の追加作業が必要。
 
+## Prometheus メトリクスの有効化（#121）
+
+### 1. イメージの再ビルド
+
+Submit API と Watcher に `prometheus_client` 依存とメトリクス計装が追加された。Docker イメージを再ビルドし push する。
+
+```bash
+read -r VERSION < VERSION
+docker build -t your-registry/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
+docker build -t your-registry/cjob-watcher:${VERSION} -f server/Dockerfile.watcher server/
+docker push your-registry/cjob-submit-api:${VERSION}
+docker push your-registry/cjob-watcher:${VERSION}
+```
+
+### 2. overlay の確認
+
+base に以下の変更が追加された。デフォルト値と異なる場合は overlay で上書きする。
+
+| 項目 | デフォルト値 | overlay での上書き方法 |
+|---|---|---|
+| `WATCHER_METRICS_PORT` | `9090` | ConfigMap パッチ |
+| `PROMETHEUS_NAMESPACE_LABEL` | `kubernetes.io/metadata.name=monitoring` | ConfigMap パッチ |
+| NetworkPolicy `allow-metrics-scrape` の namespace ラベル | `kubernetes.io/metadata.name: monitoring` | NetworkPolicy パッチ（`overlay-example/kustomization.yaml` 参照） |
+| RBAC `rbac-prometheus.yaml` の Prometheus SA | `prometheus-k8s` / namespace `monitoring` | RoleBinding パッチ（`overlay-example/kustomization.yaml` 参照） |
+
+### 3. K8s リソースの適用
+
+```bash
+kubectl apply -k /path/to/my-overlay
+kubectl rollout restart deployment/submit-api deployment/watcher -n cjob-system
+```
+
+### 4. Prometheus scrape の確認
+
+Pod テンプレートに `prometheus.io/scrape` アノテーションが追加された。Annotation-based discovery 環境では自動的に scrape される。
+
+Prometheus Operator 環境では、overlay の `kustomization.yaml` の resources に `base/prometheus-operator` ディレクトリを追加する（`overlay-example/kustomization.yaml` 参照）。
+
+適用後、Grafana の Explore 画面で `cjob_jobs_submitted_total` が表示されることを確認する。表示されない場合は以下を確認する:
+- Prometheus Operator が `cjob-system` namespace の ServiceMonitor / PodMonitor を監視対象に含んでいるか
+- Prometheus の ServiceAccount が `cjob-system` namespace のリソースを読み取れるか（`rbac-prometheus.yaml` が適用済みか）
+
+### 5. Grafana ダッシュボードの再インポート
+
+`k8s/base/grafana/dashboard-user.json` が更新された。Grafana UI の `Dashboards > Import` から JSON ファイルを再インポートする。
+
 ## flavor ノードラベルのキー統一（#119）
 
 ノードラベルのキーを flavor ごとに異なるキー（`cluster-job=true`, `cluster-gpu-job=true` 等）から共通キー `cjob.io/flavor` に統一する。3 箇所（ノードラベル・Kueue ResourceFlavor・ConfigMap）を同時に変更する必要があるため、メンテナンスウィンドウでの適用が望ましい。

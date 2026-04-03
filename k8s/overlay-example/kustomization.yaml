@@ -26,6 +26,9 @@ kind: Kustomization
 #     → ../stg-cluster-job-system/k8s/base
 resources:
   - ../stg-cluster-job-system/k8s/base
+  # Prometheus Operator を使用している場合は以下を追加する
+  # （ServiceMonitor / PodMonitor の CRD が必要）
+  - ../stg-cluster-job-system/k8s/base/prometheus-operator
 
 images:
   - name: cjob-submit-api
@@ -54,6 +57,28 @@ patches:
     target:
       kind: StatefulSet
       name: postgres
+  # Prometheus の ServiceAccount 名または namespace が異なる場合に上書きする
+  # base のデフォルト: ServiceAccount prometheus-k8s / namespace monitoring
+  # - patch: |
+  #     - op: replace
+  #       path: /subjects/0/name
+  #       value: your-prometheus-sa
+  #     - op: replace
+  #       path: /subjects/0/namespace
+  #       value: your-monitoring-namespace
+  #   target:
+  #     kind: RoleBinding
+  #     name: prometheus-k8s
+  # Prometheus namespace のラベルが異なる場合に上書きする
+  # base のデフォルト: kubernetes.io/metadata.name: monitoring
+  # - patch: |
+  #     - op: replace
+  #       path: /spec/ingress/0/from/0/namespaceSelector/matchLabels
+  #       value:
+  #         your-label-key: your-label-value
+  #   target:
+  #     kind: NetworkPolicy
+  #     name: allow-metrics-scrape
   # ConfigMap cjob-config のチューニング値を上書き
   # チューニングしたキーのみ記載すれば、残りは base のデフォルト値が使われる
   - path: configmap-cjob-config.yaml

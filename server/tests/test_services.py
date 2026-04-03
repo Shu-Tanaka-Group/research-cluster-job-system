@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 from cjob.api.schemas import JobSubmitRequest, ResourceSpec, SweepSubmitRequest
+from cjob.metrics import JOBS_COMPLETED_TOTAL, JOBS_SUBMITTED_TOTAL
 from cjob.api.services import (
     cancel_bulk,
     cancel_single,
@@ -1131,3 +1132,32 @@ class TestListFlavors:
         assert cpu_flavor.nodes[0].node_name == "worker01"
         assert cpu_flavor.quota is not None
         assert cpu_flavor.quota.cpu == "256"
+
+
+# ── Prometheus metrics ──
+
+
+class TestMetrics:
+    def test_submit_job_increments_submitted_counter(self, db_session):
+        before = JOBS_SUBMITTED_TOTAL._value.get()
+        req = _make_request()
+        submit_job(db_session, NS, "alice", req)
+        assert JOBS_SUBMITTED_TOTAL._value.get() - before == 1
+
+    def test_submit_sweep_increments_submitted_counter(self, db_session):
+        before = JOBS_SUBMITTED_TOTAL._value.get()
+        req = _make_sweep_request()
+        submit_sweep(db_session, NS, "alice", req)
+        assert JOBS_SUBMITTED_TOTAL._value.get() - before == 1
+
+    def test_cancel_single_increments_completed_counter(self, db_session):
+        _insert_job(db_session, 100, status="QUEUED")
+        before = JOBS_COMPLETED_TOTAL.labels(status="cancelled")._value.get()
+        cancel_single(db_session, NS, 100)
+        assert JOBS_COMPLETED_TOTAL.labels(status="cancelled")._value.get() - before == 1
+
+    def test_cancel_skipped_does_not_increment_counter(self, db_session):
+        _insert_job(db_session, 101, status="SUCCEEDED")
+        before = JOBS_COMPLETED_TOTAL.labels(status="cancelled")._value.get()
+        cancel_single(db_session, NS, 101)
+        assert JOBS_COMPLETED_TOTAL.labels(status="cancelled")._value.get() - before == 0

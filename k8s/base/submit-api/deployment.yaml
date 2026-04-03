@@ -12,6 +12,10 @@ spec:
     metadata:
       labels:
         app: submit-api
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: submit-api-sa
       containers:
@@ -113,9 +117,12 @@ kind: Service
 metadata:
   name: submit-api
   namespace: cjob-system
+  labels:
+    app: submit-api
 spec:
   selector:
     app: submit-api
   ports:
-    - port: 8080
+    - name: http
+      port: 8080
       targetPort: 8080
