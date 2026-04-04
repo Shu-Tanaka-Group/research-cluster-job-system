@@ -66,6 +66,7 @@ K8s Job を作成 → count/jobs.batch チェック（50件上限）
 | ResourceQuota `requests.memory` / `limits.memory` | ResourceQuota（user namespace） | 1250Gi | Kubernetes | ユーザーごと | namespace 内の全 Pod が要求・使用できるメモリの合計上限 |
 | ClusterQueue `nominalQuota` CPU | ClusterQueue | 256 | Kueue | クラスタ全体 | Kueue が Job Pod に割り当てるクラスタ全体の CPU 上限。ユーザー間で共有される |
 | ClusterQueue `nominalQuota` memory | ClusterQueue | 1000Gi | Kueue | クラスタ全体 | Kueue が Job Pod に割り当てるクラスタ全体のメモリ上限。ユーザー間で共有される |
+| `CPU_LIMIT_BUFFER_MULTIPLIER` | ConfigMap | 1.0 | Dispatcher | ジョブごと | CPU limit に適用する乗数。`1.0` で request == limit（デフォルト）。`1.05` 等に設定すると CPU limit のみを request の 1.05 倍にし、システムプロセスによる CFS throttling を軽減する。request は変更しない |
 
 ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User Pod を含む namespace 内の全 Pod を対象とした上限（バグ等による無制限消費を防ぐ安全網）。ClusterQueue nominalQuota は Kueue が Job Pod の admission を判断するための上限であり、実際の実行スケジューリングを制御する。User Pod は Kueue を経由しないため ClusterQueue の制御対象外である。
 

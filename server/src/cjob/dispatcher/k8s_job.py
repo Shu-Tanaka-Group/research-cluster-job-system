@@ -1,11 +1,13 @@
 import json
 import logging
+import math
 
 from kubernetes import client as k8s_client
 from kubernetes.client.rest import ApiException
 
 from cjob.config import Settings
 from cjob.models import Job
+from cjob.resource_utils import parse_cpu_millicores
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,13 @@ def _parse_taint(taint_str: str) -> k8s_client.V1Toleration | None:
 
 def _build_resource_requirements(job, settings: Settings) -> k8s_client.V1ResourceRequirements:
     requests = {"cpu": job.cpu, "memory": job.memory}
-    limits = {"cpu": job.cpu, "memory": job.memory}
+    cpu_limit = job.cpu
+    if settings.CPU_LIMIT_BUFFER_MULTIPLIER > 1.0:
+        buffered = int(math.ceil(
+            parse_cpu_millicores(job.cpu) * settings.CPU_LIMIT_BUFFER_MULTIPLIER
+        ))
+        cpu_limit = f"{buffered}m"
+    limits = {"cpu": cpu_limit, "memory": job.memory}
     if job.gpu > 0:
         flavor_def = settings.get_flavor_definition(job.flavor)
         gpu_resource = flavor_def.gpu_resource_name if flavor_def else "nvidia.com/gpu"

@@ -246,6 +246,54 @@ class TestBuildK8sJob:
 
         assert manifest.spec.template.spec.node_selector is None
 
+    def test_cpu_limit_buffer_multiplier(self):
+        """CPU limit should be buffered when multiplier > 1.0."""
+        job = _make_job(cpu="2", memory="4Gi")
+        settings = _make_settings(CPU_LIMIT_BUFFER_MULTIPLIER=1.05)
+        manifest = build_k8s_job(job, settings)
+
+        container = manifest.spec.template.spec.containers[0]
+        assert container.resources.requests["cpu"] == "2"
+        assert container.resources.limits["cpu"] == "2100m"
+
+    def test_cpu_limit_buffer_does_not_affect_memory(self):
+        """Memory should remain unchanged regardless of CPU buffer."""
+        job = _make_job(cpu="2", memory="4Gi")
+        settings = _make_settings(CPU_LIMIT_BUFFER_MULTIPLIER=1.05)
+        manifest = build_k8s_job(job, settings)
+
+        container = manifest.spec.template.spec.containers[0]
+        assert container.resources.requests["memory"] == "4Gi"
+        assert container.resources.limits["memory"] == "4Gi"
+
+    def test_cpu_limit_buffer_with_gpu(self):
+        """GPU resources should not be affected by CPU buffer."""
+        import json
+        job = _make_job(gpu=2, flavor="gpu")
+        settings = _make_settings(
+            CPU_LIMIT_BUFFER_MULTIPLIER=1.05,
+            RESOURCE_FLAVORS=json.dumps([
+                {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu"},
+            ]),
+        )
+        manifest = build_k8s_job(job, settings)
+
+        container = manifest.spec.template.spec.containers[0]
+        assert container.resources.requests["nvidia.com/gpu"] == "2"
+        assert container.resources.limits["nvidia.com/gpu"] == "2"
+        assert container.resources.requests["cpu"] == "2"
+        assert container.resources.limits["cpu"] == "2100m"
+
+    def test_cpu_limit_buffer_millicores_input(self):
+        """Buffer should work correctly with millicores input."""
+        job = _make_job(cpu="500m", memory="1Gi")
+        settings = _make_settings(CPU_LIMIT_BUFFER_MULTIPLIER=1.05)
+        manifest = build_k8s_job(job, settings)
+
+        container = manifest.spec.template.spec.containers[0]
+        assert container.resources.requests["cpu"] == "500m"
+        assert container.resources.limits["cpu"] == "525m"
+
 
 class TestParseTaint:
     def test_valid_taint(self):
