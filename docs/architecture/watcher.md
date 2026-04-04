@@ -119,7 +119,7 @@ K8s Job の `status.conditions` に従う（通常ジョブと同じロジック
 
 ### 4.3 RUNNING への遷移
 
-最初の Pod が RUNNING になった時点（K8s Job の `status.active >= 1`）で DB を RUNNING に更新する。通常ジョブと同様に `started_at` と `node_name` を記録する。
+最初の Pod が RUNNING になった時点（K8s Job の `status.active >= 1`）で DB を RUNNING に更新する。通常ジョブと同様に `started_at` と `node_name` を記録する。`parallelism > 1` の場合、複数の Pod が異なるノードで実行されうるが、`node_name` には最初に RUNNING になった Pod のノード名のみが記録される。
 
 ### 4.3.1 node_name の記録
 

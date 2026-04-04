@@ -130,6 +130,10 @@ pub fn print_job_detail(job: &JobDetailResponse) {
         job.k8s_job_name.as_deref().unwrap_or("-")
     );
     println!(
+        "node_name:     {}",
+        job.node_name.as_deref().unwrap_or("-")
+    );
+    println!(
         "log_dir:       {}",
         job.log_dir.as_deref().unwrap_or("-")
     );
@@ -189,6 +193,7 @@ mod tests {
             failed_count: None,
             completed_indexes: None,
             failed_indexes: None,
+            node_name: None,
         }
     }
 
@@ -262,6 +267,7 @@ mod tests {
             failed_count: Some(2),
             completed_indexes: Some("0-47".to_string()),
             failed_indexes: Some("12,37".to_string()),
+            node_name: Some("worker07".to_string()),
         }
     }
 

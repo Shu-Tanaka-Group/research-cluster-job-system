@@ -125,6 +125,12 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 { "detail": "command は空にできません" }
 ```
 
+`image` が空文字の場合は 400 を返す。
+
+```json
+{ "detail": "image は空にできません" }
+```
+
 namespace のジョブ総数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / HELD / CANCELLED の合計）が
 `MAX_QUEUED_JOBS_PER_NAMESPACE`（デフォルト 500）に達している場合は 429 を返す。
 CANCELLED ジョブを含めることで、cancel → 再投入の無制限サイクルによる DB 肥大化を防ぐ。
@@ -214,7 +220,7 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 | `status` | 文字列（任意） | 全ステータスを返す |
 | `time_limit_ge` | 整数（任意、秒） | フィルタしない |
 | `time_limit_lt` | 整数（任意、秒） | フィルタしない |
-| `limit` | 整数（任意） | 全件返す |
+| `limit` | 整数（任意） | 全件返す（注: CLI はデフォルトで `limit=50` を送信する。API を直接利用する場合は適切な `limit` の指定を推奨） |
 | `order` | 文字列（`"asc"` or `"desc"`） | `"asc"`（JOB_ID 昇順） |
 
 `time_limit_ge` / `time_limit_lt` は `time_limit_seconds` の範囲フィルタ。`time_limit_ge` は「以上」、`time_limit_lt` は「未満」。両方指定した場合は AND 条件。
@@ -288,9 +294,12 @@ GET /v1/jobs?time_limit_ge=21600&time_limit_lt=43200
   "succeeded_count": null,
   "failed_count": null,
   "completed_indexes": null,
-  "failed_indexes": null
+  "failed_indexes": null,
+  "node_name": "worker07"
 }
 ```
+
+`node_name` はジョブが実行されたノード名。Watcher が RUNNING 遷移時に記録する。QUEUED / DISPATCHED 等の未実行ジョブでは `null`。sweep ジョブでは最初に RUNNING になった Pod のノード名のみが記録される。
 
 ### エラーレスポンス
 
@@ -652,7 +661,7 @@ ResourceQuota が存在しない場合:
       "quota": {"cpu": "256", "memory": "1000Gi", "gpu": "0"}
     },
     {
-      "name": "gpu",
+      "name": "gpu-a100",
       "has_gpu": true,
       "nodes": [
         {"node_name": "gworker02", "cpu_millicores": 128000, "memory_mib": 515686, "gpu": 4}

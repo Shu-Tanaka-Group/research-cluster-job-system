@@ -89,6 +89,7 @@ pub struct JobDetailResponse {
     pub failed_count: Option<u32>,
     pub completed_indexes: Option<String>,
     pub failed_indexes: Option<String>,
+    pub node_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

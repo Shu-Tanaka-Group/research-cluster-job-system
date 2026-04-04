@@ -202,6 +202,9 @@ def submit_job(
     if not req.command:
         raise HTTPException(status_code=400, detail="command は空にできません")
 
+    if not req.image:
+        raise HTTPException(status_code=400, detail="image は空にできません")
+
     settings = get_settings()
     time_limit, flavor = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
 
@@ -253,6 +256,9 @@ def submit_sweep(
 
     if not req.command:
         raise HTTPException(status_code=400, detail="command は空にできません")
+
+    if not req.image:
+        raise HTTPException(status_code=400, detail="image は空にできません")
 
     settings = get_settings()
     time_limit, flavor = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
@@ -454,6 +460,7 @@ def get_job(
         failed_count=job.failed_count,
         completed_indexes=job.completed_indexes,
         failed_indexes=job.failed_indexes,
+        node_name=job.node_name,
     )
 
 

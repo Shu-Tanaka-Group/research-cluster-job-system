@@ -10,3 +10,4 @@
 - 複数 ClusterQueue の使い分け
 - 成果物管理
 - ログ集約
+- Dispatcher / Watcher のリーダー選出による HA 構成（Replica 複数化）

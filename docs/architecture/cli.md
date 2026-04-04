@@ -124,7 +124,7 @@ cjob delete --all
 
 ## 3. `cjob sweep` の動作
 
-1. `cjob add` と同様に `pwd`、export 済み環境変数、`CJOB_IMAGE` / `JUPYTER_IMAGE` を収集する
+1. `cjob add` と同様に `pwd`、export 済み環境変数、`CJOB_IMAGE` / `JUPYTER_IMAGE` を収集する（両方未設定の場合はエラー終了）
 2. `--` 以降の argv を shell-safe に連結して command を生成する
 3. `-n` を `completions`、`--parallel` を `parallelism` として `POST /v1/sweep` に送信する
 4. `job_id` とタスク数・並列数を表示する
@@ -165,7 +165,7 @@ cjob sweep -n 10 --parallel 5 -- bash run.sh
 
 1. `pwd` を取得する
 2. export 済み環境変数を収集する（`PATH` / `VIRTUAL_ENV` を含む）
-3. 環境変数 `CJOB_IMAGE` からコンテナイメージ名を取得する（未設定時は `JUPYTER_IMAGE` にフォールバック）
+3. 環境変数 `CJOB_IMAGE` からコンテナイメージ名を取得する（未設定時は `JUPYTER_IMAGE` にフォールバック。両方未設定の場合はエラー終了する）
 4. `--` 以降の argv を shell-safe に連結して command を生成する
 5. `--time-limit` が指定されていれば秒数に変換する（省略時は API のデフォルト値を使用）
 6. ServiceAccount JWT と namespace を固定パスから読み取る
@@ -300,6 +300,7 @@ dispatched_at: 2026-03-23 12:35:05
 started_at:   2026-03-23 12:35:10
 finished_at:  -
 k8s_job_name: cjob-alice-2
+node_name:    worker07
 log_dir:      /home/jovyan/.cjob/logs/2
 ```
 
@@ -328,8 +329,11 @@ dispatched_at:  2026-03-23 12:35:05
 started_at:     2026-03-23 12:35:10
 finished_at:    -
 k8s_job_name:   cjob-alice-3
+node_name:      worker07
 log_dir:        /home/jovyan/.cjob/logs/3
 ```
+
+`node_name` はジョブが実行されたノード名。sweep ジョブでは最初に RUNNING になった Pod のノード名のみが記録される（`parallelism > 1` の場合、他のノードの情報は含まれない）。
 
 `last_error` はジョブが FAILED の場合にエラー理由を表示する。値が `null` の場合は行自体を表示しない。
 
@@ -350,6 +354,7 @@ dispatched_at: -
 started_at:    -
 finished_at:   2026-03-23 13:00:01
 k8s_job_name:  -
+node_name:     -
 log_dir:       /home/jovyan/.cjob/logs/5
 last_error:    K8s API permanent error 403: admission webhook "validate-image.kyverno.io" denied the request
 ```
@@ -793,7 +798,7 @@ $ cjob update --version 1.3.1-beta.1
 $ cjob flavor list
 NAME             GPU    NODES    DEFAULT
 cpu              -      2          *
-gpu              yes    1
+gpu-a100         yes    1
 ```
 
 ### `cjob flavor info <name>`
@@ -815,8 +820,8 @@ Memory       1000Gi       503.4Gi
 GPU 対応 flavor の場合は GPU 行も表示する。
 
 ```
-$ cjob flavor info gpu
-name:   gpu
+$ cjob flavor info gpu-a100
+name:   gpu-a100
 GPU:    対応
 
 RESOURCE      QUOTA    TASK LIMIT
@@ -839,5 +844,5 @@ GPU:    非対応
 
 ```
 $ cjob flavor info xxx
-Error: flavor 'xxx' は存在しません。利用可能な flavor: cpu, gpu
+Error: flavor 'xxx' は存在しません。利用可能な flavor: cpu, gpu-a100
 ```
