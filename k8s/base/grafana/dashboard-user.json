@@ -1683,7 +1683,7 @@
               {
                 "targetField": "Time",
                 "destinationType": "string",
-                "dateFormat": "HH:mm"
+                "dateFormat": "HH[h]"
               }
             ]
           }
