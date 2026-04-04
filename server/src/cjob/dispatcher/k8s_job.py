@@ -157,6 +157,7 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
     job_spec_kwargs = {
         "active_deadline_seconds": job.time_limit_seconds,
         "ttl_seconds_after_finished": settings.TTL_SECONDS_AFTER_FINISHED,
+        "backoff_limit": 0,
         "template": k8s_client.V1PodTemplateSpec(spec=pod_spec),
     }
     if is_sweep:
