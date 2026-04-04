@@ -112,7 +112,7 @@ roleRef:
 
 ## 4. namespace 作成時の設定
 
-ユーザー namespace の作成手順は [deployment.md §11](../docs/deployment.md#11-namespace-作成スクリプト完成版) を参照。認証・認可に関わる要点を以下にまとめる。
+ユーザー namespace の作成手順は [deployment.md §11](deployment.md#11-namespace-作成スクリプト完成版) を参照。認証・認可に関わる要点を以下にまとめる。
 
 - 各 namespace に `computing-user` ServiceAccount を作成し、JupyterHub KubeSpawner で User Pod に付与する
 - namespace にラベル `cjob.io/user-namespace=true` を付与することで、NetworkPolicy が Submit API への通信を許可する

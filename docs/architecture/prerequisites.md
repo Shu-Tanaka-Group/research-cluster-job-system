@@ -18,7 +18,7 @@
 
 - **ジョブ投入を行う Pod とジョブを実行する Pod は同じ image を使う**
 - image は User Pod の環境変数 `CJOB_IMAGE` から自動取得する（ユーザーが明示的に指定しない）
-- `CJOB_IMAGE` が未設定の場合は `JUPYTER_IMAGE` にフォールバックする（JupyterHub 環境との後方互換）
+- `CJOB_IMAGE` が未設定の場合は `JUPYTER_IMAGE` にフォールバックする（JupyterHub 環境との後方互換）。両方未設定の場合は CLI がエラーを返す
 - JupyterHub の User Pod には `JUPYTER_IMAGE` に現在のコンテナイメージ名が設定されている
 - `cjob` CLI は Rust で実装したシングルバイナリとして GitHub Releases で配布する
 - ユーザーは CLI バイナリを各自のホームディレクトリ（例: `/home/jovyan/.local/bin/`）に配置する
