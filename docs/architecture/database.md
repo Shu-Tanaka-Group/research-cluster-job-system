@@ -248,8 +248,10 @@ FROM node_resources;
 
 **cjobctl（flavor 別 allocatable 合計）**: `set-quota` のバリデーションで、指定 flavor に対応するノード群の allocatable 合計を取得する。flavor 名は Kueue ResourceFlavor 名と統一されているため、変換処理なしでそのままクエリに使用する。
 
+CPU は bin-packing 制約を反映して、ノードごとに整数コア単位で切り下げてから合算する。各ノードの端数コア（例: DaemonSet Pod 差し引き後の 0.633 cores の余剰）は整数コアジョブから消費できず、nominalQuota を端数を含めた合計まで許容すると「cluster-wide quota には余裕があるが、どのノードにも配置できず DISPATCHED で待機するジョブ」が発生するため。メモリと GPU は単純合算する（memory は MiB 単位で既に十分細かく、GPU は元から整数）。
+
 ```sql
-SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu,
+SELECT COALESCE(SUM((cpu_millicores / 1000) * 1000), 0) AS total_cpu,
        COALESCE(SUM(memory_mib), 0) AS total_memory,
        COALESCE(SUM(gpu), 0) AS total_gpu
 FROM node_resources

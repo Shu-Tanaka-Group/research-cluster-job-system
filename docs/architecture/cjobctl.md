@@ -244,6 +244,8 @@ cjobctl cluster set-quota --flavor gpu-a100 --gpu 4
 
 指定値は `node_resources` テーブルの allocatable 合計（指定 flavor のノードのみ）と比較してバリデーションされる。allocatable を超過する場合はエラーとなるが、`--force` で上書き可能。`--flavor` に指定する名前は Kueue ResourceFlavor の `metadata.name` と一致させる（DB の `node_resources.flavor` 列の値とも統一されている）。
 
+CPU の allocatable 合計は、ノードごとの `cpu_millicores` を整数コアに切り下げてから合算する（`SUM((cpu_millicores / 1000) * 1000)`）。これは、各ノードの端数コア（例: DaemonSet Pod 差し引き後の 0.633 cores の余剰）が整数コアジョブの bin-packing 制約上使用できないため、nominalQuota は「各ノードの整数コア部分の合計」以下に抑える必要があるという考え方に基づく。メモリと GPU は切り下げず単純合算する。
+
 ### 5.5 K8s 状態確認
 
 | コマンド | 概要 | K8s API |
