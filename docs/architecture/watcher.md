@@ -25,9 +25,10 @@ Watcher は K8s API からノードの `allocatable` リソースを定期取得
 - `RESOURCE_FLAVORS` 設定（[resources.md](resources.md) 参照）の各 flavor 定義を順にイテレーションし、`label_selector` で K8s API からノードを取得する。各ノードにはその flavor 定義の `name` を flavor 値として記録する
 - GPU リソース数は flavor 定義の `gpu_resource_name` を使って `status.allocatable` から取得する。`gpu_resource_name` が未設定の flavor は GPU 数を 0 として記録する
 - 各 flavor の取得結果をノード名で重複排除してマージする。複数の flavor のラベルに一致するノードは、`RESOURCE_FLAVORS` で先に定義された flavor が優先される
+- DB に記録する CPU・memory は DaemonSet Pod の request 分を差し引いた effective allocatable である（CPU・memory のみ対象、GPU は差し引かない）。`list_pod_for_all_namespaces()` で全 Pod を 1 回取得し、`metadata.ownerReferences` に `kind: DaemonSet` を含みかつ `spec.nodeName` が設定済みかつ `status.phase` が `Pending` / `Running` の Pod をノードごとに集計する。各 Pod の `spec.containers[].resources.requests` を合計して `allocatable` から差し引く（initContainers は対象外）。requests 未設定のコンテナは 0 として扱い、差し引き結果が負になる場合は 0 にクランプする
 - 初回は Watcher 起動直後に即実行し、以降は設定間隔で繰り返す
 - K8s API から取得したノード一覧に存在しないが DB に残っているノード（撤去・ラベル除去）は DELETE する
-- K8s API 呼び出し失敗時はログを出力してスキップし、次回サイクルで再試行する（DB の既存データはそのまま維持される）。特定 flavor のノード取得に失敗しても、他の flavor のノード同期は継続する
+- K8s API 呼び出し失敗時はログを出力してスキップし、次回サイクルで再試行する（DB の既存データはそのまま維持される）。特定 flavor のノード取得に失敗しても、他の flavor のノード同期は継続する。DaemonSet Pod 取得 API の呼び出しが失敗した場合は、当該サイクルの node 同期全体をスキップする（不正確な effective allocatable を DB に書き込まないため）
 
 ## 1.2 nominalQuota 同期
 
