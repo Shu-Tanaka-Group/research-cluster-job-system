@@ -125,6 +125,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: TTL_SECONDS_AFTER_FINISHED
+            - name: CPU_LIMIT_BUFFER_MULTIPLIER
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: CPU_LIMIT_BUFFER_MULTIPLIER
             - name: JOB_NODE_TAINT
               valueFrom:
                 configMapKeyRef:
