@@ -1,5 +1,7 @@
 # 未リリース移行手順
 
+本ファイルは **次回リリース向け** の移行手順を記載する作業ファイルである。リリース時にバージョン名（例: `v1.11.0.md`）にリネームし、新しい `unreleased.md` を作成する（[versioning.md](../versioning.md) 参照）。
+
 [標準移行手順](../migration.md) の Watcher ビルド・再起動（ロールアウト再起動）により新ロジックが適用される。追加の環境変数・DB スキーマ変更・ConfigMap 変更は不要。
 
 ## `node_resources` の effective allocatable 化に伴う確認事項

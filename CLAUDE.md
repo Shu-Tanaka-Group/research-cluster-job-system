@@ -34,6 +34,8 @@ User Pod (JupyterHub) → cjob CLI → Submit API → PostgreSQL
 
 ### CLI コマンド
 
+以下は概要把握用の一覧であり、**正本の仕様は [docs/architecture/cli.md](docs/architecture/cli.md) を参照すること**。新規コマンドの追加・オプション変更は cli.md を先に更新し、必要に応じてこの一覧に反映する。
+
 ```bash
 cjob add -- <command>                # ジョブ投入
 cjob sweep -n <count> --parallel <n> -- <command>  # パラメータスイープ

@@ -152,6 +152,8 @@ namespace に `DELETING` 状態のジョブが1件でも存在する場合は 40
 
 `parallelism` は省略可能で、デフォルトは 1。
 
+CLI が受け付ける `_INDEX_` プレースホルダーは CLI クライアント側で `$CJOB_INDEX` に置換されてから本 API に送信される（[cli.md](cli.md) §3、[dispatcher.md](dispatcher.md) §3.3.1 参照）。したがって本 API のリクエストでは常に `$CJOB_INDEX` 形式の置換済みコマンドを受け取る。
+
 ### request
 
 ```json

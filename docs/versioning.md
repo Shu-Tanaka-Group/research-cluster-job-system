@@ -87,7 +87,17 @@ mv docs/migration/unreleased.md docs/migration/vX.Y.Z.md
 
 `docs/migration.md` 末尾のリンクも更新する（`unreleased` → `vX.Y.Z`）。
 
-`unreleased.md` に記載がない（大きな変更がない）場合はこのステップをスキップしてよい。
+リネーム後、以下のテンプレートを使って新しい `docs/migration/unreleased.md` を作成する。
+
+````markdown
+# 未リリース移行手順
+
+本ファイルは **次回リリース向け** の移行手順を記載する作業ファイルである。リリース時にバージョン名（例: `v1.11.0.md`）にリネームし、新しい `unreleased.md` を作成する（[versioning.md](../versioning.md) 参照）。
+
+[標準移行手順](../migration.md) に加えて次回リリース固有の移行手順がある場合は以下に追記する。
+````
+
+`unreleased.md` に記載がない（大きな変更がない）場合は、Step 5 全体（リネーム・再作成）をスキップしてよい。
 
 ### Step 6: コミット
 
@@ -102,6 +112,7 @@ mv docs/migration/unreleased.md docs/migration/vX.Y.Z.md
 - `server/uv.lock`
 - `k8s/overlay-example/kustomization.yaml`
 - `docs/migration/vX.Y.Z.md`（リネームした場合）
+- `docs/migration/unreleased.md`（テンプレートから再作成した場合）
 - `docs/migration.md`（リンクを更新した場合）
 
 ## 備考

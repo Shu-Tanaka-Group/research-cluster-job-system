@@ -329,11 +329,11 @@ dispatched_at:  2026-03-23 12:35:05
 started_at:     2026-03-23 12:35:10
 finished_at:    -
 k8s_job_name:   cjob-alice-3
-node_name:      worker07
+node_name:      worker07,worker08
 log_dir:        /home/jovyan/.cjob/logs/3
 ```
 
-`node_name` はジョブが実行されたノード名。sweep ジョブでは最初に RUNNING になった Pod のノード名のみが記録される（`parallelism > 1` の場合、他のノードの情報は含まれない）。
+`node_name` はジョブが実行されたノード名。通常ジョブでは単一のノード名を表示し、sweep ジョブでは実行に使用された全ノード名をカンマ区切りで表示する（Watcher が RUNNING 遷移時および sweep の進行状況変化時に累積記録する。詳細は [watcher.md](watcher.md) §4.3.1 参照）。
 
 `last_error` はジョブが FAILED の場合にエラー理由を表示する。値が `null` の場合は行自体を表示しない。
 
@@ -467,9 +467,13 @@ cjob config remove env exclude MY_SECRET
 
 スカラー型の設定値を変更する。リスト型のキーに対して使用するとエラーになる。
 
+> **【実装状況】未実装（将来対応予定）**。現状ではスカラー型の設定キーが存在しないため、本サブコマンドは未実装である。
+
 ##### `cjob config unset <table> <key>`
 
 スカラー型の設定値を削除（デフォルトに戻す）する。リスト型のキーに対して使用するとエラーになる。
+
+> **【実装状況】未実装（将来対応予定）**。`cjob config set` と同じ理由で未実装である。
 
 ##### バリデーション
 
