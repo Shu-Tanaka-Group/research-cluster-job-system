@@ -50,6 +50,7 @@ class Settings(BaseSettings):
 
     # K8s Job
     TTL_SECONDS_AFTER_FINISHED: int = 300
+    CPU_LIMIT_BUFFER_MULTIPLIER: float = 1.0
 
     # Kueue
     KUEUE_LOCAL_QUEUE_NAME: str = "default"
