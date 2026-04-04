@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from cjob.config import Settings
+from cjob.metrics import JOBS_COMPLETED_TOTAL
 from cjob.models import Job, JobEvent
 from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 
@@ -209,6 +210,7 @@ def mark_failed(
         {"namespace": namespace, "job_id": job_id, "error": error},
     )
     if result.rowcount > 0:
+        JOBS_COMPLETED_TOTAL.labels(status="failed").inc()
         session.add(
             JobEvent(
                 namespace=namespace,

@@ -62,6 +62,7 @@ Submit API と Watcher は Prometheus カウンターメトリクスを提供す
 |---|---|---|---|
 | Submit API | 8080 | `/metrics` | FastAPI アプリと同一ポート |
 | Watcher | 9090（`WATCHER_METRICS_PORT`） | `/metrics` | メインループとは別スレッドで提供 |
+| Dispatcher | 9090（`DISPATCHER_METRICS_PORT`） | `/metrics` | メインループとは別スレッドで提供 |
 
 **提供するメトリクス**:
 
@@ -73,6 +74,7 @@ Submit API と Watcher は Prometheus カウンターメトリクスを提供す
 `cjob_jobs_completed_total` の計装箇所:
 - `succeeded` / `failed`: Watcher の `reconcile_cycle()` でステータス遷移時
 - `failed`（K8s Job 消失）: Watcher の `reconcile_cycle()` でジョブ消失検出時
+- `failed`（dispatch 失敗）: Dispatcher の `mark_failed()` で永続エラー・リトライ上限超過時
 - `cancelled`: Submit API の `cancel_single()` でキャンセル成功時
 
 これらのカウンターはプロセス再起動時にリセットされるが、Prometheus の `increase()` / `rate()` 関数がリセットを自動的に処理するためダッュボードへの影響はない。

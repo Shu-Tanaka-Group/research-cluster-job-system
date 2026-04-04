@@ -12,11 +12,18 @@ spec:
     metadata:
       labels:
         app: dispatcher
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: dispatcher-sa
       containers:
         - name: dispatcher
           image: cjob-dispatcher
+          ports:
+            - containerPort: 9090
+              name: metrics
           env:
             - name: POSTGRES_HOST
               valueFrom:
@@ -123,6 +130,12 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: JOB_NODE_TAINT
+            - name: DISPATCHER_METRICS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCHER_METRICS_PORT
+                  optional: true
           resources:
             requests:
               cpu: "100m"

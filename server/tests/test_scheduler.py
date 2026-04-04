@@ -7,6 +7,7 @@ from cjob.dispatcher.scheduler import (
     mark_failed,
     reset_stale_dispatching,
 )
+from cjob.metrics import JOBS_COMPLETED_TOTAL
 from cjob.models import Job
 
 
@@ -134,6 +135,22 @@ class TestMarkFailed:
         result = mark_failed(db_session, NS, 1, "error")
 
         assert result is False
+
+    def test_increments_completed_total_counter(self, db_session):
+        _insert_job(db_session, 1, status="DISPATCHING")
+        before = JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get()
+
+        mark_failed(db_session, NS, 1, "permanent error")
+
+        assert JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get() - before == 1
+
+    def test_does_not_increment_counter_when_no_update(self, db_session):
+        _insert_job(db_session, 1, status="CANCELLED")
+        before = JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get()
+
+        mark_failed(db_session, NS, 1, "error")
+
+        assert JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get() - before == 0
 
 
 # ── reset_stale_dispatching ──
