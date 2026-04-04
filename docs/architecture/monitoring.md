@@ -75,7 +75,7 @@ Submit API と Watcher は Prometheus カウンターメトリクスを提供す
 - `failed`（K8s Job 消失）: Watcher の `reconcile_cycle()` でジョブ消失検出時
 - `cancelled`: Submit API の `cancel_single()` でキャンセル成功時
 
-これらのカウンターはプロセス再起動時にリセットされるが、Prometheus の `increase()` / `rate()` 関数がリセットを自動的に処理するためダッ��ュボードへの影響はない。
+これらのカウンターはプロセス再起動時にリセットされるが、Prometheus の `increase()` / `rate()` 関数がリセットを自動的に処理するためダッュボードへの影響はない。
 
 ### 2.4 Kueue Prometheus メトリクスの scrape 確認
 
