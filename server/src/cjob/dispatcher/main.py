@@ -4,6 +4,7 @@ import signal
 import time
 
 from kubernetes import config as k8s_config
+from prometheus_client import start_http_server
 
 from cjob.config import get_settings
 from cjob.db import create_session
@@ -85,6 +86,9 @@ def run():
 
     logger.info("Dispatcher starting")
     k8s_config.load_incluster_config()
+
+    start_http_server(settings.DISPATCHER_METRICS_PORT)
+    logger.info("Prometheus metrics server started on port %d", settings.DISPATCHER_METRICS_PORT)
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)

@@ -71,6 +71,7 @@ class Settings(BaseSettings):
 
     # Metrics
     WATCHER_METRICS_PORT: int = 9090
+    DISPATCHER_METRICS_PORT: int = 9090
 
     # Logging
     LOG_LEVEL: str = "INFO"
