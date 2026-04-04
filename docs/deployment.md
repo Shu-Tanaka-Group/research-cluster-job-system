@@ -568,6 +568,34 @@ kubectl apply -f kueue/cluster-queue.yaml
 
 **Taint を使わない運用（共用ノード）:** 専用ノードを持たない環境では `JOB_NODE_TAINT` を空文字列に設定し、Kueue ResourceFlavor の `nodeTaints` を省略し、ノードへの Taint 付与を行わない。
 
+### maxPods の調整
+
+kubelet のデフォルト `maxPods` は 110 であり、大量の Job Pod を同時に起動する場合はこの上限に達する可能性がある。必要に応じて各計算ノードの kubelet 設定を変更する。
+
+1. **kubelet 設定ファイルを編集する**（通常 `/var/lib/kubelet/config.yaml`）
+
+   ```yaml
+   maxPods: 135
+   ```
+
+2. **kubelet を再起動する**
+
+   ```bash
+   sudo systemctl restart kubelet
+   ```
+
+3. **反映を確認する**
+
+   ```bash
+   kubectl get node <node-name> -o jsonpath='{.status.capacity.pods}'
+   ```
+
+**注意:**
+
+- ノードの全 CPU コアを Job Pod に割り当てようとしても、DaemonSet Pod（calico-node, kube-proxy 等）の CPU request 分だけ実際に使用可能なコア数は減る。安定運用のためにシステム用として 2〜4 コア程度を確保することを推奨する。
+- Pod CIDR のサイズが maxPods 以上をカバーできることを確認する（`/24` = 256 IP なら問題ない）。
+- kubeadm 環境の場合、`kubeadm upgrade` 時にローカル設定が上書きされるため、`kube-system` の ConfigMap `kubelet-config` にも `maxPods` を設定しておく。ただし ConfigMap の変更は全ノードに影響する。特定の計算ノードにのみ適用したい場合は、ConfigMap は変更せず、対象ノードのローカル設定のみを編集し、`kubeadm upgrade` のたびに再設定する運用とする。
+
 ### 16.1 CPU ノード
 
 ```bash
