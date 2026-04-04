@@ -1683,7 +1683,7 @@
           "refId": "A"
         }
       ],
-      "timeFrom": "24h",
+      "timeFrom": "23h",
       "transformations": [
         {
           "id": "convertFieldType",
