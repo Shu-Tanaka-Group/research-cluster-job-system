@@ -78,7 +78,7 @@ class JobDetailResponse(BaseModel):
     failed_count: int | None = None
     completed_indexes: str | None = None
     failed_indexes: str | None = None
-    node_name: str | None = None
+    node_name: list[str] | None = None
 
 
 class SingleCancelResponse(BaseModel):
