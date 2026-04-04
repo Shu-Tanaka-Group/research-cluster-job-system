@@ -144,7 +144,7 @@ pub async fn status(client: &Client, namespace: &str, job_id: i32) -> Result<()>
                     time_limit_seconds, completions, parallelism, \
                     succeeded_count, failed_count, failed_indexes, \
                     created_at, dispatched_at, started_at, finished_at, \
-                    k8s_job_name, log_dir, last_error \
+                    k8s_job_name, log_dir, last_error, node_name \
              FROM jobs \
              WHERE namespace = $1 AND job_id = $2",
             &[&namespace, &job_id],
@@ -180,6 +180,7 @@ pub async fn status(client: &Client, namespace: &str, job_id: i32) -> Result<()>
     let k8s_job_name: Option<&str> = row.get(19);
     let log_dir: Option<&str> = row.get(20);
     let last_error: Option<&str> = row.get(21);
+    let node_name: Option<&str> = row.get(22);
 
     let is_sweep = completions.is_some();
     let fmt_ts = |t: Option<chrono::DateTime<chrono::Utc>>| -> String {
@@ -229,6 +230,7 @@ pub async fn status(client: &Client, namespace: &str, job_id: i32) -> Result<()>
     println!("started_at:    {}", fmt_ts(started_at));
     println!("finished_at:   {}", fmt_ts(finished_at));
     println!("k8s_job_name:  {}", k8s_job_name.unwrap_or("-"));
+    println!("node_name:     {}", node_name.unwrap_or("-"));
     println!("log_dir:       {}", log_dir.unwrap_or("-"));
     if let Some(err) = last_error {
         println!("last_error:    {}", err);
