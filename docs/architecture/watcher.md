@@ -65,7 +65,7 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    | `type: Complete, status: True` | `SUCCEEDED` | |
    | `type: Failed, status: True, reason: DeadlineExceeded` | `FAILED` | `last_error` に `"time limit exceeded"` を設定 |
    | `type: Failed, status: True` | `FAILED` | Pod の exit code 非0・起動失敗を含む |
-   | 条件なし・Pod が Running 中 | `RUNNING` | 初回 RUNNING 遷移時に `started_at` を記録し、Pod の `spec.nodeName` から `node_name` を取得して記録し、`namespace_daily_usage` に累計消費量を加算する（[database.md](database.md) §5.2 参照） |
+   | 条件なし・Pod が Running 中 | `RUNNING` | 初回 RUNNING 遷移時に `started_at` を記録し、全 Pod の `spec.nodeName` から `node_name` を取得して記録し、`namespace_daily_usage` に累計消費量を加算する（[database.md](database.md) §5.2 参照） |
 
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）。なお `HELD` ジョブは K8s Job が未作成のためこのステップの対象にならない
@@ -119,13 +119,19 @@ K8s Job の `status.conditions` に従う（通常ジョブと同じロジック
 
 ### 4.3 RUNNING への遷移
 
-最初の Pod が RUNNING になった時点（K8s Job の `status.active >= 1`）で DB を RUNNING に更新する。通常ジョブと同様に `started_at` と `node_name` を記録する。`parallelism > 1` の場合、複数の Pod が異なるノードで実行されうるが、`node_name` には最初に RUNNING になった Pod のノード名のみが記録される。
+最初の Pod が RUNNING になった時点（K8s Job の `status.active >= 1`）で DB を RUNNING に更新する。通常ジョブと同様に `started_at` と `node_name` を記録する。
 
 ### 4.3.1 node_name の記録
 
-定期同期（§1.1）ではなく、ジョブごとの状態遷移時に1回だけ実行される処理である。
+`node_name` はジョブの実行期間を通じて使用された全ノード名の累積リストである。DB 上ではカンマ区切りの TEXT（例: `"node-1,node-2"`）として格納される。通常ジョブでは Pod が1つなので結果的に単一ノード名となり、sweep ジョブとの分岐は不要である。
 
-Watcher は RUNNING 遷移時に `CoreV1Api().list_namespaced_pod()` で Job の Pod を取得し、`spec.nodeName` を DB の `node_name` カラムに記録する。一瞬で完了するジョブ（RUNNING を経由せず直接 SUCCEEDED/FAILED に遷移）の場合は、完了遷移時に `node_name` が未記録であれば Pod からの取得を試みる（Pod は `ttlSecondsAfterFinished` の間は残存している）。Pod が既に削除済みの場合は `node_name` は NULL のままとなる。
+**記録のトリガー条件:**
+
+1. **RUNNING 遷移時**: `CoreV1Api().list_namespaced_pod()` で Job の全 Pod を取得し、各 Pod の `spec.nodeName` を `node_name` にマージする
+2. **sweep の `succeeded_count` / `failed_count` 変化時**: Pod リストを取得し、新しいノード名があれば `node_name` に追加する。毎サイクルではなくカウンタ変化時のみ API を呼ぶことで K8s API（etcd）への追加負荷を最小限に抑える
+3. **完了フォールバック**: RUNNING を経由せず直接 SUCCEEDED/FAILED に遷移したジョブは、完了遷移時に `node_name` が未記録であれば Pod からの取得を試みる（Pod は `ttlSecondsAfterFinished` の間は残存している）
+
+累積記録（append-only）方式を採用し、一度記録したノード名は削除しない。Pod が reconcile 間隔より短い時間で起動・完了・削除された場合、そのノード名を取りこぼす可能性がある。Pod が既に削除済みの場合は `node_name` は NULL のままとなる。
 
 ### 4.4 リソース使用量の加算
 

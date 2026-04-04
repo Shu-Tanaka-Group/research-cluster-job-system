@@ -35,7 +35,7 @@ CREATE TABLE jobs (
     failed_indexes    TEXT,          -- 失敗インデックス（K8s 圧縮表記、例: "50"）
     succeeded_count   INTEGER,       -- 成功タスク数
     failed_count      INTEGER,       -- 失敗タスク数
-    node_name         TEXT,          -- ジョブ実行ノード名（Watcher が RUNNING 遷移時に記録。RUNNING スキップ時は完了遷移時に取得。sweep ジョブでは最初の Pod のノード名のみ記録される）
+    node_name         TEXT,          -- ジョブ実行ノード名（カンマ区切りリスト）。Watcher が RUNNING 遷移時および sweep の succeeded_count/failed_count 変化時に累積記録する。RUNNING スキップ時は完了遷移時に取得。通常ジョブでは単一ノード名、sweep ジョブでは使用された全ノード名が記録される
     cpu_millicores    INTEGER,       -- cpu 文字列のパース済み数値（ミリコア）。"500m" → 500, "2" → 2000。Dispatcher の in-flight CTE で使用
     memory_mib        INTEGER,       -- memory 文字列のパース済み数値（MiB）。"4Gi" → 4096, "500Mi" → 500。Dispatcher の in-flight CTE で使用
     PRIMARY KEY (namespace, job_id)
