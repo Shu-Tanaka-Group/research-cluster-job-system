@@ -182,7 +182,7 @@ CPU:    160 cores (160000m)
 Memory: 640.0 GiB (655360 MiB)
 GPU:    4
 
-=== Per-Flavor Totals ===
+=== Per-Flavor Totals (set-quota reference) ===
 FLAVOR      CPU (cores)   Memory (GiB)   GPU
 cpu              128         512.0          0
 gpu-a100          32         128.0          4
@@ -192,6 +192,8 @@ FLAVOR      CPU (cores)   Memory (GiB)   GPU
 cpu               64         256.0          0
 gpu-a100          32         128.0          4
 ```
+
+`Per-Flavor Totals` は `cjobctl cluster set-quota` のバリデーションが使用する値と一致する。CPU は各ノードの `cpu_millicores` を整数コアに切り下げてから合算（bin-packing 考慮）し、memory/GPU は単純合算。一方 `Cluster Totals (for DRF normalization)` は Dispatcher の DRF 正規化に使う cluster-wide の effective allocatable 合計（切り下げなし）を示す。
 
 #### `cjobctl cluster flavor-usage`
 

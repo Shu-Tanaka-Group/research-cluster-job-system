@@ -65,11 +65,15 @@ pub async fn resources(client: &Client) -> Result<()> {
     println!("Memory: {:.1} GiB ({} MiB)", total_mem as f64 / 1024.0, total_mem);
     println!("GPU:    {}", total_gpu);
 
-    // Per-flavor totals and max per node
+    // Per-flavor totals and max per node.
+    // CPU SUM is floored per-node to whole cores to reflect the bin-packing
+    // constraint used by `cjobctl cluster set-quota` validation (fractional
+    // leftover per node cannot host whole-core jobs).
     let flavor_rows = client
         .query(
             "SELECT flavor, \
-                    SUM(cpu_millicores)::BIGINT, SUM(memory_mib)::BIGINT, SUM(gpu)::BIGINT, \
+                    SUM((cpu_millicores / 1000) * 1000)::BIGINT, \
+                    SUM(memory_mib)::BIGINT, SUM(gpu)::BIGINT, \
                     MAX(cpu_millicores), MAX(memory_mib), MAX(gpu) \
              FROM node_resources GROUP BY flavor ORDER BY flavor",
             &[],
@@ -78,7 +82,7 @@ pub async fn resources(client: &Client) -> Result<()> {
 
     if !flavor_rows.is_empty() {
         println!();
-        println!("=== Per-Flavor Totals ===");
+        println!("=== Per-Flavor Totals (set-quota reference) ===");
         println!(
             "{:<14} {:>12} {:>14} {:>6}",
             "FLAVOR", "CPU (cores)", "Memory (GiB)", "GPU"
