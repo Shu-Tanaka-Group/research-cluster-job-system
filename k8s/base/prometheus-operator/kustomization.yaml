@@ -4,3 +4,4 @@ kind: Kustomization
 resources:
   - servicemonitor-submit-api.yaml
   - podmonitor-watcher.yaml
+  - podmonitor-dispatcher.yaml
