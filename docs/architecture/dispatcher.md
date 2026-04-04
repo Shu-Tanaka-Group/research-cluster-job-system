@@ -555,3 +555,20 @@ exit $EXIT_CODE
 `job.gpu > 0` の場合、`build_k8s_job` は `RESOURCE_FLAVORS` 設定から `job.flavor` に一致する flavor 定義を検索し、その `gpu_resource_name`（例: `nvidia.com/gpu`、`amd.com/gpu`）をコンテナの `resources.requests` と `resources.limits` に追加する。`job.gpu == 0` の場合は CPU / メモリのみを設定する。
 
 ResourceFlavor の定義と設定値については [resources.md](resources.md) §ResourceFlavor、[kueue.md](kueue.md) §1 を参照。
+
+### 4.2 CPU limit バッファ
+
+`CPU_LIMIT_BUFFER_MULTIPLIER`（デフォルト `1.0`）が `1.0` より大きい場合、`build_k8s_job` は CPU **limit のみ**に乗数を適用する。request は変更しない。
+
+```yaml
+# CPU_LIMIT_BUFFER_MULTIPLIER=1.05、--cpu 2 の場合
+resources:
+  requests:
+    cpu: "2"       # 変更なし（Kueue クォータはこちらで計算）
+  limits:
+    cpu: "2100m"   # 2000m × 1.05 = 2100m
+```
+
+コンテナ内のシステムプロセス（PID 1、bash、ログ出力等）のわずかな CPU 消費により、ユーザープログラムが request 分のみ使用していても CFS throttling が発生する場合がある。limit にバッファを持たせることでこれを軽減する。
+
+request を変更しないため、Kueue のクォータ消費・DRF スケジューリングへの影響はない。乗数 `1.0` のときは request == limit となり、従来の動作（Guaranteed QoS）と同一である。乗数が `1.0` を超える場合は QoS クラスが Burstable に変わるが、Kueue 管理のバッチジョブでは実質的な影響は小さい。
