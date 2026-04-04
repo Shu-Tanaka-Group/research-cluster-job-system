@@ -448,7 +448,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  CASE status\n    WHEN 'QUEUED' THEN '待機中'\n    WHEN 'DISPATCHING' THEN '投入中'\n    WHEN 'DISPATCHED' THEN '実行待ち'\n    WHEN 'RUNNING' THEN '実行中'\n    WHEN 'SUCCEEDED' THEN '成功'\n    WHEN 'FAILED' THEN '失敗'\n    WHEN 'CANCELLED' THEN 'キャンセル'\n    ELSE status\n  END AS \"状態\",\n  COUNT(*) AS \"件数\"\nFROM jobs\nWHERE created_at >= NOW() - INTERVAL '24 hours'\nGROUP BY status\nORDER BY\n  CASE status\n    WHEN 'RUNNING' THEN 1\n    WHEN 'QUEUED' THEN 2\n    WHEN 'DISPATCHING' THEN 3\n    WHEN 'DISPATCHED' THEN 4\n    WHEN 'SUCCEEDED' THEN 5\n    WHEN 'FAILED' THEN 6\n    WHEN 'CANCELLED' THEN 7\n  END;",
+          "rawSql": "SELECT\n  CASE status\n    WHEN 'QUEUED' THEN '待機中'\n    WHEN 'DISPATCHING' THEN '投入中'\n    WHEN 'DISPATCHED' THEN '実行待ち'\n    WHEN 'RUNNING' THEN '実行中'\n    WHEN 'HELD' THEN '保留中'\n    WHEN 'SUCCEEDED' THEN '成功'\n    WHEN 'FAILED' THEN '失敗'\n    WHEN 'CANCELLED' THEN 'キャンセル'\n    WHEN 'DELETING' THEN '削除中'\n    ELSE status\n  END AS \"状態\",\n  COUNT(*) AS \"件数\"\nFROM jobs\nWHERE created_at >= NOW() - INTERVAL '24 hours'\nGROUP BY status\nORDER BY\n  CASE status\n    WHEN 'RUNNING' THEN 1\n    WHEN 'QUEUED' THEN 2\n    WHEN 'HELD' THEN 3\n    WHEN 'DISPATCHING' THEN 4\n    WHEN 'DISPATCHED' THEN 5\n    WHEN 'SUCCEEDED' THEN 6\n    WHEN 'FAILED' THEN 7\n    WHEN 'CANCELLED' THEN 8\n    WHEN 'DELETING' THEN 9\n  END;",
           "refId": "A"
         }
       ],
