@@ -38,7 +38,7 @@ cargo test
 | `tests/test_scheduler.py` | `dispatcher/scheduler.py` 5関数 | 24 | cas_update_to_dispatching / mark_dispatched / mark_failed / reset_stale_dispatching の CAS 動作・状態遷移 / mark_failed の Prometheus カウンター増加（成功時に increment・更新なし時は不変）/ filter_by_resource_quota の ResourceQuota 残リソースによる dispatch 候補フィルタリング（quota 行なし通過・CPU / メモリ / GPU 不足スキップ・sweep parallelism 倍計算・サイクル内累計追跡・namespace 混在・空リスト） |
 | `tests/test_gap_filling.py` | `dispatcher/scheduler.py::apply_gap_filling` | 7 | 隙間充填フィルタリング。無効時 / 滞留なし / 残り時間による候補選択 / RUNNING なし / namespace 混在 / 残り時間 0 / 候補なし |
 | `tests/test_resource_utils.py` | `resource_utils.py` | 18 | CPU・メモリ文字列のパース。整数 / 小数 / ミリコア / Gi / Mi / Ki / Ti / milli-bytes / 10 進接頭辞(k, M, G, T) / 大きな値等 |
-| `tests/test_node_sync.py` | `watcher/node_sync.py::sync_node_resources` | 14 | ノードリソース同期。挿入 / 更新 / 削除 / 全削除 / GPU パース / API エラー時のデータ保持 / ラベルセレクタ / 部分失敗時の失敗 flavor データ保持 / 部分失敗時の成功 flavor 古ノード削除 |
+| `tests/test_node_sync.py` | `watcher/node_sync.py::sync_node_resources` | 26 | ノードリソース同期。挿入 / 更新 / 削除 / 全削除 / GPU パース / API エラー時のデータ保持 / ラベルセレクタ / 部分失敗時の失敗 flavor データ保持 / 部分失敗時の成功 flavor 古ノード削除 / DaemonSet Pod request の差し引き（単一 Pod・複数 Pod 合算・複数コンテナ合算・非 DaemonSet Pod 除外・オーナー参照なし Pod 除外・Succeeded/Failed/Unknown phase 除外・Pending phase 計上・requests 未設定コンテナ 0 扱い・0 クランプ・複数ノード独立集計・Pod 取得 API エラー時のデータ保持・GPU 非適用） |
 | `tests/test_quota_sync.py` | `watcher/quota_sync.py::sync_flavor_quotas` | 7 | flavor quota 同期。挿入 / 複数 flavor / 更新 / 削除 / API エラー時のデータ保持 / 空 resourceGroups / ClusterQueue 名設定 |
 | `tests/test_resource_quota_sync.py` | `watcher/resource_quota_sync.py::sync_resource_quotas` | 13 | ResourceQuota 同期。ユーザー namespace への挿入 / 値更新 / ユーザー namespace 除去時の行削除 / ResourceQuota なし時の行削除 / namespace 一覧 API エラー時のデータ保持 / ResourceQuota 一覧 API エラー時のデータ保持 / ユーザー namespace なしの全削除 / CPU・メモリパース / GPU リソース名取得 / field_selector 設定 / USER_NAMESPACE_LABEL 設定 / 非ユーザー namespace の除外 / ジョブなし namespace の追跡 |
 | `tests/test_cli_endpoints.py` | `api/routes.py` CLI 配布エンドポイント | 17 | `/v1/cli/version`・`/v1/cli/versions`・`/v1/cli/download` の正常系 / 404 / 認証不要 / バージョンソート / バージョン指定ダウンロード / 無効ディレクトリ除外 / 不正バージョン文字列の拒否（パストラバーサル防止）の検証 |
@@ -52,7 +52,7 @@ cargo test
 | `src/cmd/cli_list.rs` | `parse_versions` / `sort_versions` | 9 | ls 出力パース（latest 除外 / 空入力 / パース不能エントリ）/ ソート（降順 / プレリリース優先 / 設計書出力例の再現） |
 | `src/cmd/cli_set_latest.rs` | `run`（バリデーション） | 2 | プレリリース版の拒否（beta / rc） |
 
-**合計: Python 293 + Rust (cli) 62 + Rust (cjobctl) 28 = 383 テスト**
+**合計: Python 305 + Rust (cli) 62 + Rust (cjobctl) 28 = 395 テスト**
 
 ### 未テスト
 

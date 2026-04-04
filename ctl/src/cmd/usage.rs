@@ -356,12 +356,20 @@ impl ClusterTotals {
         }
     }
 
-    /// Fetch allocatable totals for nodes matching a specific DB flavor value.
+    /// Fetch dispatchable allocatable totals for nodes matching a specific DB
+    /// flavor value.
+    ///
+    /// The CPU total is computed by flooring each node's `cpu_millicores` to
+    /// whole cores before summing. This reflects the bin-packing constraint:
+    /// fractional leftover per node (e.g., 0.633 cores) cannot be consumed by
+    /// whole-core jobs, so the safe "dispatchable" total is less than the raw
+    /// SUM of effective allocatable. Memory and GPU are summed as-is.
+    ///
     /// Falls back to cluster-wide totals if no nodes match the given flavor.
     pub async fn from_db_by_flavor(client: &Client, flavor: &str) -> Self {
         match client
             .query_one(
-                "SELECT COALESCE(SUM(cpu_millicores), 0)::BIGINT, \
+                "SELECT COALESCE(SUM((cpu_millicores / 1000) * 1000), 0)::BIGINT, \
                         COALESCE(SUM(memory_mib), 0)::BIGINT, \
                         COALESCE(SUM(gpu), 0)::BIGINT \
                  FROM node_resources WHERE flavor = $1",

@@ -42,6 +42,46 @@ def _make_node(name, cpu="32", memory="128Gi", gpu_resources=None):
     return node
 
 
+def _make_pod(node_name, owner_kind="DaemonSet", phase="Running",
+              container_requests=None):
+    """Build a mock K8s Pod object.
+
+    container_requests: list of dicts, one per container, e.g.
+        [{"cpu": "500m", "memory": "256Mi"}, {"cpu": "100m"}].
+        Pass None for no containers; pass [] for a container list with no
+        requests set.
+    """
+    pod = MagicMock()
+    pod.spec.node_name = node_name
+    pod.status.phase = phase
+
+    if owner_kind is None:
+        pod.metadata.owner_references = []
+    else:
+        owner = MagicMock()
+        owner.kind = owner_kind
+        pod.metadata.owner_references = [owner]
+
+    containers = []
+    if container_requests is not None:
+        for req in container_requests:
+            c = MagicMock()
+            c.resources.requests = req
+            containers.append(c)
+    pod.spec.containers = containers
+    return pod
+
+
+def _pod_list(*pods):
+    resp = MagicMock()
+    resp.items = list(pods)
+    return resp
+
+
+def _no_pods():
+    return _pod_list()
+
+
 def _get_node_names(session):
     rows = session.execute(text("SELECT node_name FROM node_resources ORDER BY node_name"))
     return [row[0] for row in rows]
@@ -335,3 +375,256 @@ class TestSyncNodeResources:
 
         n = _get_node(db_session, "node-with-gpu")
         assert n[2] == 0  # gpu should be 0 because cpu flavor has no gpu_resource_name
+
+    def test_subtracts_daemonset_pod_requests(self, mock_k8s, db_session):
+        """DaemonSet Pod CPU/memory requests are subtracted from allocatable."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("node-1", container_requests=[{"cpu": "500m", "memory": "256Mi"}]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000 - 500  # 32 cores - 500m
+        assert n[1] == 131072 - 256  # 128Gi - 256Mi
+
+    def test_sums_multiple_daemonset_pods_per_node(self, mock_k8s, db_session):
+        """Multiple DaemonSet Pods on the same node are summed together."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("node-1", container_requests=[{"cpu": "500m", "memory": "256Mi"}]),
+            _make_pod("node-1", container_requests=[{"cpu": "200m", "memory": "128Mi"}]),
+            _make_pod("node-1", container_requests=[{"cpu": "100m", "memory": "64Mi"}]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000 - 800  # 500+200+100
+        assert n[1] == 131072 - 448  # 256+128+64
+
+    def test_sums_multiple_containers_in_daemonset_pod(self, mock_k8s, db_session):
+        """Sums requests across all containers in a single DaemonSet Pod."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("node-1", container_requests=[
+                {"cpu": "500m", "memory": "256Mi"},
+                {"cpu": "250m", "memory": "128Mi"},
+            ]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000 - 750
+        assert n[1] == 131072 - 384
+
+    def test_ignores_non_daemonset_pods(self, mock_k8s, db_session):
+        """Pods owned by non-DaemonSet controllers are not subtracted."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("node-1", owner_kind="ReplicaSet",
+                      container_requests=[{"cpu": "1000m", "memory": "1Gi"}]),
+            _make_pod("node-1", owner_kind="Job",
+                      container_requests=[{"cpu": "2000m", "memory": "2Gi"}]),
+            _make_pod("node-1", owner_kind="StatefulSet",
+                      container_requests=[{"cpu": "500m", "memory": "512Mi"}]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000  # untouched
+        assert n[1] == 131072  # untouched
+
+    def test_ignores_pods_without_owner_references(self, mock_k8s, db_session):
+        """Pods without owner references are not subtracted (bare Pods)."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("node-1", owner_kind=None,
+                      container_requests=[{"cpu": "1000m", "memory": "1Gi"}]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000
+        assert n[1] == 131072
+
+    def test_ignores_terminated_daemonset_pods(self, mock_k8s, db_session):
+        """DaemonSet Pods in Succeeded/Failed/Unknown phase are not subtracted."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("node-1", phase="Succeeded",
+                      container_requests=[{"cpu": "500m", "memory": "256Mi"}]),
+            _make_pod("node-1", phase="Failed",
+                      container_requests=[{"cpu": "500m", "memory": "256Mi"}]),
+            _make_pod("node-1", phase="Unknown",
+                      container_requests=[{"cpu": "500m", "memory": "256Mi"}]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000
+        assert n[1] == 131072
+
+    def test_counts_pending_daemonset_pods(self, mock_k8s, db_session):
+        """DaemonSet Pods in Pending phase are counted (already scheduled)."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("node-1", phase="Pending",
+                      container_requests=[{"cpu": "500m", "memory": "256Mi"}]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000 - 500
+        assert n[1] == 131072 - 256
+
+    def test_daemonset_pod_without_requests(self, mock_k8s, db_session):
+        """Containers without requests set contribute 0 to the subtraction."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            # Pod with a container that has no requests at all
+            _make_pod("node-1", container_requests=[{}]),
+            # Pod with only cpu request (no memory)
+            _make_pod("node-1", container_requests=[{"cpu": "300m"}]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000 - 300  # only the 300m cpu is subtracted
+        assert n[1] == 131072  # memory untouched
+
+    def test_effective_allocatable_clamps_at_zero(self, mock_k8s, db_session):
+        """Subtraction never produces negative effective allocatable values."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="1", memory="100Mi"),
+        ]
+        # Request more than the node has
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("node-1", container_requests=[{"cpu": "5", "memory": "1Gi"}]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 0
+        assert n[1] == 0
+
+    def test_daemonset_across_multiple_nodes(self, mock_k8s, db_session):
+        """Each node is adjusted independently based on its own DaemonSet Pods."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+            _make_node("node-2", cpu="64", memory="256Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("node-1", container_requests=[{"cpu": "500m", "memory": "256Mi"}]),
+            _make_pod("node-2", container_requests=[{"cpu": "1000m", "memory": "512Mi"}]),
+            _make_pod("node-2", container_requests=[{"cpu": "200m", "memory": "128Mi"}]),
+        )
+
+        sync_node_resources(db_session, _make_settings())
+
+        n1 = _get_node(db_session, "node-1")
+        assert n1[0] == 32000 - 500
+        assert n1[1] == 131072 - 256
+
+        n2 = _get_node(db_session, "node-2")
+        assert n2[0] == 64000 - 1200
+        assert n2[1] == 262144 - 640
+
+    def test_pod_list_api_error_preserves_db(self, mock_k8s, db_session):
+        """If list_pod_for_all_namespaces fails, existing DB data is preserved."""
+        from kubernetes.client.rest import ApiException
+
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+
+        # First sync succeeds (no DaemonSet Pods)
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
+        sync_node_resources(db_session, _make_settings())
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000
+
+        # Second sync: node list succeeds but pod list fails
+        mock_api.list_pod_for_all_namespaces.side_effect = ApiException(
+            status=500, reason="Internal"
+        )
+        sync_node_resources(db_session, _make_settings())
+
+        # Existing data is preserved (not overwritten with raw allocatable)
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000
+
+    def test_gpu_is_not_adjusted_by_daemonset_pods(self, mock_k8s, db_session):
+        """GPU count is not reduced even if a DaemonSet Pod requests GPU."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+
+        settings = _make_settings(
+            RESOURCE_FLAVORS=json.dumps([
+                {"name": "gpu", "label_selector": "cjob.io/flavor=gpu",
+                 "gpu_resource_name": "nvidia.com/gpu"},
+            ]),
+            DEFAULT_FLAVOR="gpu",
+        )
+        mock_api.list_node.return_value.items = [
+            _make_node("gpu-node", cpu="32", memory="128Gi",
+                       gpu_resources={"nvidia.com/gpu": "4"}),
+        ]
+        mock_api.list_pod_for_all_namespaces.return_value = _pod_list(
+            _make_pod("gpu-node", container_requests=[
+                {"cpu": "100m", "memory": "64Mi", "nvidia.com/gpu": "1"},
+            ]),
+        )
+
+        sync_node_resources(db_session, settings)
+
+        n = _get_node(db_session, "gpu-node")
+        assert n[0] == 32000 - 100
+        assert n[1] == 131072 - 64
+        assert n[2] == 4  # GPU not reduced

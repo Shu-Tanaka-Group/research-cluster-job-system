@@ -65,11 +65,15 @@ pub async fn resources(client: &Client) -> Result<()> {
     println!("Memory: {:.1} GiB ({} MiB)", total_mem as f64 / 1024.0, total_mem);
     println!("GPU:    {}", total_gpu);
 
-    // Per-flavor totals and max per node
+    // Per-flavor totals and max per node.
+    // CPU SUM is floored per-node to whole cores to reflect the bin-packing
+    // constraint used by `cjobctl cluster set-quota` validation (fractional
+    // leftover per node cannot host whole-core jobs).
     let flavor_rows = client
         .query(
             "SELECT flavor, \
-                    SUM(cpu_millicores)::BIGINT, SUM(memory_mib)::BIGINT, SUM(gpu)::BIGINT, \
+                    SUM((cpu_millicores / 1000) * 1000)::BIGINT, \
+                    SUM(memory_mib)::BIGINT, SUM(gpu)::BIGINT, \
                     MAX(cpu_millicores), MAX(memory_mib), MAX(gpu) \
              FROM node_resources GROUP BY flavor ORDER BY flavor",
             &[],
@@ -78,7 +82,7 @@ pub async fn resources(client: &Client) -> Result<()> {
 
     if !flavor_rows.is_empty() {
         println!();
-        println!("=== Per-Flavor Totals ===");
+        println!("=== Per-Flavor Totals (set-quota reference) ===");
         println!(
             "{:<14} {:>12} {:>14} {:>6}",
             "FLAVOR", "CPU (cores)", "Memory (GiB)", "GPU"
@@ -323,12 +327,12 @@ pub async fn set_quota(
         if (c as i64) > alloc_cpu_cores {
             exceeds = true;
             eprintln!(
-                "Error: CPU {} exceeds '{}' node allocatable total ({} cores)",
+                "Error: CPU {} exceeds '{}' effective node allocatable total ({} cores)",
                 c, flavor, alloc_cpu_cores,
             );
         } else if (c as i64) < alloc_cpu_cores / 10 {
             eprintln!(
-                "Warning: CPU {} is very small compared to '{}' node allocatable total ({} cores)",
+                "Warning: CPU {} is very small compared to '{}' effective node allocatable total ({} cores)",
                 c, flavor, alloc_cpu_cores,
             );
         }
@@ -340,13 +344,13 @@ pub async fn set_quota(
             if (mem_mib as i64) > alloc_mem_mib {
                 exceeds = true;
                 eprintln!(
-                    "Error: Memory {} exceeds '{}' node allocatable total ({:.1} GiB)",
+                    "Error: Memory {} exceeds '{}' effective node allocatable total ({:.1} GiB)",
                     mem, flavor,
                     alloc_mem_mib as f64 / 1024.0,
                 );
             } else if (mem_mib as i64) < alloc_mem_mib / 10 {
                 eprintln!(
-                    "Warning: Memory {} is very small compared to '{}' node allocatable total ({:.1} GiB)",
+                    "Warning: Memory {} is very small compared to '{}' effective node allocatable total ({:.1} GiB)",
                     mem, flavor,
                     alloc_mem_mib as f64 / 1024.0,
                 );
@@ -359,19 +363,19 @@ pub async fn set_quota(
         if (g as i64) > alloc_gpu {
             exceeds = true;
             eprintln!(
-                "Error: GPU {} exceeds '{}' node allocatable total ({})",
+                "Error: GPU {} exceeds '{}' effective node allocatable total ({})",
                 g, flavor, alloc_gpu,
             );
         } else if alloc_gpu > 0 && (g as i64) < alloc_gpu / 10 {
             eprintln!(
-                "Warning: GPU {} is very small compared to '{}' node allocatable total ({})",
+                "Warning: GPU {} is very small compared to '{}' effective node allocatable total ({})",
                 g, flavor, alloc_gpu,
             );
         }
     }
 
     if exceeds && !force {
-        bail!("Specified values exceed cluster allocatable totals. Use --force to override.");
+        bail!("Specified values exceed effective cluster allocatable totals. Use --force to override.");
     }
 
     // Show current → new (only for specified resources)

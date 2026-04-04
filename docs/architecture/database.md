@@ -189,24 +189,26 @@ WHERE usage_date <= CURRENT_DATE - :window_days;
 
 ## 6. `node_resources` テーブル
 
-クラスタ内の計算ノードごとの allocatable リソースを記録する。Watcher が K8s API からノード情報を定期取得（`NODE_RESOURCE_SYNC_INTERVAL_SEC`、デフォルト 300 秒）し、UPSERT で更新する。
+クラスタ内の計算ノードごとの effective allocatable リソース（`allocatable` から DaemonSet Pod の request 分を差し引いた値）を記録する。Watcher が K8s API からノード情報を定期取得（`NODE_RESOURCE_SYNC_INTERVAL_SEC`、デフォルト 300 秒）し、UPSERT で更新する。
 
 ```sql
 CREATE TABLE node_resources (
     node_name           TEXT PRIMARY KEY,
-    cpu_millicores      INTEGER NOT NULL,    -- allocatable CPU（ミリコア）
-    memory_mib          INTEGER NOT NULL,    -- allocatable memory（MiB）
+    cpu_millicores      INTEGER NOT NULL,    -- effective allocatable CPU（ミリコア、DaemonSet Pod の request を差し引き済み）
+    memory_mib          INTEGER NOT NULL,    -- effective allocatable memory（MiB、DaemonSet Pod の request を差し引き済み）
     gpu                 INTEGER NOT NULL DEFAULT 0,  -- allocatable GPU（nvidia.com/gpu）
     flavor              TEXT NOT NULL DEFAULT 'cpu', -- ResourceFlavor 名（RESOURCE_FLAVORS 設定の name と一致）
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 ```
 
+CPU・memory は DaemonSet Pod（calico-node、kube-proxy 等）の request 分を差し引いた effective allocatable を格納する。これにより Submit API のリジェクト判定、Dispatcher の DRF 正規化、cjobctl の `set-quota` バリデーションがすべて「実際にジョブ用に使える量」で動作する。GPU は DaemonSet 由来の消費が想定されないため差し引きは行わない。
+
 `flavor` 列は Watcher がノードの取得元セレクタに基づいて設定する。`RESOURCE_FLAVORS` 設定（[resources.md](resources.md) 参照）の各 flavor 定義の `label_selector` で取得したノードに、その flavor の `name` を設定する。`DEFAULT 'cpu'` により、既存データとの後方互換性を確保する。
 
 ### 6.1 同期処理
 
-Watcher が `RESOURCE_FLAVORS` 設定（[resources.md](resources.md) 参照）の各 flavor 定義の `label_selector` に一致するノードの `status.allocatable` を取得し、ノードごとに UPSERT する。DB に存在するが K8s から消えたノード（撤去・ラベル除去）は DELETE する。
+Watcher が `RESOURCE_FLAVORS` 設定（[resources.md](resources.md) 参照）の各 flavor 定義の `label_selector` に一致するノードの `status.allocatable` を取得し、`list_pod_for_all_namespaces()` で取得した DaemonSet Pod の CPU/memory request を差し引いた effective allocatable を計算してノードごとに UPSERT する。DB に存在するが K8s から消えたノード（撤去・ラベル除去）は DELETE する。詳細は [watcher.md](watcher.md) §1.1 を参照。
 
 ```sql
 -- UPSERT（ノードごと）
@@ -246,8 +248,10 @@ FROM node_resources;
 
 **cjobctl（flavor 別 allocatable 合計）**: `set-quota` のバリデーションで、指定 flavor に対応するノード群の allocatable 合計を取得する。flavor 名は Kueue ResourceFlavor 名と統一されているため、変換処理なしでそのままクエリに使用する。
 
+CPU は bin-packing 制約を反映して、ノードごとに整数コア単位で切り下げてから合算する。各ノードの端数コア（例: DaemonSet Pod 差し引き後の 0.633 cores の余剰）は整数コアジョブから消費できず、nominalQuota を端数を含めた合計まで許容すると「cluster-wide quota には余裕があるが、どのノードにも配置できず DISPATCHED で待機するジョブ」が発生するため。メモリと GPU は単純合算する（memory は MiB 単位で既に十分細かく、GPU は元から整数）。
+
 ```sql
-SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu,
+SELECT COALESCE(SUM((cpu_millicores / 1000) * 1000), 0) AS total_cpu,
        COALESCE(SUM(memory_mib), 0) AS total_memory,
        COALESCE(SUM(gpu), 0) AS total_gpu
 FROM node_resources
@@ -261,6 +265,7 @@ WHERE flavor = :flavor;
 - **行数の見積もり**: 計算ノード数と同数。10〜50 ノード程度を想定しており、クエリのコストは無視できる
 - **テーブルが空の場合のフォールバック**: Watcher 未起動時は `node_resources` が空となる。Submit API はバリデーションをスキップし、Dispatcher は DRF ソートを無効化して namespace 名順にフォールバックする。これにより Watcher 起動前でもシステムが動作する
 - **flavor 名の統一**: `node_resources.flavor` と `jobs.flavor` の値は Kueue ResourceFlavor の `metadata.name` と一致させる。これにより DB クエリと Kueue API の間で名前変換が不要になる
+- **DaemonSet Pod の request を差し引く理由**: `status.allocatable` は DaemonSet Pod（calico-node、kube-proxy 等）の request を含んだ値であり、そのままでは「ジョブ用に実際に使える量」を上回る。Submit API のリソース上限バリデーション（単一ノードの最大 allocatable）と cjobctl の `set-quota` バリデーション（flavor ごとの allocatable 合計）を実態に合わせるため、Watcher 側で差し引いた effective allocatable を記録する。これにより「上限表示では投入できるはずなのに Kubernetes スケジューラに配置できない」状態を防ぐ
 
 ## 7. `flavor_quotas` テーブル
 
