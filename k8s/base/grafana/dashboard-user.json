@@ -1634,7 +1634,15 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 10 },
+              { "color": "red", "value": 25 }
+            ]
           },
           "unit": "short"
         },
@@ -1658,13 +1666,14 @@
           "placement": "bottom"
         },
         "orientation": "vertical",
-        "showValue": "auto",
+        "showValue": "never",
         "stacking": "none",
         "tooltip": {
           "mode": "single",
           "sort": "none"
         },
-        "xTickLabelRotation": 0
+        "xTickLabelRotation": 0,
+        "colorByField": "平均ジョブ数"
       },
       "targets": [
         {
