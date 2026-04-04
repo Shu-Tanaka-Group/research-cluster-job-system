@@ -460,7 +460,7 @@ def get_job(
         failed_count=job.failed_count,
         completed_indexes=job.completed_indexes,
         failed_indexes=job.failed_indexes,
-        node_name=job.node_name,
+        node_name=job.node_name.split(",") if job.node_name else None,
     )
 
 

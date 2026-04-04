@@ -295,11 +295,11 @@ GET /v1/jobs?time_limit_ge=21600&time_limit_lt=43200
   "failed_count": null,
   "completed_indexes": null,
   "failed_indexes": null,
-  "node_name": "worker07"
+  "node_name": ["worker07", "worker08"]
 }
 ```
 
-`node_name` はジョブが実行されたノード名。Watcher が RUNNING 遷移時に記録する。QUEUED / DISPATCHED 等の未実行ジョブでは `null`。sweep ジョブでは最初に RUNNING になった Pod のノード名のみが記録される。
+`node_name` はジョブの実行に使用されたノード名のリスト（`list[str] | null`）。Watcher が RUNNING 遷移時および sweep の進行状況変化時に累積記録する。QUEUED / DISPATCHED 等の未実行ジョブでは `null`。通常ジョブでは単一要素のリスト、sweep ジョブでは使用された全ノード名のリストとなる。
 
 ### エラーレスポンス
 
