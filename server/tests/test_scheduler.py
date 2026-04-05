@@ -1,7 +1,11 @@
+from unittest.mock import MagicMock
+
 from sqlalchemy import text
 
+from cjob.config import Settings
 from cjob.dispatcher.scheduler import (
     cas_update_to_dispatching,
+    fetch_dispatchable_jobs,
     filter_by_resource_quota,
     mark_dispatched,
     mark_failed,
@@ -305,3 +309,69 @@ class TestFilterByResourceQuota:
         result = filter_by_resource_quota(db_session, [])
 
         assert result == []
+
+
+# ── fetch_dispatchable_jobs ──
+
+
+def _fetch_settings(batch_size=50, fetch_multiplier=10):
+    return Settings(
+        POSTGRES_PASSWORD="test",
+        DISPATCH_BATCH_SIZE=batch_size,
+        DISPATCH_FETCH_MULTIPLIER=fetch_multiplier,
+    )
+
+
+class TestFetchDispatchableJobsLimit:
+    """Verify SQL LIMIT is BATCH_SIZE * FETCH_MULTIPLIER (issue #136).
+
+    fetch_dispatchable_jobs uses PostgreSQL-specific SQL (CURRENT_DATE,
+    NULLS FIRST, MAKE_INTERVAL, ::float) that doesn't run under SQLite,
+    so we mock the session and assert the bound parameters instead.
+    """
+
+    def _mock_session(self, cluster_totals_row):
+        """Build a mocked Session that handles the 3 execute calls.
+
+        1. _cleanup_old_usage
+        2. _fetch_cluster_totals (reads .mappings().first())
+        3. main SELECT (iterated via `for row in result.mappings()`)
+        """
+        cleanup_result = MagicMock()
+        totals_result = MagicMock()
+        totals_result.mappings.return_value.first.return_value = cluster_totals_row
+        main_result = MagicMock()
+        main_result.mappings.return_value = iter([])
+
+        session = MagicMock()
+        session.execute.side_effect = [cleanup_result, totals_result, main_result]
+        return session
+
+    def test_fetch_limit_uses_multiplier_drf_path(self):
+        """DRF-enabled branch binds fetch_limit = BATCH_SIZE * FETCH_MULTIPLIER."""
+        session = self._mock_session(
+            {"total_cpu": 1000, "total_memory": 4096, "total_gpu": 0}
+        )
+        settings = _fetch_settings(batch_size=50, fetch_multiplier=10)
+
+        fetch_dispatchable_jobs(session, settings)
+
+        # The 3rd execute call is the main SELECT; its 2nd positional arg is params.
+        main_call = session.execute.call_args_list[2]
+        params = main_call.args[1]
+        assert params["fetch_limit"] == 500
+        assert "batch_size" not in params
+
+    def test_fetch_limit_uses_multiplier_fallback_path(self):
+        """Fallback branch (empty node_resources) also uses the multiplier."""
+        session = self._mock_session(
+            {"total_cpu": 0, "total_memory": 0, "total_gpu": 0}
+        )
+        settings = _fetch_settings(batch_size=20, fetch_multiplier=5)
+
+        fetch_dispatchable_jobs(session, settings)
+
+        main_call = session.execute.call_args_list[2]
+        params = main_call.args[1]
+        assert params["fetch_limit"] == 100
+        assert "batch_size" not in params

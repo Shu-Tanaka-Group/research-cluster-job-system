@@ -75,11 +75,13 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
                 "  AND COALESCE(w.weight, 1) > 0 "
                 "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
                 "  q.namespace ASC "
-                "LIMIT :batch_size"
+                "LIMIT :fetch_limit"
             ),
             {
                 "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
-                "batch_size": settings.DISPATCH_BATCH_SIZE,
+                "fetch_limit": (
+                    settings.DISPATCH_BATCH_SIZE * settings.DISPATCH_FETCH_MULTIPLIER
+                ),
                 "round_size": settings.DISPATCH_ROUND_SIZE,
             },
         )
@@ -139,11 +141,13 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
                 "    (COALESCE(u.gpu_seconds, 0) + COALESCE(inf.gpu_seconds, 0)) * 1.0 / NULLIF(:cluster_gpus, 0)"
                 "  ) / COALESCE(w.weight, 1) ASC NULLS FIRST, "
                 "  q.namespace ASC "
-                "LIMIT :batch_size"
+                "LIMIT :fetch_limit"
             ),
             {
                 "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
-                "batch_size": settings.DISPATCH_BATCH_SIZE,
+                "fetch_limit": (
+                    settings.DISPATCH_BATCH_SIZE * settings.DISPATCH_FETCH_MULTIPLIER
+                ),
                 "round_size": settings.DISPATCH_ROUND_SIZE,
                 "window_days": settings.FAIR_SHARE_WINDOW_DAYS,
                 "cluster_cpu_millicores": cluster_cpu,

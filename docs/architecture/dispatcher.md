@@ -78,12 +78,14 @@ ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 nam
            (COALESCE(u.gpu_seconds, 0) + COALESCE(inf.gpu_seconds, 0))::float / NULLIF(:cluster_gpus, 0)
          ) / COALESCE(w.weight, 1) ASC NULLS FIRST,  -- 消費量レコードなし(NULL)の namespace が最優先
          q.namespace ASC                   -- 同率の場合は namespace 名で決定的に順序付け
-LIMIT :batch_size;                         -- 1サイクルの総取得数を固定
+LIMIT :fetch_limit;                        -- 候補を余剰取得（DISPATCH_BATCH_SIZE × DISPATCH_FETCH_MULTIPLIER）
 ```
 
 このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_daily_usage` のウィンドウ集計はサブクエリで行い、namespace ごとに 1 行に集約されるため JOIN のコストは無視できる（20 namespace × 7 日 = 140 行程度）。`in_flight` CTE も `idx_jobs_namespace_status` インデックスを利用し、DISPATCHING/DISPATCHED ジョブ（通常 `DISPATCH_BUDGET_PER_NAMESPACE × namespace 数` 以下）を効率的に集計する。
 
-**ラウンドロビンの仕組み：** `ROW_NUMBER()` を QUEUED ジョブのみに振り、`CEIL(rn / round_size)` でグループ化することで、各 namespace から `DISPATCH_ROUND_SIZE` 件ずつ交互に取得する。デフォルト（`round_size = 1`）では各 namespace から 1 件ずつ交互に並び、`round_size = 5` なら 5 件ずつまとめて並ぶ。`LIMIT :batch_size` で打ち切ることで、1 サイクルの dispatch 数が制限される。
+**ラウンドロビンの仕組み：** `ROW_NUMBER()` を QUEUED ジョブのみに振り、`CEIL(rn / round_size)` でグループ化することで、各 namespace から `DISPATCH_ROUND_SIZE` 件ずつ交互に取得する。デフォルト（`round_size = 1`）では各 namespace から 1 件ずつ交互に並び、`round_size = 5` なら 5 件ずつまとめて並ぶ。1 サイクルあたりの dispatch 数は後段のフィルタ通過後に `DISPATCH_BATCH_SIZE` 件へ絞り込まれる（後述の「候補の余剰取得」参照）。
+
+**候補の余剰取得：** SQL の `LIMIT` は `DISPATCH_BATCH_SIZE × DISPATCH_FETCH_MULTIPLIER`（デフォルト 50 × 10 = 500）で取得する。取得した候補は §2.4 の隙間充填フィルタと §2.5 の ResourceQuota プレチェックを通過した後、Python 側で先頭 `DISPATCH_BATCH_SIZE` 件に絞り込んで dispatch する。余剰取得は、DRF 優先で取得される namespace のジョブが全滅（現在の残リソースで実行不可能）した場合に、後続の他 namespace の候補が dispatch されるようにするためである。これにより、リソースに空きがあるにもかかわらず 0 dispatch が継続して均衡が進まない事象を防ぐ。倍率は namespace 数・ジョブサイズの分布に応じて調整できる。候補数は WHERE 句の `q.rn <= :dispatch_limit - active_count` により `namespace数 × DISPATCH_BUDGET_PER_NAMESPACE` が上限となるため無制限にはならず、DB → Dispatcher のネットワーク転送量と Python 側のフィルタ iteration 回数のみが増加する。
 
 **公平性の保証（DRF）：** 直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量（`namespace_daily_usage`）と DISPATCHING/DISPATCHED ジョブの予測消費量（`in_flight` CTE）を合算し、クラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求め、namespace の weight（`namespace_weights` テーブル、デフォルト 1）で割ってソートする。クラスタ容量は `node_resources` テーブルから `SUM()` で動的に取得する（[database.md](database.md) §6.2 参照）。これにより、支配的リソースの消費割合が小さい namespace が優先され、weight が大きい namespace はより多くのリソースを消費するまで優先され続ける。`namespace_daily_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。`node_resources` テーブルが空の場合は DRF ソートを無効化し、namespace 名順にフォールバックする。
 
@@ -97,12 +99,12 @@ LIMIT :batch_size;                         -- 1サイクルの総取得数を固
 2. DRF dominant share / weight — グループ内の namespace 優先度
 3. namespace 名 — 同率タイブレイク
 
-DRF が dispatch 結果を実質的に変えるのは、1 つのラウンドロビングループ内のジョブ数が `DISPATCH_BATCH_SIZE` を超え、`LIMIT` による切り落としが発生するときである。`round_size` が小さいと各グループの件数が少なくなり、DRF は順序の調整にとどまる。`round_size` が大きいと各グループの件数が多くなり、DRF が dispatch 枠の配分自体を左右する。
+DRF が dispatch 結果を実質的に変えるのは、1 つのラウンドロビングループ内のジョブ数が `DISPATCH_BATCH_SIZE` を超え、`DISPATCH_BATCH_SIZE` への切り詰めが発生するときである。`round_size` が小さいと各グループの件数が少なくなり、DRF は順序の調整にとどまる。`round_size` が大きいと各グループの件数が多くなり、DRF が dispatch 枠の配分自体を左右する。
 
 | 設定 | 挙動 | 特性 |
 |---|---|---|
 | `round_size = 1`（デフォルト） | 各 namespace から 1 件ずつ交互に取得。DRF はグループ内の順序のみ決定 | namespace 数が `DISPATCH_BATCH_SIZE` 以下の場合、全 namespace が均等に dispatch される。DRF の影響は namespace 数が `DISPATCH_BATCH_SIZE` を超えた場合にのみ現れる |
-| `round_size = DISPATCH_BUDGET_PER_NAMESPACE` | 各 namespace の budget 内の全ジョブが同一グループに入り、DRF が namespace 間の配分を完全に決定 | リソース消費量の少ない namespace が優先的に dispatch され、消費量の多い namespace の dispatch が抑制される。in_flight CTE の自己補正により、特定 namespace への集中は数サイクル（数十秒）で均衡に戻る |
+| `round_size = DISPATCH_BUDGET_PER_NAMESPACE` | 各 namespace の budget 内の全ジョブが同一グループに入り、DRF が namespace 間の配分を完全に決定 | リソース消費量の少ない namespace が優先的に dispatch され、消費量の多い namespace の dispatch が抑制される。dispatch が進むたびに in_flight CTE が更新され、特定 namespace への集中は数サイクル（数十秒）で均衡に戻る。DRF 優先の namespace のジョブがフィルタで全滅しても、候補の余剰取得により他 namespace の dispatch が継続するため、0 dispatch による均衡停止は発生しない |
 
 中間値は `DISPATCH_BATCH_SIZE mod (namespace 数 × round_size)` の剰余に依存して DRF の影響度が変動し、namespace 数の増減で挙動が不安定になるため推奨しない。DRF による消費量ベースの優先制御を意図する場合は `round_size = DISPATCH_BUDGET_PER_NAMESPACE` を設定する。DRF を使用せずラウンドロビンのみで運用する場合はデフォルトの `round_size = 1` を維持する。
 
@@ -144,6 +146,7 @@ dispatch_budget = namespace_dispatch_limit - active_jobs_in_db(namespace)
 
 namespace_dispatch_limit = 32 （ConfigMap: DISPATCH_BUDGET_PER_NAMESPACE で設定）
 batch_size              = 50 （ConfigMap: DISPATCH_BATCH_SIZE で設定）
+fetch_multiplier        = 10 （ConfigMap: DISPATCH_FETCH_MULTIPLIER で設定）
 
 active_jobs_in_db(namespace) は PostgreSQL から取得する。
 K8s API は参照しない。
@@ -213,15 +216,18 @@ class Dispatcher:
     def __init__(self):
         self.check_interval = int(os.environ["DISPATCH_BUDGET_CHECK_INTERVAL_SEC"])
         self.batch_size = int(os.environ["DISPATCH_BATCH_SIZE"])
+        self.fetch_multiplier = int(os.environ["DISPATCH_FETCH_MULTIPLIER"])
 
     def run(self):
         while True:
-            # §1.2 のクエリ（期間リセット → ラウンドロビン・DRF 優先・LIMIT batch_size）
+            # §1.2 のクエリ（期間リセット → ラウンドロビン・DRF 優先・LIMIT fetch_limit で余剰取得）
             candidates = db.fetch_dispatchable_jobs()
             # §2.4 の隙間充填フィルタ（滞留ジョブがある namespace の候補を制限）
             candidates = apply_gap_filling(session, candidates, settings)
             # §2.5 の ResourceQuota プレチェック（namespace の残リソースで候補を制限）
             candidates = filter_by_resource_quota(session, candidates)
+            # フィルタ通過後の先頭 DISPATCH_BATCH_SIZE 件に絞り込む（1サイクルの dispatch 数上限）
+            candidates = candidates[:self.batch_size]
             for job in candidates:
                 self.dispatch(job)
             time.sleep(self.check_interval)

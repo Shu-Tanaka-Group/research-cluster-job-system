@@ -60,6 +60,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: DISPATCH_BATCH_SIZE
+            - name: DISPATCH_FETCH_MULTIPLIER
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: DISPATCH_FETCH_MULTIPLIER
             - name: DISPATCH_ROUND_SIZE
               valueFrom:
                 configMapKeyRef:
