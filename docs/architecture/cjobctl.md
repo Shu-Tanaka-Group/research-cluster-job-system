@@ -313,6 +313,7 @@ CLI 側で以下のバリデーションを行う:
 |---|---|---|
 | `DISPATCH_BUDGET_PER_NAMESPACE` | int | dispatcher |
 | `DISPATCH_BATCH_SIZE` | int | dispatcher |
+| `DISPATCH_FETCH_MULTIPLIER` | int | dispatcher |
 | `DISPATCH_ROUND_SIZE` | int | dispatcher |
 | `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` | int | dispatcher, watcher |
 | `DISPATCH_RETRY_INTERVAL_SEC` | int | dispatcher |

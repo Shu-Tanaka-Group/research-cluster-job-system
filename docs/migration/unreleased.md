@@ -2,7 +2,21 @@
 
 本ファイルは **次回リリース向け** の移行手順を記載する作業ファイルである。リリース時にバージョン名（例: `v1.11.0.md`）にリネームし、新しい `unreleased.md` を作成する（[versioning.md](../versioning.md) 参照）。
 
-[標準移行手順](../migration.md) の Watcher ビルド・再起動（ロールアウト再起動）により新ロジックが適用される。追加の環境変数・DB スキーマ変更・ConfigMap 変更は不要。
+[標準移行手順](../migration.md) に加えて、以下の追加作業が必要。
+
+## ConfigMap 更新: `DISPATCH_FETCH_MULTIPLIER` の追加
+
+Dispatcher の候補取得数に余剰を持たせる設定 `DISPATCH_FETCH_MULTIPLIER` を新設した（issue #136）。ConfigMap `cjob-config` にキーを追加したうえで、Dispatcher Deployment を再起動する。
+
+```bash
+# ConfigMap を適用（base マニフェストにキーが追加されている）
+kubectl apply -k k8s/overlay-<env>
+
+# Dispatcher を再起動して新しい環境変数を読み込ませる
+kubectl -n cjob-system rollout restart deploy/dispatcher
+```
+
+デフォルト値は `10` である。overlay で上書きする必要は通常ない。
 
 ## `node_resources` の effective allocatable 化に伴う確認事項
 
