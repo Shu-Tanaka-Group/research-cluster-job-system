@@ -112,6 +112,11 @@ def run():
             candidates = fetch_dispatchable_jobs(session, settings)
             candidates = apply_gap_filling(session, candidates, settings)
             candidates = filter_by_resource_quota(session, candidates)
+            # Cap to DISPATCH_BATCH_SIZE after filtering. SQL over-fetched
+            # DISPATCH_BATCH_SIZE * DISPATCH_FETCH_MULTIPLIER candidates so
+            # that later-namespace jobs can still dispatch when DRF-prioritised
+            # namespaces have their candidates wiped out by the filters.
+            candidates = candidates[:settings.DISPATCH_BATCH_SIZE]
             if candidates:
                 logger.info("Found %d dispatchable jobs", len(candidates))
             for job in candidates:

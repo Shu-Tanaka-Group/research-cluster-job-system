@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # Dispatcher
     DISPATCH_BUDGET_PER_NAMESPACE: int = 32
     DISPATCH_BATCH_SIZE: int = 50
+    DISPATCH_FETCH_MULTIPLIER: int = 10            # SQL over-fetch factor; filters cap to BATCH_SIZE
     DISPATCH_BUDGET_CHECK_INTERVAL_SEC: int = 10
     DISPATCH_ROUND_SIZE: int = 1                   # jobs per namespace per round-robin round
     DISPATCH_RETRY_INTERVAL_SEC: int = 30
