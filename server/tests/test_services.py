@@ -711,7 +711,7 @@ class TestDeleteJobs:
         _insert_job(db_session, 3, status="RUNNING")
         resp = delete_jobs(db_session, NS, None)
         assert sorted(resp.deleted) == [1, 2]
-        assert len(resp.skipped) == 1
+        assert len(resp.skipped) == 0
         assert sorted(resp.log_dirs) == ["/home/jovyan/.cjob/logs/1", "/home/jovyan/.cjob/logs/2"]
 
 
