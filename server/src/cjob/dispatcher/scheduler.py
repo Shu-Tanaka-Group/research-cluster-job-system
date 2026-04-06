@@ -54,24 +54,29 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
         result = session.execute(
             text(
                 "WITH active AS ("
-                "  SELECT namespace, COUNT(*) AS active_count"
+                "  SELECT namespace, flavor, COUNT(*) AS active_count"
                 "  FROM jobs"
                 "  WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
-                "  GROUP BY namespace"
+                "  GROUP BY namespace, flavor"
                 "), "
                 "queued AS ("
-                "  SELECT *, ROW_NUMBER() OVER ("
-                "    PARTITION BY namespace ORDER BY created_at ASC"
-                "  ) AS rn"
+                "  SELECT *,"
+                "    ROW_NUMBER() OVER ("
+                "      PARTITION BY namespace ORDER BY created_at ASC"
+                "    ) AS rn,"
+                "    ROW_NUMBER() OVER ("
+                "      PARTITION BY namespace, flavor ORDER BY created_at ASC"
+                "    ) AS flavor_rn"
                 "  FROM jobs"
                 "  WHERE status = 'QUEUED'"
                 "    AND (retry_after IS NULL OR retry_after <= NOW())"
                 ") "
                 "SELECT q.* FROM queued q"
-                "  LEFT JOIN active a USING (namespace)"
+                "  LEFT JOIN active a"
+                "    ON q.namespace = a.namespace AND q.flavor = a.flavor"
                 "  LEFT JOIN namespace_weights w ON q.namespace = w.namespace "
                 "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
-                "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
+                "  AND q.flavor_rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
                 "  AND COALESCE(w.weight, 1) > 0 "
                 "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
                 "  q.namespace ASC "
@@ -89,15 +94,19 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
         result = session.execute(
             text(
                 "WITH active AS ("
-                "  SELECT namespace, COUNT(*) AS active_count"
+                "  SELECT namespace, flavor, COUNT(*) AS active_count"
                 "  FROM jobs"
                 "  WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
-                "  GROUP BY namespace"
+                "  GROUP BY namespace, flavor"
                 "), "
                 "queued AS ("
-                "  SELECT *, ROW_NUMBER() OVER ("
-                "    PARTITION BY namespace ORDER BY created_at ASC"
-                "  ) AS rn"
+                "  SELECT *,"
+                "    ROW_NUMBER() OVER ("
+                "      PARTITION BY namespace ORDER BY created_at ASC"
+                "    ) AS rn,"
+                "    ROW_NUMBER() OVER ("
+                "      PARTITION BY namespace, flavor ORDER BY created_at ASC"
+                "    ) AS flavor_rn"
                 "  FROM jobs"
                 "  WHERE status = 'QUEUED'"
                 "    AND (retry_after IS NULL OR retry_after <= NOW())"
@@ -127,12 +136,13 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
                 "  GROUP BY namespace"
                 ") "
                 "SELECT q.* FROM queued q"
-                "  LEFT JOIN active a USING (namespace)"
+                "  LEFT JOIN active a"
+                "    ON q.namespace = a.namespace AND q.flavor = a.flavor"
                 "  LEFT JOIN usage u ON q.namespace = u.namespace"
                 "  LEFT JOIN in_flight inf ON q.namespace = inf.namespace"
                 "  LEFT JOIN namespace_weights w ON q.namespace = w.namespace "
                 "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
-                "  AND q.rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
+                "  AND q.flavor_rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
                 "  AND COALESCE(w.weight, 1) > 0 "
                 "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
                 "  GREATEST("
@@ -268,9 +278,13 @@ def fetch_stalled_jobs(session: Session, threshold_sec: int) -> list[Job]:
     return jobs
 
 
-def estimate_shortest_remaining(session: Session, namespace: str) -> int | None:
-    """Estimate the shortest remaining time (seconds) among RUNNING jobs in a namespace.
+def estimate_shortest_remaining(
+    session: Session, namespace: str, flavor: str
+) -> int | None:
+    """Estimate the shortest remaining time (seconds) among RUNNING jobs.
 
+    Scoped to the same (namespace, flavor) so that only jobs competing
+    for the same resource pool are considered.
     Returns None if there are no RUNNING jobs with a known started_at.
     """
     result = session.execute(
@@ -282,10 +296,11 @@ def estimate_shortest_remaining(session: Session, namespace: str) -> int | None:
             ") AS min_remaining "
             "FROM jobs "
             "WHERE namespace = :namespace "
+            "  AND flavor = :flavor "
             "  AND status = 'RUNNING' "
             "  AND started_at IS NOT NULL"
         ),
-        {"namespace": namespace},
+        {"namespace": namespace, "flavor": flavor},
     )
     row = result.mappings().first()
     if row is None or row["min_remaining"] is None:
@@ -371,23 +386,25 @@ def apply_gap_filling(
         return candidates
 
     stalled = fetch_stalled_jobs(session, settings.GAP_FILLING_STALL_THRESHOLD_SEC)
-    stalled_namespaces = {job.namespace for job in stalled}
+    stalled_keys = {(job.namespace, job.flavor) for job in stalled}
 
-    if not stalled_namespaces:
+    if not stalled_keys:
         return candidates
 
     available = estimate_available_cluster_resources(session, settings)
 
-    result = [c for c in candidates if c.namespace not in stalled_namespaces]
+    result = [c for c in candidates if (c.namespace, c.flavor) not in stalled_keys]
 
-    for ns in stalled_namespaces:
-        ns_candidates = [c for c in candidates if c.namespace == ns]
-        if not ns_candidates:
+    for ns, flv in stalled_keys:
+        key_candidates = [
+            c for c in candidates if c.namespace == ns and c.flavor == flv
+        ]
+        if not key_candidates:
             continue
 
-        remaining = estimate_shortest_remaining(session, ns)
+        remaining = estimate_shortest_remaining(session, ns, flv)
 
-        for c in ns_candidates:
+        for c in key_candidates:
             # Time check: skip if remaining is known and job doesn't fit.
             # When remaining is None (no RUNNING jobs), skip time check
             # to avoid deadlock.
