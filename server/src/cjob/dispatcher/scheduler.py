@@ -461,7 +461,8 @@ def filter_by_resource_quota(
     rows = session.execute(
         text(
             f"SELECT namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu, "
-            f"used_cpu_millicores, used_memory_mib, used_gpu "
+            f"used_cpu_millicores, used_memory_mib, used_gpu, "
+            f"hard_count, used_count "
             f"FROM namespace_resource_quotas WHERE namespace IN ({ph})"
         ),
         params,
@@ -473,6 +474,11 @@ def filter_by_resource_quota(
             "remaining_cpu": row["hard_cpu_millicores"] - row["used_cpu_millicores"],
             "remaining_mem": row["hard_memory_mib"] - row["used_memory_mib"],
             "remaining_gpu": row["hard_gpu"] - row["used_gpu"],
+            "remaining_count": (
+                row["hard_count"] - row["used_count"]
+                if row["hard_count"] is not None
+                else None
+            ),
         }
 
     # Track cumulative dispatched resources per namespace within this cycle
@@ -486,7 +492,7 @@ def filter_by_resource_quota(
             continue
 
         remaining = quota_map[ns]
-        prev = dispatched.get(ns, {"cpu": 0, "mem": 0, "gpu": 0})
+        prev = dispatched.get(ns, {"cpu": 0, "mem": 0, "gpu": 0, "count": 0})
 
         multiplier = job.parallelism if job.completions is not None else 1
         job_cpu = job.cpu_millicores * multiplier
@@ -497,18 +503,30 @@ def filter_by_resource_quota(
         eff_mem = remaining["remaining_mem"] - prev["mem"]
         eff_gpu = remaining["remaining_gpu"] - prev["gpu"]
 
-        if eff_cpu >= job_cpu and eff_mem >= job_mem and eff_gpu >= job_gpu:
+        # Job count: always 1 per job (sweep creates 1 K8s Job object)
+        remaining_count = remaining["remaining_count"]
+        eff_count = (
+            remaining_count - prev["count"]
+            if remaining_count is not None
+            else None
+        )
+
+        resource_ok = eff_cpu >= job_cpu and eff_mem >= job_mem and eff_gpu >= job_gpu
+        count_ok = eff_count is None or eff_count >= 1
+
+        if resource_ok and count_ok:
             result.append(job)
             dispatched[ns] = {
                 "cpu": prev["cpu"] + job_cpu,
                 "mem": prev["mem"] + job_mem,
                 "gpu": prev["gpu"] + job_gpu,
+                "count": prev["count"] + 1,
             }
         else:
             logger.debug(
                 "ResourceQuota: skipping %s/%d "
-                "(needs cpu=%d mem=%d gpu=%d, "
-                "remaining cpu=%d mem=%d gpu=%d)",
+                "(needs cpu=%d mem=%d gpu=%d count=1, "
+                "remaining cpu=%d mem=%d gpu=%d count=%s)",
                 ns,
                 job.job_id,
                 job_cpu,
@@ -517,6 +535,7 @@ def filter_by_resource_quota(
                 eff_cpu,
                 eff_mem,
                 eff_gpu,
+                eff_count if eff_count is not None else "unlimited",
             )
 
     return result

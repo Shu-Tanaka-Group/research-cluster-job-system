@@ -64,7 +64,8 @@ def _get_quota_row(session, namespace):
     return session.execute(
         text(
             "SELECT hard_cpu_millicores, hard_memory_mib, hard_gpu, "
-            "used_cpu_millicores, used_memory_mib, used_gpu "
+            "used_cpu_millicores, used_memory_mib, used_gpu, "
+            "hard_count, used_count "
             "FROM namespace_resource_quotas WHERE namespace = :ns"
         ),
         {"ns": namespace},
@@ -344,3 +345,63 @@ class TestSyncResourceQuotas:
         row = _get_quota_row(db_session, "user-alice")
         assert row is not None
         assert row[3] == 200000  # used_cpu - JupyterHub consuming resources
+
+    def test_syncs_count_jobs_batch(self, mock_k8s, db_session):
+        """count/jobs.batch should be synced to hard_count/used_count."""
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi",
+                 "count/jobs.batch": "50"},
+                {"requests.cpu": "20", "requests.memory": "80Gi",
+                 "count/jobs.batch": "10"},
+            ),
+        ])
+        sync_resource_quotas(db_session, _make_settings())
+
+        row = _get_quota_row(db_session, "user-alice")
+        assert row[6] == 50   # hard_count
+        assert row[7] == 10   # used_count
+
+    def test_count_null_when_not_set(self, mock_k8s, db_session):
+        """hard_count/used_count should be NULL when count/jobs.batch is absent."""
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi"},
+                {"requests.cpu": "20", "requests.memory": "80Gi"},
+            ),
+        ])
+        sync_resource_quotas(db_session, _make_settings())
+
+        row = _get_quota_row(db_session, "user-alice")
+        assert row[6] is None  # hard_count
+        assert row[7] is None  # used_count
+
+    def test_count_updates_on_resync(self, mock_k8s, db_session):
+        """used_count should be updated on resync."""
+        _setup_mock_api(mock_k8s, ["user-alice"], [
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi",
+                 "count/jobs.batch": "50"},
+                {"requests.cpu": "20", "requests.memory": "80Gi",
+                 "count/jobs.batch": "5"},
+            ),
+        ])
+        sync_resource_quotas(db_session, _make_settings())
+        assert _get_quota_row(db_session, "user-alice")[7] == 5
+
+        # Resync with updated used count
+        mock_api = mock_k8s.CoreV1Api.return_value
+        mock_api.list_resource_quota_for_all_namespaces.return_value = _make_rq_list([
+            _make_resource_quota(
+                "user-alice",
+                {"requests.cpu": "300", "requests.memory": "1250Gi",
+                 "count/jobs.batch": "50"},
+                {"requests.cpu": "20", "requests.memory": "80Gi",
+                 "count/jobs.batch": "20"},
+            ),
+        ])
+        sync_resource_quotas(db_session, _make_settings())
+        assert _get_quota_row(db_session, "user-alice")[7] == 20

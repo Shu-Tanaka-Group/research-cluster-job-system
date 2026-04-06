@@ -204,7 +204,8 @@ pub async fn quota(client: &Client, user_namespaces: &[String], namespace: Optio
     let rows = client
         .query(
             "SELECT namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu, \
-                    used_cpu_millicores, used_memory_mib, used_gpu, updated_at \
+                    used_cpu_millicores, used_memory_mib, used_gpu, updated_at, \
+                    hard_count, used_count \
              FROM namespace_resource_quotas \
              ORDER BY namespace",
             &[],
@@ -219,10 +220,10 @@ pub async fn quota(client: &Client, user_namespaces: &[String], namespace: Optio
 
     let now = chrono::Utc::now();
 
-    let headers = ["Namespace", "CPU (used/hard)", "Memory (used/hard)", "GPU (used/hard)", "Updated"];
+    let headers = ["Namespace", "CPU (used/hard)", "Memory (used/hard)", "GPU (used/hard)", "Jobs (used/hard)", "Updated"];
 
     // Pass 1: collect formatted data
-    let mut table_rows: Vec<[String; 5]> = Vec::new();
+    let mut table_rows: Vec<[String; 6]> = Vec::new();
     for ns in &targets {
         if let Some(row) = quota_map.get(*ns) {
             let hard_cpu: i32 = row.get(1);
@@ -232,17 +233,26 @@ pub async fn quota(client: &Client, user_namespaces: &[String], namespace: Optio
             let used_mem: i32 = row.get(5);
             let used_gpu: i32 = row.get(6);
             let updated_at: chrono::DateTime<chrono::Utc> = row.get(7);
+            let hard_count: Option<i32> = row.get(8);
+            let used_count: Option<i32> = row.get(9);
+
+            let count_str = match (hard_count, used_count) {
+                (Some(h), Some(u)) => format!("{} / {}", u, h),
+                _ => "-".to_string(),
+            };
 
             table_rows.push([
                 ns.to_string(),
                 format!("{:.1} / {:.1}", used_cpu as f64 / 1000.0, hard_cpu as f64 / 1000.0),
                 format!("{}Gi / {}Gi", used_mem / 1024, hard_mem / 1024),
                 format!("{} / {}", used_gpu, hard_gpu),
+                count_str,
                 format_age(now - updated_at),
             ]);
         } else {
             table_rows.push([
                 ns.to_string(),
+                "-".to_string(),
                 "-".to_string(),
                 "-".to_string(),
                 "-".to_string(),
@@ -275,7 +285,7 @@ pub async fn quota(client: &Client, user_namespaces: &[String], namespace: Optio
             if i > 0 { print!("{}", sep); }
             if i == headers.len() - 1 {
                 print!("{}", cell);
-            } else if (1..=3).contains(&i) {
+            } else if (1..=4).contains(&i) {
                 // Right-align numeric columns for easier comparison
                 print!("{:>width$}", cell, width = widths[i]);
             } else {

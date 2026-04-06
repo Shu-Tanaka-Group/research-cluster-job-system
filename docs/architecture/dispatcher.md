@@ -493,10 +493,11 @@ candidates = filter_by_resource_quota(session, candidates)  # 追加
 2. DRF 優先順序のまま候補を iterate し、残リソース（hard - used）がジョブのリソース要求以上であれば通過させる
 3. sweep ジョブの場合は `parallelism` 倍のリソースを要求するものとして計算する
 4. 同一サイクル内で通過させたジョブのリソースを累計し、後続ジョブの残リソース計算に反映する（同一サイクルでの過剰 dispatch を防止）
+5. `hard_count` が NULL でない場合、残りジョブ数（hard_count - used_count - サイクル内累計 dispatch 数）が 1 以上であることを確認する。sweep ジョブも K8s Job 1 つとしてカウントする（parallelism による倍算なし）
 
 **前提:** ResourceQuota の使用状況は Watcher が定期同期するため、`RESOURCE_QUOTA_SYNC_INTERVAL_SEC`（デフォルト 10 秒）分の遅延がある。このチェックは best-effort であり、チェック通過後に Kueue が admit するまでの間に ResourceQuota の使用状況が変わる可能性がある。ただし、チェックなしの場合（DISPATCHED 滞留 → 時間切れ FAILED）と比較して大幅に改善される。
 
-**budget の flavor 分離との関係:** budget を `(namespace, flavor)` 単位に分離したことで、namespace あたりの最大 active ジョブ数が理論上 `DISPATCH_BUDGET_PER_NAMESPACE × flavor 数` に増加する。ResourceQuota が単一 budget（32）を前提にサイジングされている場合、相対的に窮屈になり ResourceQuota で弾かれるジョブが増える可能性がある。これは保守的な方向（dispatch を控える）であり、過剰 dispatch にはならない。移行時に ResourceQuota の見直しを案内する。
+**budget の flavor 分離との関係:** budget を `(namespace, flavor)` 単位に分離したことで、namespace あたりの最大 active ジョブ数が理論上 `DISPATCH_BUDGET_PER_NAMESPACE × flavor 数` に増加する。`count/jobs.batch` のプレチェック（ステップ 5）により、flavor-aware budget の合計が `count/jobs.batch` を超過する場合でも、Dispatcher が K8s API エラーを受ける前に dispatch を抑制できる。CPU/memory/GPU の ResourceQuota が単一 budget を前提にサイジングされている場合は、相対的に窮屈になり ResourceQuota で弾かれるジョブが増える可能性がある。これは保守的な方向（dispatch を控える）であり、過剰 dispatch にはならない。
 
 ### 2.6 起動時の初期化処理
 

@@ -83,25 +83,39 @@ def sync_resource_quotas(session: Session, settings: Settings):
                 used_gpu = u
                 break
 
+        # Parse count/jobs.batch (nullable: absent means no limit)
+        hard_count_str = hard.get("count/jobs.batch")
+        if hard_count_str is not None:
+            hard_count = int(hard_count_str)
+            used_count = int(used.get("count/jobs.batch", "0"))
+        else:
+            hard_count = None
+            used_count = None
+
         session.execute(
             text(
                 "INSERT INTO namespace_resource_quotas "
                 "(namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu, "
-                "used_cpu_millicores, used_memory_mib, used_gpu, updated_at) "
-                "VALUES (:ns, :h_cpu, :h_mem, :h_gpu, :u_cpu, :u_mem, :u_gpu, NOW()) "
+                "hard_count, used_cpu_millicores, used_memory_mib, used_gpu, "
+                "used_count, updated_at) "
+                "VALUES (:ns, :h_cpu, :h_mem, :h_gpu, :h_count, "
+                ":u_cpu, :u_mem, :u_gpu, :u_count, NOW()) "
                 "ON CONFLICT (namespace) DO UPDATE SET "
                 "hard_cpu_millicores = :h_cpu, hard_memory_mib = :h_mem, "
-                "hard_gpu = :h_gpu, used_cpu_millicores = :u_cpu, "
-                "used_memory_mib = :u_mem, used_gpu = :u_gpu, updated_at = NOW()"
+                "hard_gpu = :h_gpu, hard_count = :h_count, "
+                "used_cpu_millicores = :u_cpu, used_memory_mib = :u_mem, "
+                "used_gpu = :u_gpu, used_count = :u_count, updated_at = NOW()"
             ),
             {
                 "ns": ns,
                 "h_cpu": parse_cpu_millicores(hard.get("requests.cpu", "0")),
                 "h_mem": parse_memory_mib(hard.get("requests.memory", "0")),
                 "h_gpu": hard_gpu,
+                "h_count": hard_count,
                 "u_cpu": parse_cpu_millicores(used.get("requests.cpu", "0")),
                 "u_mem": parse_memory_mib(used.get("requests.memory", "0")),
                 "u_gpu": used_gpu,
+                "u_count": used_count,
             },
         )
         synced_count += 1

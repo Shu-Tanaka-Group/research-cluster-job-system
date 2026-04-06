@@ -118,9 +118,11 @@ class NamespaceResourceQuota(Base):
     hard_cpu_millicores: Mapped[int] = mapped_column(Integer, nullable=False)
     hard_memory_mib: Mapped[int] = mapped_column(Integer, nullable=False)
     hard_gpu: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    hard_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     used_cpu_millicores: Mapped[int] = mapped_column(Integer, nullable=False)
     used_memory_mib: Mapped[int] = mapped_column(Integer, nullable=False)
     used_gpu: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    used_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

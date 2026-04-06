@@ -27,6 +27,16 @@ Watcher が `node_resources` テーブルに記録する CPU・memory を `alloc
 - `cjobctl cluster set-quota --flavor <name>` で設定済みの nominalQuota が、新しい effective allocatable の bin-packing 考慮済み合計（各ノード `cpu_millicores` を整数コアに切り下げて合算）以下に収まっているかを確認する。超過している場合は `cjobctl cluster set-quota` で下方修正しないと、DISPATCHED で待機するジョブが発生する可能性がある。`cjobctl cluster set-quota` のバリデーションは新バージョンから bin-packing 考慮済みの合計を使用する（詳細は [cjobctl.md](../architecture/cjobctl.md) §5.4 `set-quota` 項目、[database.md](../architecture/database.md) §6.2 参照）
 - `cjob flavor info` の TASK LIMIT 表示が想定通り（DaemonSet Pod 分だけ減少）になっているかを確認する
 
+## DB スキーマ更新: `count/jobs.batch` プレチェック用カラム追加
+
+Dispatcher が dispatch 前に `count/jobs.batch` の残りジョブ数を確認するようになった（issue #140）。`cjobctl db migrate` を実行して `namespace_resource_quotas` テーブルに `hard_count` / `used_count` カラムを追加する。
+
+```bash
+cjobctl db migrate
+```
+
+Watcher 再起動後、次の ResourceQuota 同期サイクル（最大 `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` 秒後、デフォルト 10 秒）で `hard_count` / `used_count` が自動的に同期される。同期完了前は `hard_count = NULL` のため、Dispatcher はジョブ数制限なしとして動作する（既存動作と同じ）。
+
 ## Flavor-aware budget による ResourceQuota サイジングの見直し
 
 Dispatcher の dispatch budget が namespace 単位から `(namespace, flavor)` 単位に変更された（issue #138）。これにより、各 flavor が独立した budget（`DISPATCH_BUDGET_PER_NAMESPACE`、デフォルト 32）を持つようになり、namespace あたりの最大 active ジョブ数が理論上 `DISPATCH_BUDGET_PER_NAMESPACE × flavor 数` に増加する。
