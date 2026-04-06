@@ -129,6 +129,7 @@ dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 - CPU は cores 表示（millicores / 1000）、`cjob usage`（#105）と統一
 - Memory は GiB 表示（MiB / 1024）
 - GPU は個数表示
+- Jobs は `count/jobs.batch` の used/hard を表示（ResourceQuota に `count/jobs.batch` が含まれていない場合は `-`）
 - `updated_at` は相対時間（`Xm ago`, `Xh ago` 等）で鮮度を表示
 - `--namespace` で特定 namespace にフィルタ可能
 - DB に行がない namespace（ResourceQuota 未設定）は各列を `-` で表示
@@ -139,10 +140,10 @@ dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
 出力例:
 
 ```
-Namespace      CPU (used/hard)   Memory (used/hard)   GPU (used/hard)   Updated
-user-alice      20.0 / 300.0      80Gi / 1250Gi       0 / 4             2m ago
-user-bob       260.0 / 300.0     800Gi / 1250Gi       1 / 4             2m ago
-user-charlie   -                 -                    -                 -
+Namespace      CPU (used/hard)   Memory (used/hard)   GPU (used/hard)   Jobs (used/hard)   Updated
+user-alice      20.0 / 300.0      80Gi / 1250Gi       0 / 4             3 / 50             2m ago
+user-bob       260.0 / 300.0     800Gi / 1250Gi       1 / 4            12 / 50             2m ago
+user-charlie   -                 -                    -                 -                   -
 ```
 
 ### 5.3 namespace weight 管理

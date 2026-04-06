@@ -614,6 +614,8 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 
 `namespace_resource_quotas` テーブルから自 namespace の ResourceQuota 情報を取得し、`resource_quota` フィールドとして返す。ResourceQuota が設定されていない、または Watcher が未同期でテーブルに行がない場合は `null` を返す。
 
+`hard_count` / `used_count` は K8s ResourceQuota の `count/jobs.batch` に対応する。ResourceQuota に `count/jobs.batch` が含まれていない場合は `null` となる。
+
 ```json
 {
   "window_days": 7,
@@ -625,9 +627,11 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
     "hard_cpu_millicores": 300000,
     "hard_memory_mib": 1280000,
     "hard_gpu": 4,
+    "hard_count": 50,
     "used_cpu_millicores": 280000,
     "used_memory_mib": 819200,
-    "used_gpu": 1
+    "used_gpu": 1,
+    "used_count": 12
   }
 }
 ```
