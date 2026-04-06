@@ -23,33 +23,44 @@ const CONFIG_KEYS: &[ConfigKeyMeta] = &[
     ConfigKeyMeta { key: "POSTGRES_HOST", value_type: ValueType::String, components: &["dispatcher", "watcher", "submit-api"], updatable: false },
     ConfigKeyMeta { key: "POSTGRES_PORT", value_type: ValueType::Integer, components: &["dispatcher", "watcher", "submit-api"], updatable: false },
     ConfigKeyMeta { key: "POSTGRES_DB", value_type: ValueType::String, components: &["dispatcher", "watcher", "submit-api"], updatable: false },
+    ConfigKeyMeta { key: "POSTGRES_USER", value_type: ValueType::String, components: &["dispatcher", "watcher", "submit-api"], updatable: false },
+    ConfigKeyMeta { key: "POSTGRES_PASSWORD", value_type: ValueType::String, components: &["dispatcher", "watcher", "submit-api"], updatable: false },
     // Dispatcher
     ConfigKeyMeta { key: "DISPATCH_BUDGET_PER_NAMESPACE", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "DISPATCH_BATCH_SIZE", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
+    ConfigKeyMeta { key: "DISPATCH_FETCH_MULTIPLIER", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "DISPATCH_ROUND_SIZE", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
-    ConfigKeyMeta { key: "DISPATCH_BUDGET_CHECK_INTERVAL_SEC", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
+    ConfigKeyMeta { key: "DISPATCH_BUDGET_CHECK_INTERVAL_SEC", value_type: ValueType::Integer, components: &["dispatcher", "watcher"], updatable: true },
     ConfigKeyMeta { key: "DISPATCH_RETRY_INTERVAL_SEC", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "DISPATCH_MAX_RETRIES", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "GAP_FILLING_ENABLED", value_type: ValueType::Boolean, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "GAP_FILLING_STALL_THRESHOLD_SEC", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
-    ConfigKeyMeta { key: "FAIR_SHARE_WINDOW_DAYS", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
+    ConfigKeyMeta { key: "FAIR_SHARE_WINDOW_DAYS", value_type: ValueType::Integer, components: &["dispatcher", "submit-api"], updatable: true },
     // ResourceFlavor
     ConfigKeyMeta { key: "RESOURCE_FLAVORS", value_type: ValueType::Json, components: &["dispatcher", "watcher", "submit-api"], updatable: true },
     ConfigKeyMeta { key: "DEFAULT_FLAVOR", value_type: ValueType::String, components: &["submit-api"], updatable: true },
     ConfigKeyMeta { key: "NODE_RESOURCE_SYNC_INTERVAL_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
+    // Watcher
+    ConfigKeyMeta { key: "CLUSTER_QUEUE_NAME", value_type: ValueType::String, components: &["watcher"], updatable: true },
+    ConfigKeyMeta { key: "RESOURCE_QUOTA_NAME", value_type: ValueType::String, components: &["watcher"], updatable: true },
+    ConfigKeyMeta { key: "RESOURCE_QUOTA_SYNC_INTERVAL_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
+    ConfigKeyMeta { key: "WATCHER_METRICS_PORT", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
     // Submit API
     ConfigKeyMeta { key: "MAX_QUEUED_JOBS_PER_NAMESPACE", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },
     ConfigKeyMeta { key: "MAX_SWEEP_COMPLETIONS", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },
     ConfigKeyMeta { key: "DEFAULT_TIME_LIMIT_SECONDS", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },
     ConfigKeyMeta { key: "MAX_TIME_LIMIT_SECONDS", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },
+    ConfigKeyMeta { key: "CLI_BINARY_DIR", value_type: ValueType::String, components: &["submit-api"], updatable: true },
     // K8s / Kueue
-    ConfigKeyMeta { key: "KUEUE_LOCAL_QUEUE_NAME", value_type: ValueType::String, components: &["submit-api"], updatable: true },
-    ConfigKeyMeta { key: "USER_NAMESPACE_LABEL", value_type: ValueType::String, components: &["dispatcher", "watcher"], updatable: true },
-    ConfigKeyMeta { key: "TTL_SECONDS_AFTER_FINISHED", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },
-    ConfigKeyMeta { key: "JOB_NODE_TAINT", value_type: ValueType::String, components: &["submit-api"], updatable: true },
+    ConfigKeyMeta { key: "KUEUE_LOCAL_QUEUE_NAME", value_type: ValueType::String, components: &["dispatcher"], updatable: true },
+    ConfigKeyMeta { key: "USER_NAMESPACE_LABEL", value_type: ValueType::String, components: &["watcher"], updatable: true },
+    ConfigKeyMeta { key: "TTL_SECONDS_AFTER_FINISHED", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
+    ConfigKeyMeta { key: "JOB_NODE_TAINT", value_type: ValueType::String, components: &["dispatcher"], updatable: true },
     // Paths
-    ConfigKeyMeta { key: "WORKSPACE_MOUNT_PATH", value_type: ValueType::String, components: &["submit-api"], updatable: true },
+    ConfigKeyMeta { key: "WORKSPACE_MOUNT_PATH", value_type: ValueType::String, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "LOG_BASE_DIR", value_type: ValueType::String, components: &["submit-api"], updatable: true },
+    // Logging
+    ConfigKeyMeta { key: "LOG_LEVEL", value_type: ValueType::String, components: &["dispatcher", "watcher", "submit-api"], updatable: true },
 ];
 
 fn find_key(name: &str) -> Option<&'static ConfigKeyMeta> {
