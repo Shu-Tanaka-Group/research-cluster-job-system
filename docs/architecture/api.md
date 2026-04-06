@@ -49,7 +49,14 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 }
 ```
 
-`resources.flavor` は省略可能。省略時はサーバ側デフォルト（ConfigMap: `DEFAULT_FLAVOR`、デフォルト `cpu`）を使用する。
+`resources` 内の各フィールドは省略可能。省略時のデフォルト値:
+
+| フィールド | デフォルト | 説明 |
+|---|---|---|
+| `cpu` | `"1"` | CPU リソース |
+| `memory` | `"1Gi"` | メモリリソース |
+| `gpu` | `0` | GPU 数 |
+| `flavor` | サーバ側デフォルト（ConfigMap: `DEFAULT_FLAVOR`、デフォルト `cpu`） | ResourceFlavor 名 |
 
 ### response
 

@@ -163,6 +163,19 @@ cjob sweep -n 10 --parallel 5 -- bash run.sh
 
 ## 4. `cjob add` の動作
 
+### 引数
+
+| 引数 | 必須 | 説明 |
+|---|---|---|
+| `--cpu <cpu>` | 任意 | CPU リソース。デフォルト "1" |
+| `--memory <memory>` | 任意 | メモリリソース。デフォルト "1Gi" |
+| `--gpu <N>` | 任意 | GPU 数。デフォルト 0（GPU なし） |
+| `--flavor <name>` | 任意 | ResourceFlavor 名（例: "cpu", "gpu-a100"）。省略時はサーバ側デフォルト |
+| `--time-limit <duration>` | 任意 | 実行時間上限。省略時はサーバ側デフォルト |
+| `-- <command>` | 必須 | 実行するコマンド |
+
+### 動作
+
 1. `pwd` を取得する
 2. export 済み環境変数を収集する（`PATH` / `VIRTUAL_ENV` を含む）
 3. 環境変数 `CJOB_IMAGE` からコンテナイメージ名を取得する（未設定時は `JUPYTER_IMAGE` にフォールバック。両方未設定の場合はエラー終了する）
