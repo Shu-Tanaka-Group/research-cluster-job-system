@@ -51,7 +51,9 @@ pub async fn migrate(client: &Client) -> Result<()> {
             used_memory_mib      INTEGER NOT NULL, \
             used_gpu             INTEGER NOT NULL DEFAULT 0, \
             updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW() \
-        );";
+        ); \
+        ALTER TABLE namespace_resource_quotas ADD COLUMN IF NOT EXISTS hard_count INTEGER; \
+        ALTER TABLE namespace_resource_quotas ADD COLUMN IF NOT EXISTS used_count INTEGER;";
 
     client
         .batch_execute(ddl)
