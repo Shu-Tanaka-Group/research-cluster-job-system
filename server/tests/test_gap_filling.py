@@ -298,7 +298,7 @@ class TestApplyGapFilling:
     def test_resource_gpu_check(self, mock_stalled, mock_remaining, mock_available, db_session):
         """GPU resources are checked per flavor."""
         settings = _make_settings()
-        stalled_job = _make_job(NS, 99)
+        stalled_job = _make_job(NS, 99, flavor="gpu-a100")
         mock_stalled.return_value = [stalled_job]
         mock_remaining.return_value = 86400
         mock_available.return_value = {
@@ -317,3 +317,77 @@ class TestApplyGapFilling:
         result_ids = [j.job_id for j in result]
         assert 1 in result_ids
         assert 2 not in result_ids
+
+    # --- Flavor-aware scoping tests ---
+
+    def test_stalled_gpu_does_not_block_cpu(self, mock_stalled, mock_remaining, mock_available, db_session):
+        """GPU flavor stall does not affect CPU flavor jobs in the same namespace."""
+        settings = _make_settings()
+        # Only GPU flavor is stalled
+        stalled_job = _make_job(NS, 99, flavor="gpu-a100")
+        mock_stalled.return_value = [stalled_job]
+        mock_remaining.return_value = 0  # Would block if scope were namespace-wide
+        mock_available.return_value = {}
+
+        candidates = [
+            _make_job(NS, 1, flavor="cpu", time_limit_seconds=86400),   # CPU: unaffected
+            _make_job(NS, 2, flavor="cpu", time_limit_seconds=3600),    # CPU: unaffected
+            _make_job(NS, 3, flavor="gpu-a100", time_limit_seconds=60), # GPU: held (remaining=0)
+        ]
+
+        result = apply_gap_filling(db_session, candidates, settings)
+
+        result_ids = [j.job_id for j in result]
+        assert 1 in result_ids   # CPU unaffected
+        assert 2 in result_ids   # CPU unaffected
+        assert 3 not in result_ids  # GPU held by remaining=0
+
+    def test_mixed_flavors_independent_remaining(self, mock_stalled, mock_remaining, mock_available, db_session):
+        """Each (namespace, flavor) gets its own remaining time estimate."""
+        settings = _make_settings()
+        stalled_cpu = _make_job(NS, 98, flavor="cpu")
+        stalled_gpu = _make_job(NS, 99, flavor="gpu-a100")
+        mock_stalled.return_value = [stalled_cpu, stalled_gpu]
+
+        # CPU has remaining=1800, GPU has remaining=None (no RUNNING)
+        def remaining_side_effect(session, namespace, flavor):
+            if flavor == "cpu":
+                return 1800
+            return None  # GPU: no RUNNING jobs
+
+        mock_remaining.side_effect = remaining_side_effect
+        mock_available.return_value = {}
+
+        candidates = [
+            _make_job(NS, 1, flavor="cpu", time_limit_seconds=900),    # CPU: fits (900 <= 1800)
+            _make_job(NS, 2, flavor="cpu", time_limit_seconds=3600),   # CPU: held (3600 > 1800)
+            _make_job(NS, 3, flavor="gpu-a100", time_limit_seconds=86400),  # GPU: passes (remaining=None)
+        ]
+
+        result = apply_gap_filling(db_session, candidates, settings)
+
+        result_ids = [j.job_id for j in result]
+        assert 1 in result_ids      # CPU fits time
+        assert 2 not in result_ids   # CPU exceeds time
+        assert 3 in result_ids      # GPU time check bypassed
+
+    def test_stalled_one_flavor_other_flavor_passthrough(self, mock_stalled, mock_remaining, mock_available, db_session):
+        """Only the stalled (namespace, flavor) is filtered; other flavors in same namespace pass through."""
+        settings = _make_settings()
+        stalled_job = _make_job(NS, 99, flavor="gpu-a100")
+        mock_stalled.return_value = [stalled_job]
+        mock_remaining.return_value = 86400
+        mock_available.return_value = {
+            "gpu-a100": {"cpu": 0, "mem": 0, "gpu": 0},  # No GPU resources available
+        }
+
+        candidates = [
+            _make_job(NS, 1, flavor="cpu", cpu_millicores=99999),       # CPU: unrestricted (not stalled)
+            _make_job(NS, 2, flavor="gpu-a100", cpu_millicores=1000),   # GPU: held (no resources)
+        ]
+
+        result = apply_gap_filling(db_session, candidates, settings)
+
+        result_ids = [j.job_id for j in result]
+        assert 1 in result_ids      # CPU passes through
+        assert 2 not in result_ids   # GPU held by resource check
