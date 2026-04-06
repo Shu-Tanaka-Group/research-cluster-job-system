@@ -36,7 +36,7 @@ spec:
 | 制限 | 設定箇所 | 値 | 管理主体 | 適用単位 | 制限対象 |
 |---|---|---|---|---|---|
 | `MAX_QUEUED_JOBS_PER_NAMESPACE` | ConfigMap | 500 | Submit API | ユーザーごと | PostgreSQL の `jobs` テーブルへの登録数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / HELD / CANCELLED の合計） |
-| `DISPATCH_BUDGET_PER_NAMESPACE` | ConfigMap | 32 | Dispatcher | ユーザーごと | DB 上の active ジョブ数（DISPATCHING + DISPATCHED + RUNNING の合計）。上限に達すると Dispatcher が新規 dispatch を停止する |
+| `DISPATCH_BUDGET_PER_NAMESPACE` | ConfigMap | 32 | Dispatcher | ユーザー × flavor ごと | DB 上の active ジョブ数（DISPATCHING + DISPATCHED + RUNNING の合計）を `(namespace, flavor)` 単位で制限する。ある flavor が上限に達しても他の flavor の dispatch は継続される |
 | `DISPATCH_BATCH_SIZE` | ConfigMap | 50 | Dispatcher | サイクルごと（全体） | 1回の dispatch サイクルで dispatch するジョブの総数上限。namespace 間でラウンドロビン・DRF 優先で公平に分配される |
 | `DISPATCH_FETCH_MULTIPLIER` | ConfigMap | 10 | Dispatcher | サイクルごと（全体） | SQL 候補取得数の倍率。`DISPATCH_BATCH_SIZE × DISPATCH_FETCH_MULTIPLIER` 件を余剰取得し、隙間充填・ResourceQuota フィルタ通過後に `DISPATCH_BATCH_SIZE` 件へ絞り込む。DRF 優先の namespace のジョブがフィルタで全滅しても他 namespace の候補が dispatch されることを保証する |
 | `DISPATCH_ROUND_SIZE` | ConfigMap | 1 | Dispatcher | サイクルごと（namespace あたり） | ラウンドロビンと DRF のバランスを制御する。値が小さいとラウンドロビン主導（均等配分）、`DISPATCH_BUDGET_PER_NAMESPACE` と同値にすると DRF 主導（消費量ベースの優先制御）になる。詳細は [dispatcher.md](dispatcher.md) §1.2 調整指針を参照 |
@@ -51,14 +51,16 @@ spec:
 ```
 cjob add → DB 登録（MAX_QUEUED_JOBS_PER_NAMESPACE: 500件上限）
               ↓
-Dispatcher がスキャン → dispatch_budget チェック（DISPATCH_BUDGET_PER_NAMESPACE: 32件上限）
+Dispatcher がスキャン → dispatch_budget チェック（DISPATCH_BUDGET_PER_NAMESPACE: flavor ごとに 32件上限）
                       → 候補を余剰取得（DISPATCH_BATCH_SIZE × DISPATCH_FETCH_MULTIPLIER）
                       → 隙間充填・ResourceQuota フィルタ通過後に DISPATCH_BATCH_SIZE 件へ絞り込み（50件/サイクル上限）
               ↓
 K8s Job を作成 → count/jobs.batch チェック（50件上限）
 ```
 
-`count/jobs.batch` を 50 に設定する理由：dispatch_budget の上限（32件）で動作していても、SUCCEEDED/FAILED になった K8s Job が TTL（5分）が切れるまで K8s 上に残り続けるため、実行中 + TTL 待ち完了済みジョブの合計を吸収できるよう設定している。TTL 300秒（5分）では長時間〜中程度のジョブで TTL 待ちの蓄積がほとんど発生せず、50 に対して大幅な余裕がある。短時間ジョブが大量に回転して一時的に quota に達した場合は TTL 経過で自然に回復し、Dispatcher の retry により自動復旧する。
+`count/jobs.batch` を 50 に設定する理由：dispatch_budget の上限で動作していても、SUCCEEDED/FAILED になった K8s Job が TTL（5分）が切れるまで K8s 上に残り続けるため、実行中 + TTL 待ち完了済みジョブの合計を吸収できるよう設定している。TTL 300秒（5分）では長時間〜中程度のジョブで TTL 待ちの蓄積がほとんど発生せず、50 に対して大幅な余裕がある。短時間ジョブが大量に回転して一時的に quota に達した場合は TTL 経過で自然に回復し、Dispatcher の retry により自動復旧する。
+
+**`count/jobs.batch` と flavor-aware budget の関係:** dispatch_budget は `(namespace, flavor)` 単位で 32 件であるため、namespace あたりの理論上の最大 active ジョブ数は `32 × flavor 数`（2 flavor で 64）となり、`count/jobs.batch`（50）を超過する場合がある。現在の Dispatcher は `count/jobs.batch` の事前チェックを行わないため、超過分は K8s API エラー → retry で処理される。Dispatcher 側に `count/jobs.batch` のプレチェックを追加する改善を #140 で追跡している。
 
 ### CPU・メモリに関する制限
 
