@@ -614,7 +614,7 @@ def delete_jobs(
         # Delete all completed jobs in namespace
         jobs = (
             session.query(Job)
-            .filter(Job.namespace == namespace)
+            .filter(Job.namespace == namespace, Job.status.in_(DELETABLE_STATUSES))
             .all()
         )
         targets = [(j.job_id, j.status, j.log_dir) for j in jobs]
