@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Sync VERSION file to pyproject.toml, Cargo.toml, and kustomization.yaml.
 # Idempotent: does nothing if versions already match.
+#
+# VERSION file uses SemVer format: X.Y.Z or X.Y.Z-pre.N
+# Supported pre-release tags: alpha, beta, rc (e.g., 1.12.0-beta.1)
+#
+# pyproject.toml uses PEP 440 format, so pre-release versions are converted:
+#   1.12.0-alpha.1 -> 1.12.0a1
+#   1.12.0-beta.1  -> 1.12.0b1
+#   1.12.0-rc.1    -> 1.12.0rc1
 
 set -euo pipefail
 
@@ -21,22 +29,32 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-# Validate semver format (basic check)
-if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+'; then
+# Validate semver format: X.Y.Z or X.Y.Z-{alpha,beta,rc}.N
+if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-((alpha|beta|rc)\.[0-9]+))?$'; then
     echo "error: VERSION '$VERSION' is not valid semver" >&2
+    echo "  expected: X.Y.Z or X.Y.Z-{alpha,beta,rc}.N (e.g., 1.12.0, 1.12.0-beta.1)" >&2
     exit 1
 fi
 
+# Convert SemVer pre-release to PEP 440 for pyproject.toml
+# 1.12.0-alpha.1 -> 1.12.0a1, 1.12.0-beta.1 -> 1.12.0b1, 1.12.0-rc.1 -> 1.12.0rc1
+pep440_version() {
+    local ver="$1"
+    echo "$ver" | sed -E 's/-alpha\./a/; s/-beta\./b/; s/-rc\./rc/'
+}
+
+PEP440_VERSION="$(pep440_version "$VERSION")"
+
 changed=0
 
-# Update pyproject.toml
+# Update pyproject.toml (uses PEP 440 format)
 PYPROJECT="$REPO_ROOT/server/pyproject.toml"
 if [ -f "$PYPROJECT" ]; then
     current=$(grep -E '^version = "' "$PYPROJECT" | head -1 | sed 's/version = "\(.*\)"/\1/')
-    if [ "$current" != "$VERSION" ]; then
-        sed -i.bak "s/^version = \".*\"/version = \"$VERSION\"/" "$PYPROJECT"
+    if [ "$current" != "$PEP440_VERSION" ]; then
+        sed -i.bak "s/^version = \".*\"/version = \"$PEP440_VERSION\"/" "$PYPROJECT"
         rm -f "$PYPROJECT.bak"
-        echo "Updated $PYPROJECT: $current -> $VERSION"
+        echo "Updated $PYPROJECT: $current -> $PEP440_VERSION"
         changed=1
     fi
 fi
