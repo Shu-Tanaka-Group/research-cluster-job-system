@@ -234,15 +234,13 @@ class TestSubmitJob:
 
     def test_running_jobs_not_counted_toward_limit(self, db_session, settings):
         """RUNNING jobs should not count toward MAX_QUEUED_JOBS_PER_NAMESPACE."""
-        from unittest.mock import patch as _patch
-
         limit = settings.MAX_QUEUED_JOBS_PER_NAMESPACE
         for i in range(limit - 1):
             _insert_job(db_session, i + 1, status="QUEUED")
         _insert_job(db_session, limit, status="RUNNING")
         # limit - 1 QUEUED + 1 RUNNING = limit total rows, but RUNNING is excluded
-        # Mock allocate_job_id to avoid counter/job_id collision
-        with _patch("cjob.api.services.allocate_job_id", return_value=limit + 1):
+        # Override autouse allocate_job_id mock to avoid job_id collision
+        with patch("cjob.api.services.allocate_job_id", return_value=limit + 1):
             req = _make_request()
             result = submit_job(db_session, NS, "alice", req)
         assert result.status == "QUEUED"
