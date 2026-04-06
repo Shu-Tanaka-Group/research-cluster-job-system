@@ -194,7 +194,7 @@ cjob add --time-limit 3d -- python main.py       # 3日
 
 | 状態 | 動作 |
 |---|---|
-| QUEUED / DISPATCHING / DISPATCHED | ログファイル未生成のため最大 5分待機（待機中は状態と経過時間を表示） |
+| QUEUED / DISPATCHING / DISPATCHED | `--follow` なし: 「まだ開始されていません」と表示し `--follow` の使用を促して終了。`--follow` あり: 最大 5分待機（待機中は状態と経過時間を表示） |
 | HELD | 保留中のためログなし。「ジョブは保留中です」と表示し、`cjob release` で解除を促す |
 | RUNNING | ファイル生成後に tail -f で追跡（`--follow` 時） |
 | SUCCEEDED / FAILED | ファイルを全量表示して終了 |
@@ -203,9 +203,17 @@ cjob add --time-limit 3d -- python main.py       # 3日
 
 ログファイルは PVC 上にあり、CLI が直接読む。ログディレクトリのパスは `GET /v1/jobs/{job_id}` で取得した `log_dir` を使用する。
 
-### QUEUED / DISPATCHING / DISPATCHED 中の待機フィードバック
+### QUEUED / DISPATCHING / DISPATCHED 中の動作
 
-待機中は `GET /v1/jobs/{job_id}` を数秒ごとにポーリングし、状態と経過時間を表示する。5分経過してもジョブが開始しない場合はタイムアウトメッセージを表示して終了する。
+`--follow` なしの場合、ジョブがまだ開始されていないことを通知し、`--follow` の使用を促して即座に終了する。
+
+```
+$ cjob logs 3
+ジョブ 3 はまだ開始されていません。(QUEUED)
+`cjob logs --follow 3` でログの追跡ができます。
+```
+
+`--follow` ありの場合、`GET /v1/jobs/{job_id}` を数秒ごとにポーリングし、状態と経過時間を表示する。5分経過してもジョブが開始しない場合はタイムアウトメッセージを表示して終了する。
 
 ```
 $ cjob logs --follow 3
