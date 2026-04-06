@@ -129,9 +129,9 @@ $ cjob add --flavor gpu --gpu 1 -- python train.py
 $ cjob usage
 ```
 
+- 現在の CPU・メモリ・GPU・ジョブ数の消費量と割り当て上限を確認できます
 - 直近 7 日間の日別リソース消費量を表示します
-- CPU は core·h（コア時間）、メモリは GiB·h（ギビバイト時間）の単位で表示されます
-- リソース消費量はジョブが RUNNING になった時点で `--time-limit` の値をもとに計上されます
+- 詳細はユーザーガイドの[リソース使用状況の確認](./docs/user_guide.md#6-リソース使用状況の確認cjob-usage)をご参照ください
 
 ### ジョブ一覧表示
 

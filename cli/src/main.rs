@@ -799,6 +799,18 @@ async fn cmd_usage(client: &client::CjobClient) -> Result<()> {
                 "GPU", q.used_gpu, q.hard_gpu, q.hard_gpu - q.used_gpu, pct_gpu
             );
         }
+
+        // Jobs row (hidden when hard_count is None)
+        if let Some(hard) = q.hard_count {
+            let used = q.used_count.unwrap_or(0);
+            if hard > 0 {
+                let pct = used as f64 / hard as f64 * 100.0;
+                println!(
+                    "  {:<10} {:>10} {:>10} {:>10} {:>7.1}%",
+                    "Jobs", used, hard, hard - used, pct
+                );
+            }
+        }
     }
 
     println!(
