@@ -196,16 +196,19 @@ class TestResetStaleDispatching:
 
 
 def _insert_quota(session, namespace, hard_cpu, hard_mem, hard_gpu,
-                  used_cpu, used_mem, used_gpu):
+                  used_cpu, used_mem, used_gpu,
+                  hard_count=None, used_count=None):
     session.execute(
         text(
             "INSERT INTO namespace_resource_quotas "
             "(namespace, hard_cpu_millicores, hard_memory_mib, hard_gpu, "
-            "used_cpu_millicores, used_memory_mib, used_gpu) "
-            "VALUES (:ns, :hc, :hm, :hg, :uc, :um, :ug)"
+            "used_cpu_millicores, used_memory_mib, used_gpu, "
+            "hard_count, used_count) "
+            "VALUES (:ns, :hc, :hm, :hg, :uc, :um, :ug, :h_count, :u_count)"
         ),
         {"ns": namespace, "hc": hard_cpu, "hm": hard_mem, "hg": hard_gpu,
-         "uc": used_cpu, "um": used_mem, "ug": used_gpu},
+         "uc": used_cpu, "um": used_mem, "ug": used_gpu,
+         "h_count": hard_count, "u_count": used_count},
     )
     session.flush()
 
@@ -309,6 +312,70 @@ class TestFilterByResourceQuota:
         result = filter_by_resource_quota(db_session, [])
 
         assert result == []
+
+    def test_count_null_skips_check(self, db_session):
+        """When hard_count is NULL, job count limit is not enforced."""
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 20000, 80000, 0)
+        j1 = _insert_job(db_session, 1, cpu_millicores=2000, memory_mib=4096)
+
+        result = filter_by_resource_quota(db_session, [j1])
+
+        assert len(result) == 1
+
+    def test_sufficient_count_passes(self, db_session):
+        """Job should pass when remaining job count is sufficient."""
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 20000, 80000, 0,
+                      hard_count=50, used_count=30)
+        j1 = _insert_job(db_session, 1, cpu_millicores=2000, memory_mib=4096)
+
+        result = filter_by_resource_quota(db_session, [j1])
+
+        assert len(result) == 1
+
+    def test_insufficient_count_skips(self, db_session):
+        """Job should be skipped when remaining job count is 0."""
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 20000, 80000, 0,
+                      hard_count=50, used_count=50)
+        j1 = _insert_job(db_session, 1, cpu_millicores=2000, memory_mib=4096)
+
+        result = filter_by_resource_quota(db_session, [j1])
+
+        assert len(result) == 0
+
+    def test_count_cumulative_tracking(self, db_session):
+        """Second job should be skipped when cumulative count exceeds quota."""
+        # remaining count = 1; j1 uses 1, j2 would exceed
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 0, 0, 0,
+                      hard_count=50, used_count=49)
+        j1 = _insert_job(db_session, 1, cpu_millicores=1000, memory_mib=1024)
+        j2 = _insert_job(db_session, 2, cpu_millicores=1000, memory_mib=1024)
+
+        result = filter_by_resource_quota(db_session, [j1, j2])
+
+        assert len(result) == 1
+        assert result[0].job_id == 1
+
+    def test_sweep_count_is_one(self, db_session):
+        """Sweep job should count as 1 for count/jobs.batch."""
+        # remaining count = 1; sweep with parallelism=4 still uses 1
+        _insert_quota(db_session, NS, 300000, 1280000, 0, 0, 0, 0,
+                      hard_count=50, used_count=49)
+        j1 = _insert_job(db_session, 1, cpu_millicores=1000, memory_mib=1024,
+                         completions=20, parallelism=4)
+
+        result = filter_by_resource_quota(db_session, [j1])
+
+        assert len(result) == 1
+
+    def test_count_blocks_but_resources_sufficient(self, db_session):
+        """Job should be skipped when count is exhausted even if resources are sufficient."""
+        _insert_quota(db_session, NS, 300000, 1280000, 4, 0, 0, 0,
+                      hard_count=50, used_count=50)
+        j1 = _insert_job(db_session, 1, cpu_millicores=1000, memory_mib=1024)
+
+        result = filter_by_resource_quota(db_session, [j1])
+
+        assert len(result) == 0
 
 
 # ── fetch_dispatchable_jobs ──
