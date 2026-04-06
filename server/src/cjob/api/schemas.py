@@ -153,9 +153,11 @@ class ResourceQuota(BaseModel):
     hard_cpu_millicores: int
     hard_memory_mib: int
     hard_gpu: int
+    hard_count: int | None = None
     used_cpu_millicores: int
     used_memory_mib: int
     used_gpu: int
+    used_count: int | None = None
 
 
 class UsageResponse(BaseModel):

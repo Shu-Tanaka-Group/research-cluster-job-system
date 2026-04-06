@@ -714,8 +714,8 @@ def get_usage(session: Session, namespace: str) -> UsageResponse:
 
     quota_row = session.execute(
         text(
-            "SELECT hard_cpu_millicores, hard_memory_mib, hard_gpu, "
-            "       used_cpu_millicores, used_memory_mib, used_gpu "
+            "SELECT hard_cpu_millicores, hard_memory_mib, hard_gpu, hard_count, "
+            "       used_cpu_millicores, used_memory_mib, used_gpu, used_count "
             "FROM namespace_resource_quotas "
             "WHERE namespace = :namespace"
         ),
