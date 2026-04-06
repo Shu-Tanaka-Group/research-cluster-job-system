@@ -573,7 +573,7 @@ async fn cmd_cancel(client: &client::CjobClient, job_ids_expr: &str) -> Result<(
             println!("キャンセルしました: {:?}", resp.cancelled);
         }
         if !resp.skipped.is_empty() {
-            println!("スキップしました（完了済み）: {:?}", resp.skipped);
+            println!("スキップしました（完了済みまたはキャンセル済み）: {:?}", resp.skipped);
         }
         if !resp.not_found.is_empty() {
             println!("見つかりませんでした: {:?}", resp.not_found);
