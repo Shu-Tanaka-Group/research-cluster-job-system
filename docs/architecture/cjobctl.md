@@ -322,6 +322,7 @@ CLI 側で以下のバリデーションを行う:
 | `GAP_FILLING_ENABLED` | bool | dispatcher |
 | `GAP_FILLING_STALL_THRESHOLD_SEC` | int | dispatcher |
 | `FAIR_SHARE_WINDOW_DAYS` | int | dispatcher, submit-api |
+| `CPU_LIMIT_BUFFER_MULTIPLIER` | float | dispatcher |
 | `RESOURCE_FLAVORS` | json | dispatcher, watcher, submit-api |
 | `DEFAULT_FLAVOR` | string | submit-api |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | int | watcher |

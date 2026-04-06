@@ -7,6 +7,7 @@ use std::io::{self, Write};
 enum ValueType {
     String,
     Integer,
+    Float,
     Boolean,
     Json,
 }
@@ -36,6 +37,7 @@ const CONFIG_KEYS: &[ConfigKeyMeta] = &[
     ConfigKeyMeta { key: "GAP_FILLING_ENABLED", value_type: ValueType::Boolean, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "GAP_FILLING_STALL_THRESHOLD_SEC", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "FAIR_SHARE_WINDOW_DAYS", value_type: ValueType::Integer, components: &["dispatcher", "submit-api"], updatable: true },
+    ConfigKeyMeta { key: "CPU_LIMIT_BUFFER_MULTIPLIER", value_type: ValueType::Float, components: &["dispatcher"], updatable: true },
     // ResourceFlavor
     ConfigKeyMeta { key: "RESOURCE_FLAVORS", value_type: ValueType::Json, components: &["dispatcher", "watcher", "submit-api"], updatable: true },
     ConfigKeyMeta { key: "DEFAULT_FLAVOR", value_type: ValueType::String, components: &["submit-api"], updatable: true },
@@ -74,6 +76,12 @@ fn validate_value(meta: &ConfigKeyMeta, value: &str) -> Result<String> {
             value
                 .parse::<i64>()
                 .with_context(|| format!("'{}' expects an integer value, got '{}'", meta.key, value))?;
+            Ok(value.to_string())
+        }
+        ValueType::Float => {
+            value
+                .parse::<f64>()
+                .with_context(|| format!("'{}' expects a numeric value, got '{}'", meta.key, value))?;
             Ok(value.to_string())
         }
         ValueType::Boolean => {
