@@ -351,11 +351,55 @@ cjob add --cpu 4 -- python main.py
 cjob sweep -n 50 --parallel 5 --cpu 4 -- python main.py --trial _INDEX_
 ```
 
-## 6. ユーザー設定の管理（`cjob config`）
+## 6. リソース使用状況の確認（`cjob usage`）
+
+`cjob usage` を実行すると、現在のリソース消費状況と直近の使用実績を確認できます。
+
+### 6.1 Resource Quota（現在のリソース消費）
+
+現在使用中のリソース量と、割り当てられた上限が表示されます。
+
+```
+Resource Quota
+──────────────────────────────────────────────────
+  Resource       Used       Hard  Remaining    Use%
+  CPU           280.0      300.0       20.0   93.3%
+  Memory        800Gi     1250Gi      450Gi   64.0%
+  GPU               1          4          3   25.0%
+  Jobs             10         50         40   20.0%
+```
+
+- **Used**: 現在の使用量
+- **Hard**: 割り当てられた上限
+- **Remaining**: 残り（`Hard - Used`）
+- **Use%**: 使用率
+
+CPU・Memory・GPU は実行中のジョブが要求しているリソースの合計です。Jobs はシステム内部に存在するジョブの数で、[§1.2 の合計のジョブ数の上限](#12-同時に実行できるジョブ数の上限flavor-ごとに-32-件合計-50-件)に対応します。
+
+### 6.2 Resource Usage（日別の使用実績）
+
+直近 7 日間の日別リソース消費量が表示されます。
+
+```
+Resource Usage (past 7 days)
+──────────────────────────────────────────────────
+  Date              CPU (core·h)    Mem (GiB·h)
+  2026-03-23               24.0           48.0
+  2026-03-24               12.5           25.0
+  2026-03-25                8.0           16.0
+  ────────────────────────────────────────────────
+  Total                    44.5           89.0
+```
+
+- CPU は core·h（コア時間）、メモリは GiB·h（ギビバイト時間）の単位で表示されます
+- GPU を使用している場合は GPU 列（GPU·h）も表示されます
+- リソース消費量はジョブが実行状態になった時点で、`--time-limit` の値をもとに計上されます
+
+## 7. ユーザー設定の管理（`cjob config`）
 
 `cjob config` コマンドを使って、CJob の動作をカスタマイズできます。設定は `~/.config/cjob/config.toml` に保存されます（環境変数 `XDG_CONFIG_HOME` が設定されている場合は `$XDG_CONFIG_HOME/cjob/config.toml`）。
 
-### 6.1 環境変数の除外設定
+### 7.1 環境変数の除外設定
 
 CJob はジョブ投入時にシェルの環境変数をすべて引き継ぎますが、引き継ぎたくない変数がある場合は除外リストに追加できます。
 
@@ -370,7 +414,7 @@ cjob config remove env exclude MY_SECRET_TOKEN
 
 除外リストに追加した環境変数は、`cjob add` や `cjob sweep` でジョブを投入する際にサーバーへ送信されなくなります。
 
-### 6.2 現在の設定を確認する
+### 7.2 現在の設定を確認する
 
 ```bash
 cjob config list
