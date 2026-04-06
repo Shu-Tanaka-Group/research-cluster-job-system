@@ -27,7 +27,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          PRERELEASE_FLAG=""
+          if echo "${{ github.ref_name }}" | grep -qE '-(alpha|beta|rc)\.'; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
           gh release create "${{ github.ref_name }}" \
             --title "v${{ github.ref_name }}" \
             --generate-notes \
+            $PRERELEASE_FLAG \
             cjob-linux-x86_64
