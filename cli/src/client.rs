@@ -174,6 +174,8 @@ pub struct ResourceQuota {
     pub used_cpu_millicores: i64,
     pub used_memory_mib: i64,
     pub used_gpu: i64,
+    pub hard_count: Option<i64>,
+    pub used_count: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
