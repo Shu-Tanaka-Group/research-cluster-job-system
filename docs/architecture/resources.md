@@ -35,7 +35,7 @@ spec:
 
 | 制限 | 設定箇所 | 値 | 管理主体 | 適用単位 | 制限対象 |
 |---|---|---|---|---|---|
-| `MAX_QUEUED_JOBS_PER_NAMESPACE` | ConfigMap | 500 | Submit API | ユーザーごと | PostgreSQL の `jobs` テーブルへの登録数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / HELD / CANCELLED の合計） |
+| `MAX_QUEUED_JOBS_PER_NAMESPACE` | ConfigMap | 500 | Submit API | ユーザーごと | PostgreSQL の `jobs` テーブルへの登録数（QUEUED / DISPATCHING / DISPATCHED / HELD / CANCELLED の合計）。RUNNING は `DISPATCH_BUDGET_PER_NAMESPACE` で上限が管理されるためカウント対象外 |
 | `DISPATCH_BUDGET_PER_NAMESPACE` | ConfigMap | 32 | Dispatcher | ユーザー × flavor ごと | DB 上の active ジョブ数（DISPATCHING + DISPATCHED + RUNNING の合計）を `(namespace, flavor)` 単位で制限する。ある flavor が上限に達しても他の flavor の dispatch は継続される |
 | `DISPATCH_BATCH_SIZE` | ConfigMap | 50 | Dispatcher | サイクルごと（全体） | 1回の dispatch サイクルで dispatch するジョブの総数上限。namespace 間でラウンドロビン・DRF 優先で公平に分配される |
 | `DISPATCH_FETCH_MULTIPLIER` | ConfigMap | 10 | Dispatcher | サイクルごと（全体） | SQL 候補取得数の倍率。`DISPATCH_BATCH_SIZE × DISPATCH_FETCH_MULTIPLIER` 件を余剰取得し、隙間充填・ResourceQuota フィルタ通過後に `DISPATCH_BATCH_SIZE` 件へ絞り込む。DRF 優先の namespace のジョブがフィルタで全滅しても他 namespace の候補が dispatch されることを保証する |

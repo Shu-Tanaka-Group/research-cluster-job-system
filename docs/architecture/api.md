@@ -131,8 +131,9 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 { "detail": "image は空にできません" }
 ```
 
-namespace のジョブ総数（QUEUED / DISPATCHING / DISPATCHED / RUNNING / HELD / CANCELLED の合計）が
+namespace のジョブ総数（QUEUED / DISPATCHING / DISPATCHED / HELD / CANCELLED の合計）が
 `MAX_QUEUED_JOBS_PER_NAMESPACE`（デフォルト 500）に達している場合は 429 を返す。
+RUNNING は `DISPATCH_BUDGET_PER_NAMESPACE`（flavor ごと）で上限が管理されており、無制限に蓄積しないためカウント対象外とする。DISPATCHING / DISPATCHED も同様に budget で制限されるが、ステータス遷移の過渡期に一時的に存在する状態であり滞留時間が短いため、現時点ではカウント対象に含める。
 CANCELLED ジョブを含めることで、cancel → 再投入の無制限サイクルによる DB 肥大化を防ぐ。
 上限に達した場合は `cjob delete` で CANCELLED ジョブを削除してから再投入すること。
 
