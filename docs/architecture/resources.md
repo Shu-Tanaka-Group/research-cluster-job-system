@@ -60,7 +60,7 @@ K8s Job を作成 → count/jobs.batch チェック（50件上限）
 
 `count/jobs.batch` を 50 に設定する理由：dispatch_budget の上限で動作していても、SUCCEEDED/FAILED になった K8s Job が TTL（5分）が切れるまで K8s 上に残り続けるため、実行中 + TTL 待ち完了済みジョブの合計を吸収できるよう設定している。TTL 300秒（5分）では長時間〜中程度のジョブで TTL 待ちの蓄積がほとんど発生せず、50 に対して大幅な余裕がある。短時間ジョブが大量に回転して一時的に quota に達した場合は TTL 経過で自然に回復し、Dispatcher の retry により自動復旧する。
 
-**`count/jobs.batch` と flavor-aware budget の関係:** dispatch_budget は `(namespace, flavor)` 単位で 32 件であるため、namespace あたりの理論上の最大 active ジョブ数は `32 × flavor 数`（2 flavor で 64）となり、`count/jobs.batch`（50）を超過する場合がある。現在の Dispatcher は `count/jobs.batch` の事前チェックを行わないため、超過分は K8s API エラー → retry で処理される。Dispatcher 側に `count/jobs.batch` のプレチェックを追加する改善を #140 で追跡している。
+**`count/jobs.batch` と flavor-aware budget の関係:** dispatch_budget は `(namespace, flavor)` 単位で 32 件であるため、namespace あたりの理論上の最大 active ジョブ数は `32 × flavor 数`（2 flavor で 64）となり、`count/jobs.batch`（50）を超過する場合がある。Dispatcher は `namespace_resource_quotas` テーブルの `hard_count` / `used_count` を用いて `count/jobs.batch` の残りジョブ数をプレチェックし、超過する dispatch を抑制する（[dispatcher.md](dispatcher.md) §2.5 参照）。
 
 ### CPU・メモリに関する制限
 
