@@ -26,3 +26,11 @@ Watcher が `node_resources` テーブルに記録する CPU・memory を `alloc
 
 - `cjobctl cluster set-quota --flavor <name>` で設定済みの nominalQuota が、新しい effective allocatable の bin-packing 考慮済み合計（各ノード `cpu_millicores` を整数コアに切り下げて合算）以下に収まっているかを確認する。超過している場合は `cjobctl cluster set-quota` で下方修正しないと、DISPATCHED で待機するジョブが発生する可能性がある。`cjobctl cluster set-quota` のバリデーションは新バージョンから bin-packing 考慮済みの合計を使用する（詳細は [cjobctl.md](../architecture/cjobctl.md) §5.4 `set-quota` 項目、[database.md](../architecture/database.md) §6.2 参照）
 - `cjob flavor info` の TASK LIMIT 表示が想定通り（DaemonSet Pod 分だけ減少）になっているかを確認する
+
+## Flavor-aware budget による ResourceQuota サイジングの見直し
+
+Dispatcher の dispatch budget が namespace 単位から `(namespace, flavor)` 単位に変更された（issue #138）。これにより、各 flavor が独立した budget（`DISPATCH_BUDGET_PER_NAMESPACE`、デフォルト 32）を持つようになり、namespace あたりの最大 active ジョブ数が理論上 `DISPATCH_BUDGET_PER_NAMESPACE × flavor 数` に増加する。
+
+ResourceQuota が従来の単一 budget（32 ジョブ分）を前提にサイジングされている場合、全 flavor で同時に budget 上限まで active になると ResourceQuota に達しやすくなる可能性がある。この場合、ResourceQuota プレチェック（§2.5）により QUEUED に留まるジョブが増えるが、過剰 dispatch にはならない（保守的な方向）。
+
+必要に応じて ResourceQuota の上限を見直す。実運用では全 flavor が同時に budget 上限に達することは稀であるため、即座の変更は必須ではない。
