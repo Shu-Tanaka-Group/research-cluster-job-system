@@ -237,7 +237,7 @@ $ cjob help
 次のコマンドで最新の `cjob` をインストールできます。
 
 ```bash
-curl -fsSL https://github.com/Shu-Tanaka-Group/research-cluster-job-system/releases/latest/download/cjob -o /tmp/cjob
+curl -fsSL https://github.com/Shu-Tanaka-Group/research-cluster-job-system/releases/latest/download/cjob-linux-x86_64 -o /tmp/cjob
 chmod u+x /tmp/cjob
 mv /tmp/cjob ~/.local/bin/cjob
 ```
