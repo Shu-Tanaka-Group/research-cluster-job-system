@@ -15,8 +15,8 @@ pub fn print_job_table(jobs: &[JobSummary]) {
     }
 
     println!(
-        "{:<8} {:<6} {:<12} {:<12} {:<36} {:<20} {}",
-        "JOB_ID", "TYPE", "STATUS", "PROGRESS", "COMMAND", "CREATED", "FINISHED"
+        "{:<8} {:<6} {:<12} {:<12} {:<12} {:<34} {:<20} {}",
+        "JOB_ID", "TYPE", "STATUS", "FLAVOR", "PROGRESS", "COMMAND", "CREATED", "FINISHED"
     );
     for job in jobs {
         let job_type = if job.completions.is_some() { "sweep" } else { "job" };
@@ -26,8 +26,8 @@ pub fn print_job_table(jobs: &[JobSummary]) {
             }
             _ => "-".to_string(),
         };
-        let command_display = if job.command.len() > 36 {
-            format!("{}...", &job.command[..33])
+        let command_display = if job.command.len() > 34 {
+            format!("{}...", &job.command[..31])
         } else {
             job.command.clone()
         };
@@ -43,8 +43,8 @@ pub fn print_job_table(jobs: &[JobSummary]) {
             None => "-",
         };
         println!(
-            "{:<8} {:<6} {:<12} {:<12} {:<36} {:<20} {}",
-            job.job_id, job_type, job.status, progress, command_display, created, finished
+            "{:<8} {:<6} {:<12} {:<12} {:<12} {:<34} {:<20} {}",
+            job.job_id, job_type, job.status, job.flavor, progress, command_display, created, finished
         );
     }
 }

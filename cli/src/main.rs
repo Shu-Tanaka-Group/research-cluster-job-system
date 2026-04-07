@@ -83,6 +83,10 @@ enum Commands {
         #[arg(long)]
         status: Option<String>,
 
+        /// flavor でフィルタ
+        #[arg(long)]
+        flavor: Option<String>,
+
         /// time_limit の範囲でフィルタ（例: 6h:12h, :12h, 6h:）
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
@@ -287,12 +291,12 @@ async fn main() -> Result<()> {
             flavor,
             command,
         } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, gpu, flavor, time_limit).await,
-        Commands::List { status, time_limit, format, limit, reverse, all } => {
+        Commands::List { status, flavor, time_limit, format, limit, reverse, all } => {
             let (time_limit_ge, time_limit_lt) = match time_limit {
                 Some(ref s) => parse_time_limit_range(s)?,
                 None => (None, None),
             };
-            cmd_list(&api_client, status.map(|s| s.to_uppercase()), time_limit_ge, time_limit_lt, format, limit, reverse, all).await
+            cmd_list(&api_client, status.map(|s| s.to_uppercase()), flavor, time_limit_ge, time_limit_lt, format, limit, reverse, all).await
         },
         Commands::Status { job_id } => cmd_status(&api_client, job_id).await,
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
@@ -506,6 +510,7 @@ const DEFAULT_LIST_LIMIT: u32 = 50;
 async fn cmd_list(
     client: &client::CjobClient,
     status: Option<String>,
+    flavor: Option<String>,
     time_limit_ge: Option<u32>,
     time_limit_lt: Option<u32>,
     format: Option<String>,
@@ -530,7 +535,7 @@ async fn cmd_list(
     let order = if reverse { "desc" } else { "asc" };
 
     let resp = client
-        .list_jobs(status.as_deref(), time_limit_ge, time_limit_lt, effective_limit, Some(order))
+        .list_jobs(status.as_deref(), flavor.as_deref(), time_limit_ge, time_limit_lt, effective_limit, Some(order))
         .await?;
 
     if format.as_deref() == Some("ids") {
@@ -705,7 +710,7 @@ async fn cmd_delete(
 
 async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
     // Check current job status
-    let list_resp = client.list_jobs(None, None, None, None, None).await?;
+    let list_resp = client.list_jobs(None, None, None, None, None, None).await?;
 
     // Check for DELETING jobs
     let has_deleting = list_resp.jobs.iter().any(|j| j.status == "DELETING");

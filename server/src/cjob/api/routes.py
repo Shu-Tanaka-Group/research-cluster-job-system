@@ -134,6 +134,7 @@ def post_job(
 @router.get("/jobs", response_model=JobListResponse)
 def get_jobs(
     status: str | None = None,
+    flavor: str | None = None,
     time_limit_ge: int | None = None,
     time_limit_lt: int | None = None,
     limit: int | None = None,
@@ -145,6 +146,7 @@ def get_jobs(
         session,
         namespace,
         status=status,
+        flavor=flavor,
         time_limit_ge=time_limit_ge,
         time_limit_lt=time_limit_lt,
         limit=limit,

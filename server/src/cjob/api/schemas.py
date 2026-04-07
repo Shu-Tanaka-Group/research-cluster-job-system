@@ -38,6 +38,7 @@ class JobSubmitResponse(BaseModel):
 class JobSummary(BaseModel):
     job_id: int
     status: str
+    flavor: str
     command: str
     created_at: datetime
     finished_at: datetime | None = None
