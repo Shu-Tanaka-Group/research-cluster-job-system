@@ -158,7 +158,7 @@ pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, n
                SUM(memory_mib_seconds)::BIGINT AS mem, \
                SUM(gpu_seconds)::BIGINT AS gpu \
              FROM namespace_daily_usage \
-             WHERE usage_date > CURRENT_DATE - $2 \
+             WHERE usage_date > CURRENT_DATE - $2::INT \
                AND ($1::TEXT IS NULL OR namespace = $1) \
              GROUP BY namespace ORDER BY namespace",
             &[&namespace, &window_days_i32],
@@ -201,7 +201,7 @@ pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, n
                SUM(u.memory_mib_seconds)::BIGINT AS mem, \
                SUM(u.gpu_seconds)::BIGINT AS gpu \
              FROM namespace_daily_usage u \
-             WHERE u.usage_date > CURRENT_DATE - $2 \
+             WHERE u.usage_date > CURRENT_DATE - $2::INT \
                AND ($1::TEXT IS NULL OR u.namespace = $1) \
              GROUP BY u.namespace, u.flavor \
              ORDER BY u.namespace, u.flavor",
