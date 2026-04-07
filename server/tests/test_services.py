@@ -458,6 +458,14 @@ class TestListJobs:
         assert resp.total_count == 1
         assert resp.jobs[0].status == "RUNNING"
 
+    def test_filter_by_flavor(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu")
+        _insert_job(db_session, 2, status="QUEUED", flavor="gpu-a100")
+        _insert_job(db_session, 3, status="RUNNING", flavor="gpu-a100")
+        resp = list_jobs(db_session, NS, flavor="gpu-a100")
+        assert resp.total_count == 2
+        assert all(j.flavor == "gpu-a100" for j in resp.jobs)
+
     def test_limit(self, db_session):
         for i in range(5):
             _insert_job(db_session, i + 1)

@@ -384,6 +384,7 @@ def list_jobs(
     session: Session,
     namespace: str,
     status: str | None = None,
+    flavor: str | None = None,
     time_limit_ge: int | None = None,
     time_limit_lt: int | None = None,
     limit: int | None = None,
@@ -393,6 +394,8 @@ def list_jobs(
     base_query = session.query(Job).filter(Job.namespace == namespace)
     if status:
         base_query = base_query.filter(Job.status == status)
+    if flavor:
+        base_query = base_query.filter(Job.flavor == flavor)
     if time_limit_ge is not None:
         base_query = base_query.filter(Job.time_limit_seconds >= time_limit_ge)
     if time_limit_lt is not None:
@@ -415,6 +418,7 @@ def list_jobs(
         JobSummary(
             job_id=j.job_id,
             status=j.status,
+            flavor=j.flavor,
             command=j.command,
             created_at=j.created_at,
             finished_at=j.finished_at,
