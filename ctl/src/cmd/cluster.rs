@@ -89,7 +89,7 @@ pub async fn resources(client: &Client) -> Result<()> {
         .await?;
     let weights: std::collections::HashMap<String, f64> = weight_rows
         .iter()
-        .map(|r| (r.get::<_, String>(0), r.get::<_, f64>(1)))
+        .map(|r| (r.get::<_, String>(0), r.get::<_, f32>(1) as f64))
         .collect();
 
     if !flavor_rows.is_empty() {
@@ -660,10 +660,11 @@ pub async fn set_drf_weight(client: &Client, flavor: &str, weight: f64) -> Resul
         bail!("DRF weight must be > 0");
     }
 
+    let weight_f32 = weight as f32;
     let count = client
         .execute(
             "UPDATE flavor_quotas SET drf_weight = $1 WHERE flavor = $2",
-            &[&weight, &flavor],
+            &[&weight_f32, &flavor],
         )
         .await?;
 
