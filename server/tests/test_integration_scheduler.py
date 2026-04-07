@@ -437,6 +437,29 @@ class TestFetchDispatchableJobsDRF:
         assert queued_jobs[0].namespace == NS_BOB
         assert queued_jobs[1].namespace == NS_ALICE
 
+    def test_drf_in_flight_no_integer_overflow(self, pg_session, pg_settings):
+        """Verify in_flight CTE handles large time_limit * cpu/memory without overflow.
+
+        time_limit_seconds=86400 * cpu_millicores=32000 = 2,764,800,000
+        which exceeds PostgreSQL INTEGER max (2,147,483,647).
+        """
+        _insert_node(pg_session, "node-1", flavor="cpu")
+        _insert_quota(pg_session, flavor="cpu")
+        pg_settings.DISPATCH_ROUND_SIZE = pg_settings.DISPATCH_BUDGET_PER_NAMESPACE
+
+        # DISPATCHING job with values that overflow INT32
+        _insert_job(pg_session, 1, namespace=NS_ALICE, status="DISPATCHING",
+                    cpu_millicores=32000, memory_mib=32768,
+                    time_limit_seconds=86400)
+        _insert_job(pg_session, 2, namespace=NS_ALICE, status="QUEUED")
+        _insert_job(pg_session, 1, namespace=NS_BOB, status="QUEUED")
+
+        # Should not raise NumericValueOutOfRange
+        jobs = fetch_dispatchable_jobs(pg_session, pg_settings)
+
+        queued_jobs = [j for j in jobs if j.status == "QUEUED"]
+        assert len(queued_jobs) == 2
+
     def test_retry_after_future_excludes_job(self, pg_session, pg_settings):
         _insert_node(pg_session, "node-1", flavor="cpu")
         _insert_quota(pg_session, flavor="cpu")
