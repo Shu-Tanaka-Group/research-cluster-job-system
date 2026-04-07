@@ -54,7 +54,7 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
     let select_cols = if wide {
         "namespace, job_id, completions, status, command, created_at, dispatched_at, started_at, finished_at, flavor, cpu, memory, gpu, node_name"
     } else {
-        "namespace, job_id, completions, status, command, created_at, finished_at"
+        "namespace, job_id, completions, status, flavor, command, created_at, finished_at"
     };
 
     let query = format!(
@@ -81,8 +81,8 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
         );
     } else {
         println!(
-            "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {}",
-            "NAMESPACE", "JOB_ID", "TYPE", "STATUS", "COMMAND", "CREATED", "FINISHED"
+            "{:<20} {:<8} {:<6} {:<12} {:<12} {:<40} {:<20} {}",
+            "NAMESPACE", "JOB_ID", "TYPE", "STATUS", "FLAVOR", "COMMAND", "CREATED", "FINISHED"
         );
     }
 
@@ -96,18 +96,12 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
         let job_id: i32 = row.get(1);
         let completions: Option<i32> = row.get(2);
         let status: &str = row.get(3);
-        let command: &str = row.get(4);
-        let created_at: chrono::DateTime<chrono::Utc> = row.get(5);
 
         let job_type = if completions.is_some() { "sweep" } else { "job" };
-        let cmd_display = if command.len() > 40 {
-            format!("{}...", &command[..37])
-        } else {
-            command.to_string()
-        };
-        let created = created_at.format("%Y-%m-%dT%H:%M").to_string();
 
         if wide {
+            let command: &str = row.get(4);
+            let created_at: chrono::DateTime<chrono::Utc> = row.get(5);
             let dispatched_at: Option<chrono::DateTime<chrono::Utc>> = row.get(6);
             let started_at: Option<chrono::DateTime<chrono::Utc>> = row.get(7);
             let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(8);
@@ -116,21 +110,36 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
             let memory: &str = row.get(11);
             let gpu: i32 = row.get(12);
             let node_name: Option<&str> = row.get(13);
+            let cmd_display = if command.len() > 40 {
+                format!("{}...", &command[..37])
+            } else {
+                command.to_string()
+            };
             let gpu_display = if gpu > 0 { gpu.to_string() } else { "-".to_string() };
             let node_display = node_name.unwrap_or("-");
 
             println!(
                 "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {:<20} {:<20} {:<20} {:<14} {:<6} {:<8} {:<4} {}",
-                ns, job_id, job_type, status, cmd_display, created,
+                ns, job_id, job_type, status, cmd_display,
+                created_at.format("%Y-%m-%dT%H:%M"),
                 fmt_ts(dispatched_at), fmt_ts(started_at), fmt_ts(finished_at),
                 flv, cpu, memory, gpu_display, node_display
             );
         } else {
-            let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(6);
+            let flv: &str = row.get(4);
+            let command: &str = row.get(5);
+            let created_at: chrono::DateTime<chrono::Utc> = row.get(6);
+            let finished_at: Option<chrono::DateTime<chrono::Utc>> = row.get(7);
+            let cmd_display = if command.len() > 40 {
+                format!("{}...", &command[..37])
+            } else {
+                command.to_string()
+            };
 
             println!(
-                "{:<20} {:<8} {:<6} {:<12} {:<40} {:<20} {}",
-                ns, job_id, job_type, status, cmd_display, created, fmt_ts(finished_at)
+                "{:<20} {:<8} {:<6} {:<12} {:<12} {:<40} {:<20} {}",
+                ns, job_id, job_type, status, flv, cmd_display,
+                created_at.format("%Y-%m-%dT%H:%M"), fmt_ts(finished_at)
             );
         }
     }
