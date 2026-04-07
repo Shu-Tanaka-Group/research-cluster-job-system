@@ -130,5 +130,6 @@ cjob list
 
 標準手順に加えて追加の作業が必要なバージョンでは、`docs/migration/` ディレクトリにバージョン固有の移行手順を用意している。該当バージョンへの更新時は標準手順と合わせて参照すること。大きな変更がないバージョンではファイルが存在しない場合がある。
 
+- [v1.12.0](migration/v1.12.0.md) — per-flavor DRF weight、namespace_daily_usage flavor 列追加、weight Float 型化、USAGE_RETENTION_DAYS 設定追加
 - [v1.11.0](migration/v1.11.0.md) — Dispatcher メトリクス、flavor-aware budget、count/jobs.batch プレチェック、effective allocatable
 - [v1.10.0](migration/v1.10.0.md) — Prometheus メトリクス有効化、flavor ノードラベル統一
