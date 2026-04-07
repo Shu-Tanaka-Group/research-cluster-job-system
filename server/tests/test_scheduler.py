@@ -390,10 +390,10 @@ def _fetch_settings(batch_size=50, fetch_multiplier=10):
 
 
 class TestFetchDispatchableJobsLimit:
-    """Verify SQL LIMIT is BATCH_SIZE * FETCH_MULTIPLIER (issue #136).
+    """Verify SQL LIMIT and per-flavor DRF parameters.
 
     fetch_dispatchable_jobs uses PostgreSQL-specific SQL (CURRENT_DATE,
-    NULLS FIRST, MAKE_INTERVAL, ::float) that doesn't run under SQLite,
+    NULLS FIRST, MAKE_INTERVAL, ::FLOAT) that doesn't run under SQLite,
     so we mock the session and assert the bound parameters instead.
     """
 
@@ -401,8 +401,8 @@ class TestFetchDispatchableJobsLimit:
         """Build a mocked Session that handles the 4 execute calls.
 
         1. _cleanup_old_usage
-        2. _fetch_cluster_totals: alloc query (reads .mappings().all())
-        3. _fetch_cluster_totals: quota query (reads .mappings().all())
+        2. _fetch_flavor_caps: alloc query (reads .mappings().all())
+        3. _fetch_flavor_caps: quota query (reads .mappings().all())
         4. main SELECT (iterated via `for row in result.mappings()`)
         """
         if quota_rows is None:
@@ -450,8 +450,8 @@ class TestFetchDispatchableJobsLimit:
         assert params["fetch_limit"] == 100
         assert "batch_size" not in params
 
-    def test_cluster_totals_capped_by_nominal_quota(self):
-        """DRF totals should be MIN(allocatable, nominalQuota) per flavor."""
+    def test_per_flavor_caps_capped_by_nominal_quota(self):
+        """Per-flavor caps should be MIN(allocatable, nominalQuota)."""
         session = self._mock_session(
             [{"flavor": "cpu", "total_cpu": 256000, "total_memory": 1048576, "total_gpu": 0}],
             [{"flavor": "cpu", "cpu": "128", "memory": "500Gi", "gpu": "0", "drf_weight": 1.0}],
@@ -462,11 +462,13 @@ class TestFetchDispatchableJobsLimit:
 
         main_call = session.execute.call_args_list[3]
         params = main_call.args[1]
-        assert params["cluster_cpu_millicores"] == 128000
-        assert params["cluster_memory_mib"] == 512000
-        assert params["cluster_gpus"] == 0
+        assert params["f_0"] == "cpu"
+        assert params["cpu_0"] == 128000.0
+        assert params["mem_0"] == 512000.0
+        assert params["gpu_0"] == 0.0
+        assert params["w_0"] == 1.0
 
-    def test_cluster_totals_uses_allocatable_when_quota_larger(self):
+    def test_per_flavor_caps_uses_allocatable_when_quota_larger(self):
         """When nominalQuota > allocatable, allocatable should be used."""
         session = self._mock_session(
             [{"flavor": "gpu", "total_cpu": 64000, "total_memory": 262144, "total_gpu": 4}],
@@ -478,12 +480,13 @@ class TestFetchDispatchableJobsLimit:
 
         main_call = session.execute.call_args_list[3]
         params = main_call.args[1]
-        assert params["cluster_cpu_millicores"] == 64000
-        assert params["cluster_memory_mib"] == 262144
-        assert params["cluster_gpus"] == 4
+        assert params["f_0"] == "gpu"
+        assert params["cpu_0"] == 64000.0
+        assert params["mem_0"] == 262144.0
+        assert params["gpu_0"] == 4.0
 
-    def test_cluster_totals_no_quota_uses_allocatable(self):
-        """When flavor_quotas is empty, raw allocatable totals should be used."""
+    def test_per_flavor_caps_no_quota_uses_allocatable(self):
+        """When flavor_quotas is empty, raw allocatable with weight 1.0."""
         session = self._mock_session(
             [{"flavor": "cpu", "total_cpu": 256000, "total_memory": 1048576, "total_gpu": 0}],
             [],  # no quota rows
@@ -494,11 +497,13 @@ class TestFetchDispatchableJobsLimit:
 
         main_call = session.execute.call_args_list[3]
         params = main_call.args[1]
-        assert params["cluster_cpu_millicores"] == 256000
-        assert params["cluster_memory_mib"] == 1048576
+        assert params["f_0"] == "cpu"
+        assert params["cpu_0"] == 256000.0
+        assert params["mem_0"] == 1048576.0
+        assert params["w_0"] == 1.0
 
-    def test_cluster_totals_multi_flavor(self):
-        """Totals should sum MIN(alloc, quota) across multiple flavors."""
+    def test_per_flavor_caps_multi_flavor(self):
+        """Multiple flavors should each have their own per-flavor params."""
         session = self._mock_session(
             [
                 {"flavor": "cpu", "total_cpu": 256000, "total_memory": 1048576, "total_gpu": 0},
@@ -515,15 +520,23 @@ class TestFetchDispatchableJobsLimit:
 
         main_call = session.execute.call_args_list[3]
         params = main_call.args[1]
-        assert params["cluster_cpu_millicores"] == 200000 + 64000
-        assert params["cluster_memory_mib"] == 512000 + 524288
-        assert params["cluster_gpus"] == 0 + 4
+        # Collect per-flavor values from params
+        flavor_params = {}
+        i = 0
+        while f"f_{i}" in params:
+            flavor_params[params[f"f_{i}"]] = {
+                "cpu": params[f"cpu_{i}"],
+                "mem": params[f"mem_{i}"],
+                "gpu": params[f"gpu_{i}"],
+            }
+            i += 1
+        assert flavor_params["cpu"]["cpu"] == 200000.0
+        assert flavor_params["cpu"]["mem"] == 512000.0
+        assert flavor_params["gpu"]["cpu"] == 64000.0
+        assert flavor_params["gpu"]["gpu"] == 4.0
 
-    def test_cluster_totals_weighted_multi_flavor(self):
-        """DRF weight should scale capacity per flavor."""
-        # cpu: MIN(128000, 256000) * 1.0 = 128000
-        # gpu: MIN(64000, 128000) * 2.0 = 128000
-        # total: 256000
+    def test_per_flavor_caps_weighted_multi_flavor(self):
+        """DRF weight should be passed per flavor (not multiplied into capacity)."""
         session = self._mock_session(
             [
                 {"flavor": "cpu", "total_cpu": 128000, "total_memory": 524288, "total_gpu": 0},
@@ -540,6 +553,20 @@ class TestFetchDispatchableJobsLimit:
 
         main_call = session.execute.call_args_list[3]
         params = main_call.args[1]
-        assert params["cluster_cpu_millicores"] == 128000 * 1.0 + 64000 * 2.0  # 256000
-        assert params["cluster_memory_mib"] == 524288 * 1.0 + 262144 * 2.0     # 1048576
-        assert params["cluster_gpus"] == 0 * 1.0 + 4 * 2.0                     # 8
+        # Collect per-flavor values from params
+        flavor_params = {}
+        i = 0
+        while f"f_{i}" in params:
+            flavor_params[params[f"f_{i}"]] = {
+                "cpu": params[f"cpu_{i}"],
+                "mem": params[f"mem_{i}"],
+                "gpu": params[f"gpu_{i}"],
+                "weight": params[f"w_{i}"],
+            }
+            i += 1
+        # cpu: MIN(128000, 256000) = 128000, weight = 1.0
+        assert flavor_params["cpu"]["cpu"] == 128000.0
+        assert flavor_params["cpu"]["weight"] == 1.0
+        # gpu: MIN(64000, 128000) = 64000, weight = 2.0
+        assert flavor_params["gpu"]["cpu"] == 64000.0
+        assert flavor_params["gpu"]["weight"] == 2.0

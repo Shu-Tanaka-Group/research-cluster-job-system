@@ -21,17 +21,31 @@ Dispatcher は PostgreSQL を定期的にスキャンし、以下の基準で di
 
 **Fair sharing（DRF）：** namespace ごとの直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量（[database.md](database.md) §5 の `namespace_daily_usage` テーブル）を参照し、Dominant Resource Fairness（DRF）に基づいて dispatch 優先度を決定する。各リソース（CPU・メモリ・GPU）をクラスタ全体の容量で正規化し、最大値（dominant share）を namespace の weight（[database.md](database.md) §4）で割った値が小さい namespace を優先的に dispatch する。これにより、リソースを多く消費した namespace の優先度が下がり、消費の少ない namespace にリソースが行き渡る。weight が大きい namespace はより多くのリソースを消費するまで優先され続ける。日別の消費量をスライディングウィンドウで集計するため、一括リセットの断崖が生じない。
 
-**Flavor DRF weight：** `flavor_quotas` テーブルの `drf_weight`（[database.md](database.md) §7）を DRF の消費量と容量の両方に乗じることで、flavor ごとのリソースの「価値」の違いを反映する。GPU など貴重なリソースに大きい weight（例: 2.0）、低スペック flavor に小さい weight（例: 0.5）を設定することで、低スペック flavor の使用が DRF スコアを不当に押し上げることを防ぐ。デフォルトは 1.0（全 flavor 均一）。`cjobctl cluster set-drf-weight` で設定する。
+**Flavor DRF weight：** DRF スコアは flavor ごとに dominant share を計算し、`flavor_quotas` テーブルの `drf_weight`（[database.md](database.md) §7）を乗じてから全 flavor で合算する。これにより、flavor ごとのリソースの「価値」の違いを正確に反映する。GPU など貴重なリソースに大きい weight（例: 2.0）、低スペック flavor に小さい weight（例: 0.5）を設定することで、高価値 flavor の逼迫がスコアに適切に反映される。デフォルトは 1.0（全 flavor 均一）。`cjobctl cluster set-drf-weight` で設定する。
 
-DRF 正規化に使用するクラスタ全体の容量は、flavor ごとに `node_resources` テーブル（[database.md](database.md) §6）の allocatable 合計と `flavor_quotas` テーブル（[database.md](database.md) §7）の nominalQuota の小さい方を取り、`drf_weight` を乗じてから全 flavor で合算して算出する。これにより、nominalQuota が allocatable より小さい場合に、実際に使用可能なリソース量に対する正確なシェアが計算される。Watcher がノードの `allocatable` と ClusterQueue の nominalQuota を定期的に同期するため、ノードの追加・撤去や quota 変更が自動的に反映される。`flavor_quotas` テーブルが空の場合（Watcher 未同期時）は `node_resources` の allocatable 合計をそのまま使用し、`node_resources` テーブルも空の場合は DRF ソートを無効化して namespace 名順にフォールバックする。
+```
+dominant_share = Σ_f ( GREATEST(consumed_cpu_f / capacity_cpu_f,
+                                consumed_mem_f / capacity_mem_f,
+                                consumed_gpu_f / capacity_gpu_f) × drf_weight_f )
+```
+
+この方式により、小さい flavor のリソース消費が大きい flavor の容量に希釈されることなく、flavor 単位の資源逼迫が DRF スコアに正確に反映される。
+
+DRF 正規化に使用する flavor ごとの容量は、`node_resources` テーブル（[database.md](database.md) §6）の allocatable 合計と `flavor_quotas` テーブル（[database.md](database.md) §7）の nominalQuota の小さい方を取る（weight は乗じない。weight は dominant share 計算後に乗じる）。Watcher がノードの `allocatable` と ClusterQueue の nominalQuota を定期的に同期するため、ノードの追加・撤去や quota 変更が自動的に反映される。`flavor_quotas` テーブルが空の場合（Watcher 未同期時）は `node_resources` の allocatable 合計をそのまま使用し（weight 1.0 扱い）、`node_resources` テーブルも空の場合は DRF ソートを無効化して namespace 名順にフォールバックする。
 
 **消費量データの保持：** `namespace_daily_usage` の古い行の削除は `USAGE_RETENTION_DAYS`（デフォルト 7）で制御する。DRF 計算ウィンドウ（`FAIR_SHARE_WINDOW_DAYS`）とは独立しており、将来 DRF 以外の用途で消費量データを参照する場合に、より長い期間のデータを保持できる。
 
 ### 1.2 DB スキャンのクエリ方針
 
 ```sql
+-- flavor_caps CTE: Python 側で算出した flavor ごとの容量と weight を VALUES 句で注入
+WITH flavor_caps(flavor, cap_cpu, cap_mem, cap_gpu, w) AS (
+  VALUES (:f_0::TEXT, :cpu_0::FLOAT, :mem_0::FLOAT, :gpu_0::FLOAT, :w_0::FLOAT),
+         (:f_1::TEXT, :cpu_1::FLOAT, :mem_1::FLOAT, :gpu_1::FLOAT, :w_1::FLOAT)
+         -- ... flavor 数分のパラメータ行
+),
 -- active CTE: (namespace, flavor) ごとの active ジョブ数を集計（budget 制御用）
-WITH active AS (
+active AS (
   SELECT namespace, flavor, COUNT(*) AS active_count
   FROM jobs
   WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')
@@ -46,54 +60,70 @@ queued AS (
   WHERE status = 'QUEUED'            -- HELD ジョブはディスパッチ対象外
     AND (retry_after IS NULL OR retry_after <= NOW())
 ),
--- in_flight CTE: DISPATCHING/DISPATCHED ジョブの予測消費量を集計（drf_weight 乗算）
+-- usage CTE: 直近 N 日のウィンドウ集計（flavor ごとに分離、drf_weight 乗算なし）
+usage AS (
+  SELECT u.namespace, u.flavor,
+    SUM(u.cpu_millicores_seconds) AS cpu_ms,
+    SUM(u.memory_mib_seconds) AS mem_ms,
+    SUM(u.gpu_seconds) AS gpu_s
+  FROM namespace_daily_usage u
+  WHERE u.usage_date > CURRENT_DATE - :window_days
+  GROUP BY u.namespace, u.flavor
+),
+-- in_flight CTE: DISPATCHING/DISPATCHED ジョブの予測消費量を集計（flavor ごとに分離、drf_weight 乗算なし）
 in_flight AS (
-  SELECT j.namespace,
+  SELECT j.namespace, j.flavor,
     SUM(j.time_limit_seconds * j.cpu_millicores
         * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END
-        * COALESCE(fq2.drf_weight, 1)
-    ) AS cpu_millicores_seconds,
+    ) AS cpu_ms,
     SUM(j.time_limit_seconds * j.memory_mib
         * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END
-        * COALESCE(fq2.drf_weight, 1)
-    ) AS memory_mib_seconds,
+    ) AS mem_ms,
     SUM(j.time_limit_seconds * j.gpu
         * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END
-        * COALESCE(fq2.drf_weight, 1)
-    ) AS gpu_seconds
+    ) AS gpu_s
   FROM jobs j
-  LEFT JOIN flavor_quotas fq2 ON j.flavor = fq2.flavor
   WHERE j.status IN ('DISPATCHING', 'DISPATCHED')
-  GROUP BY j.namespace
+  GROUP BY j.namespace, j.flavor
+),
+-- drf_scores CTE: flavor ごとに dominant share を計算し、weight を乗じて namespace ごとに合算
+drf_scores AS (
+  SELECT nfc.namespace,
+    SUM(
+      GREATEST(
+        nfc.total_cpu / fc.cap_cpu,
+        nfc.total_mem / fc.cap_mem,
+        nfc.total_gpu / NULLIF(fc.cap_gpu, 0)
+      ) * fc.w
+    ) AS drf_score
+  FROM (
+    SELECT COALESCE(u.namespace, inf.namespace) AS namespace,
+           COALESCE(u.flavor, inf.flavor) AS flavor,
+           COALESCE(u.cpu_ms, 0) + COALESCE(inf.cpu_ms, 0) AS total_cpu,
+           COALESCE(u.mem_ms, 0) + COALESCE(inf.mem_ms, 0) AS total_mem,
+           COALESCE(u.gpu_s, 0) + COALESCE(inf.gpu_s, 0) AS total_gpu
+    FROM usage u
+    FULL OUTER JOIN in_flight inf ON u.namespace = inf.namespace AND u.flavor = inf.flavor
+  ) nfc
+  JOIN flavor_caps fc ON nfc.flavor = fc.flavor
+  GROUP BY nfc.namespace
 )
 SELECT q.* FROM queued q
   LEFT JOIN active a ON q.namespace = a.namespace AND q.flavor = a.flavor
-  LEFT JOIN (                              -- 直近 N 日のウィンドウ集計（drf_weight 乗算）
-    SELECT u.namespace,
-           SUM(u.cpu_millicores_seconds * COALESCE(fq.drf_weight, 1)) AS cpu_millicores_seconds,
-           SUM(u.memory_mib_seconds * COALESCE(fq.drf_weight, 1)) AS memory_mib_seconds,
-           SUM(u.gpu_seconds * COALESCE(fq.drf_weight, 1)) AS gpu_seconds
-    FROM namespace_daily_usage u
-    LEFT JOIN flavor_quotas fq ON u.flavor = fq.flavor
-    WHERE u.usage_date > CURRENT_DATE - :window_days
-    GROUP BY u.namespace
-  ) u ON q.namespace = u.namespace
-  LEFT JOIN in_flight inf ON q.namespace = inf.namespace
+  LEFT JOIN drf_scores d ON q.namespace = d.namespace
   LEFT JOIN namespace_weights w ON q.namespace = w.namespace
 WHERE COALESCE(a.active_count, 0) < :dispatch_limit              -- budget に余裕がある (namespace, flavor) のみ
   AND q.flavor_rn <= :dispatch_limit - COALESCE(a.active_count, 0)  -- 残り budget 分だけ取得（flavor 単位）
   AND COALESCE(w.weight, 1) > 0                                   -- weight=0 の namespace は dispatch 対象外
 ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 namespace から round_size 件ずつ交互）
-         GREATEST(                         -- DRF: dominant share / weight が小さい namespace を優先
-           (COALESCE(u.cpu_millicores_seconds, 0) + COALESCE(inf.cpu_millicores_seconds, 0))::float / :cluster_cpu_millicores,
-           (COALESCE(u.memory_mib_seconds, 0) + COALESCE(inf.memory_mib_seconds, 0))::float / :cluster_memory_mib,
-           (COALESCE(u.gpu_seconds, 0) + COALESCE(inf.gpu_seconds, 0))::float / NULLIF(:cluster_gpus, 0)
-         ) / COALESCE(w.weight, 1) ASC NULLS FIRST,  -- 消費量レコードなし(NULL)の namespace が最優先
-         q.namespace ASC                   -- 同率の場合は namespace 名で決定的に順序付け
-LIMIT :fetch_limit;                        -- 候補を余剰取得（DISPATCH_BATCH_SIZE × DISPATCH_FETCH_MULTIPLIER）
+         COALESCE(d.drf_score, 0)              -- DRF: flavor 単位 dominant share の重み付き合算
+           / COALESCE(w.weight, 1)             -- namespace weight で割る
+           ASC NULLS FIRST,                    -- 消費量レコードなし(NULL)の namespace が最優先
+         q.namespace ASC                       -- 同率の場合は namespace 名で決定的に順序付け
+LIMIT :fetch_limit;                            -- 候補を余剰取得（DISPATCH_BATCH_SIZE × DISPATCH_FETCH_MULTIPLIER）
 ```
 
-このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_daily_usage` のウィンドウ集計はサブクエリで行い、`flavor_quotas` と JOIN して `drf_weight` を乗じた上で namespace ごとに 1 行に集約するため JOIN のコストは無視できる（20 namespace × 7 日 × 3 flavor = 420 行程度、`flavor_quotas` は 2〜5 行）。`in_flight` CTE も `idx_jobs_namespace_status` インデックスを利用し、`flavor_quotas` と JOIN して `drf_weight` を乗じる。DISPATCHING/DISPATCHED ジョブ（通常 `DISPATCH_BUDGET_PER_NAMESPACE × namespace 数 × flavor 数` 以下）を効率的に集計する。
+このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`flavor_caps` CTE は Python 側で `_fetch_flavor_caps()` により算出した per-flavor 容量を VALUES 句のバインドパラメータとして注入する（flavor 数分の行を動的に構築）。`usage` CTE と `in_flight` CTE は (namespace, flavor) 単位で集計し、`drf_weight` の乗算は行わない（weight は `drf_scores` CTE 内で GREATEST 計算後に適用する）。`drf_scores` CTE は `usage` と `in_flight` を FULL OUTER JOIN で統合し、`flavor_caps` と JOIN して flavor ごとの dominant share を求め、`w` を乗じて namespace ごとに SUM する。消費データの行数は 20 namespace × 7 日 × 3 flavor = 420 行程度であり、FULL OUTER JOIN と GREATEST の追加コストは無視できる。
 
 **budget の flavor 分離：** `active` CTE は `(namespace, flavor)` 単位で active ジョブ数を集計し、`queued` CTE には namespace 単位の `rn` に加えて `(namespace, flavor)` 単位の `flavor_rn` を付与する。`active` との JOIN は `(namespace, flavor)` でマッチし、WHERE 句の budget 条件には `flavor_rn` を使用する。これにより、ある flavor の active ジョブが budget を占有しても、同じ namespace の別 flavor のジョブは独立した budget で dispatch される。ラウンドロビン用の `rn` は namespace 単位のままであり、flavor 数が多い namespace がラウンドロビン枠を多く占有する問題は発生しない。
 
@@ -101,9 +131,9 @@ LIMIT :fetch_limit;                        -- 候補を余剰取得（DISPATCH_B
 
 **候補の余剰取得：** SQL の `LIMIT` は `DISPATCH_BATCH_SIZE × DISPATCH_FETCH_MULTIPLIER`（デフォルト 50 × 10 = 500）で取得する。取得した候補は §2.4 の隙間充填フィルタと §2.5 の ResourceQuota プレチェックを通過した後、Python 側で先頭 `DISPATCH_BATCH_SIZE` 件に絞り込んで dispatch する。余剰取得は、DRF 優先で取得される namespace のジョブが全滅（現在の残リソースで実行不可能）した場合に、後続の他 namespace の候補が dispatch されるようにするためである。これにより、リソースに空きがあるにもかかわらず 0 dispatch が継続して均衡が進まない事象を防ぐ。倍率は namespace 数・ジョブサイズの分布に応じて調整できる。候補数は WHERE 句の `q.flavor_rn <= :dispatch_limit - active_count` により `namespace数 × flavor数 × DISPATCH_BUDGET_PER_NAMESPACE` が上限となるため無制限にはならず、DB → Dispatcher のネットワーク転送量と Python 側のフィルタ iteration 回数のみが増加する。
 
-**公平性の保証（DRF）：** 直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース消費量（`namespace_daily_usage`）と DISPATCHING/DISPATCHED ジョブの予測消費量（`in_flight` CTE）を合算し、クラスタ容量で正規化し、`GREATEST` で最大値（dominant share）を求め、namespace の weight（`namespace_weights` テーブル、デフォルト 1）で割ってソートする。消費量と容量の両方に `flavor_quotas.drf_weight` を乗じることで、flavor ごとのリソースの「価値」の違いを反映する。クラスタ容量は flavor ごとに `node_resources` テーブルの allocatable 合計と `flavor_quotas` テーブルの nominalQuota の小さい方を取り、`drf_weight` を乗じてから全 flavor で合算して算出する（[database.md](database.md) §6.2・§7.2 参照）。これにより、支配的リソースの消費割合が小さい namespace が優先され、weight が大きい namespace はより多くのリソースを消費するまで優先され続ける。`namespace_daily_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 のクラスタでは `NULLIF(:cluster_gpus, 0)` により GPU の項が NULL となり、DRF の計算から除外される。`node_resources` テーブルが空の場合は DRF ソートを無効化し、namespace 名順にフォールバックする。
+**公平性の保証（DRF）：** flavor ごとに独立して dominant share を計算し、`drf_weight` を乗じてから全 flavor で合算する。具体的には、`usage` CTE と `in_flight` CTE の消費量を FULL OUTER JOIN で (namespace, flavor) 単位に統合し、`flavor_caps` CTE の容量で正規化して `GREATEST` で dominant share を求め、`w`（drf_weight）を乗じて namespace ごとに `SUM` する。この合算値を namespace の weight（`namespace_weights` テーブル、デフォルト 1）で割ってソートする。flavor ごとの容量は `node_resources` テーブルの allocatable 合計と `flavor_quotas` テーブルの nominalQuota の小さい方を取る（[database.md](database.md) §6.2・§7.2 参照）。この方式により、小さい flavor のリソース逼迫が大きい flavor の容量に希釈されることなく、flavor 単位の資源使用状況が正確にスコアに反映される。`namespace_daily_usage` にレコードがない namespace は消費量 0 として扱われ（`COALESCE` + `NULLS FIRST`）、最優先で dispatch される。GPU が 0 の flavor では `NULLIF(cap_gpu, 0)` により GPU の項が NULL となり、`GREATEST` が NULL 引数を無視するため DRF の計算から除外される。`node_resources` テーブルが空の場合は DRF ソートを無効化し、namespace 名順にフォールバックする。
 
-**in-flight CTE による予測消費量の反映：** DISPATCHING/DISPATCHED ジョブは `namespace_daily_usage` に未記録（Watcher が RUNNING 遷移時に記録するため）であるが、in_flight CTE により `time_limit_seconds × リソース量 × drf_weight` の予測消費量が DRF スコアに加算される。RUNNING に遷移したジョブは `namespace_daily_usage` に記録済みであり、かつ `status IN ('DISPATCHING', 'DISPATCHED')` の条件から除外されるため、二重計上は発生しない。PostgreSQL の MVCC（スナップショット分離）により、同一トランザクション内でのステータス遷移の一貫性が保証される。in_flight CTE は `jobs.cpu_millicores` / `jobs.memory_mib` カラム（Submit API が `parse_cpu_millicores()` / `parse_memory_mib()` で設定する数値カラム）を使用し、`flavor_quotas.drf_weight` を `jobs.flavor` で JOIN して乗じる（[database.md](database.md) §1 参照）。
+**in-flight CTE による予測消費量の反映：** DISPATCHING/DISPATCHED ジョブは `namespace_daily_usage` に未記録（Watcher が RUNNING 遷移時に記録するため）であるが、in_flight CTE により `time_limit_seconds × リソース量` の予測消費量が (namespace, flavor) 単位で DRF スコアに加算される。RUNNING に遷移したジョブは `namespace_daily_usage` に記録済みであり、かつ `status IN ('DISPATCHING', 'DISPATCHED')` の条件から除外されるため、二重計上は発生しない。PostgreSQL の MVCC（スナップショット分離）により、同一トランザクション内でのステータス遷移の一貫性が保証される。in_flight CTE は `jobs.cpu_millicores` / `jobs.memory_mib` カラム（Submit API が `parse_cpu_millicores()` / `parse_memory_mib()` で設定する数値カラム）を使用する（[database.md](database.md) §1 参照）。`drf_weight` は in_flight CTE 内では乗じず、`drf_scores` CTE 内で `GREATEST` 計算後に適用する。
 
 **古い行の削除：** `fetch_dispatchable_jobs()` の実行前に、保持期間（`USAGE_RETENTION_DAYS`）外の古い行を削除する（[database.md](database.md) §5.4 参照）。
 

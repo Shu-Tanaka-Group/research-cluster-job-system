@@ -1,15 +1,13 @@
 from sqlalchemy import text
 
-from cjob.dispatcher.scheduler import _fetch_cluster_totals
+from cjob.dispatcher.scheduler import _fetch_flavor_caps
 
 
-class TestFetchClusterTotals:
+class TestFetchFlavorCaps:
     def test_empty_table(self, db_session):
-        """Empty node_resources returns all zeros."""
-        cpu, mem, gpu = _fetch_cluster_totals(db_session)
-        assert cpu == 0
-        assert mem == 0
-        assert gpu == 0
+        """Empty node_resources returns empty dict."""
+        caps = _fetch_flavor_caps(db_session)
+        assert caps == {}
 
     def test_single_node(self, db_session):
         db_session.execute(
@@ -20,10 +18,13 @@ class TestFetchClusterTotals:
         )
         db_session.flush()
 
-        cpu, mem, gpu = _fetch_cluster_totals(db_session)
-        assert cpu == 64000
-        assert mem == 262144
-        assert gpu == 4
+        caps = _fetch_flavor_caps(db_session)
+        # Default flavor is 'cpu' (column default)
+        assert "cpu" in caps
+        assert caps["cpu"]["cpu"] == 64000.0
+        assert caps["cpu"]["mem"] == 262144.0
+        assert caps["cpu"]["gpu"] == 4.0
+        assert caps["cpu"]["weight"] == 1.0
 
     def test_multiple_nodes_sums(self, db_session):
         db_session.execute(
@@ -36,13 +37,13 @@ class TestFetchClusterTotals:
         )
         db_session.flush()
 
-        cpu, mem, gpu = _fetch_cluster_totals(db_session)
-        assert cpu == 128000  # 32000 + 64000 + 32000
-        assert mem == 524288  # 131072 + 262144 + 131072
-        assert gpu == 6       # 0 + 4 + 2
+        caps = _fetch_flavor_caps(db_session)
+        assert caps["cpu"]["cpu"] == 128000.0  # 32000 + 64000 + 32000
+        assert caps["cpu"]["mem"] == 524288.0  # 131072 + 262144 + 131072
+        assert caps["cpu"]["gpu"] == 6.0       # 0 + 4 + 2
 
-    def test_drf_weight_scales_capacity(self, db_session):
-        """DRF weight should scale the effective capacity."""
+    def test_capacity_capped_by_quota(self, db_session):
+        """Capacity should be MIN(allocatable, nominalQuota)."""
         db_session.execute(
             text(
                 "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
@@ -57,14 +58,15 @@ class TestFetchClusterTotals:
         )
         db_session.flush()
 
-        cpu, mem, gpu = _fetch_cluster_totals(db_session)
-        # MIN(128000, 256000) * 2.0 = 256000
-        assert cpu == 256000.0
-        # MIN(524288, 1024000) * 2.0 = 1048576
-        assert mem == 1048576.0
+        caps = _fetch_flavor_caps(db_session)
+        # MIN(128000, 256000) = 128000 (weight NOT multiplied into capacity)
+        assert caps["cpu"]["cpu"] == 128000.0
+        # MIN(524288, 1024000) = 524288
+        assert caps["cpu"]["mem"] == 524288.0
+        assert caps["cpu"]["weight"] == 2.0
 
-    def test_drf_weight_with_multiple_flavors(self, db_session):
-        """Weighted totals should sum across multiple flavors."""
+    def test_multiple_flavors(self, db_session):
+        """Per-flavor caps should be returned separately."""
         db_session.execute(
             text(
                 "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
@@ -81,13 +83,19 @@ class TestFetchClusterTotals:
         )
         db_session.flush()
 
-        cpu, mem, gpu = _fetch_cluster_totals(db_session)
-        # cpu: MIN(128000, 256000)*1.0 + MIN(32000, 64000)*2.0 = 128000 + 64000 = 192000
-        assert cpu == 192000.0
-        # gpu: MIN(0, 0)*1.0 + MIN(4, 8)*2.0 = 0 + 8 = 8
-        assert gpu == 8.0
+        caps = _fetch_flavor_caps(db_session)
+        assert len(caps) == 2
 
-    def test_drf_weight_default_when_no_quota(self, db_session):
+        # cpu: MIN(128000, 256000) = 128000
+        assert caps["cpu"]["cpu"] == 128000.0
+        assert caps["cpu"]["weight"] == 1.0
+
+        # gpu: MIN(32000, 64000) = 32000, MIN(4, 8) = 4
+        assert caps["gpu"]["cpu"] == 32000.0
+        assert caps["gpu"]["gpu"] == 4.0
+        assert caps["gpu"]["weight"] == 2.0
+
+    def test_default_weight_when_no_quota(self, db_session):
         """Flavor without quota row should use weight 1.0 (raw allocatable)."""
         db_session.execute(
             text(
@@ -98,6 +106,7 @@ class TestFetchClusterTotals:
         # No flavor_quotas row
         db_session.flush()
 
-        cpu, mem, gpu = _fetch_cluster_totals(db_session)
-        assert cpu == 64000  # raw allocatable, no weight applied
-        assert mem == 262144
+        caps = _fetch_flavor_caps(db_session)
+        assert caps["cpu"]["cpu"] == 64000.0  # raw allocatable
+        assert caps["cpu"]["mem"] == 262144.0
+        assert caps["cpu"]["weight"] == 1.0
