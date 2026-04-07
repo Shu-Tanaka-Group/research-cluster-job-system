@@ -194,21 +194,21 @@ enum WeightCommands {
     Set {
         /// Target namespace (e.g. user-alice)
         namespace: String,
-        /// Weight value (>= 0)
-        weight: i32,
+        /// Weight value (>= 0, float allowed e.g. 1.5)
+        weight: f64,
     },
-    /// Reset weight for a namespace to default (1)
+    /// Reset weight for a namespace to default (1), or --all to reset all
     Reset {
         /// Target namespace
-        namespace: String,
+        namespace: Option<String>,
+        /// Reset all namespaces
+        #[arg(long)]
+        all: bool,
     },
     /// Give exclusive cluster access to a namespace
     Exclusive {
-        /// Namespace to grant exclusive access (omit with --release)
-        namespace: Option<String>,
-        /// Release exclusive mode (reset all weights)
-        #[arg(long)]
-        release: bool,
+        /// Namespace to grant exclusive access
+        namespace: String,
     },
 }
 
@@ -404,23 +404,21 @@ async fn main() -> Result<()> {
                 WeightCommands::Set { namespace, weight } => {
                     cmd::weight::set(&conn.client, &namespace, weight).await
                 }
-                WeightCommands::Reset { namespace } => {
-                    cmd::weight::reset(&conn.client, &namespace).await
-                }
-                WeightCommands::Exclusive { namespace, release } => {
-                    if release {
-                        cmd::weight::release(&conn.client).await
+                WeightCommands::Reset { namespace, all } => {
+                    if all {
+                        cmd::weight::reset_all(&conn.client).await
+                    } else if let Some(ns) = namespace {
+                        cmd::weight::reset(&conn.client, &ns).await
                     } else {
-                        let ns = namespace
-                            .as_deref()
-                            .ok_or_else(|| anyhow::anyhow!("Specify a namespace or use --release"))?;
-                        // Fetch user namespaces from K8s
-                        let k8s_client = k8s::client().await?;
-                        let label = config.user_namespace_label();
-                        let user_namespaces =
-                            fetch_user_namespaces(&k8s_client, label).await?;
-                        cmd::weight::exclusive(&conn.client, ns, &user_namespaces, label).await
+                        anyhow::bail!("Specify a namespace or use --all")
                     }
+                }
+                WeightCommands::Exclusive { namespace } => {
+                    let k8s_client = k8s::client().await?;
+                    let label = config.user_namespace_label();
+                    let user_namespaces =
+                        fetch_user_namespaces(&k8s_client, label).await?;
+                    cmd::weight::exclusive(&conn.client, &namespace, &user_namespaces, label).await
                 }
             }
         }
