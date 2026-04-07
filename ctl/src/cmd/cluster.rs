@@ -80,21 +80,34 @@ pub async fn resources(client: &Client) -> Result<()> {
         )
         .await?;
 
+    // Fetch DRF weights from flavor_quotas
+    let weight_rows = client
+        .query(
+            "SELECT flavor, drf_weight FROM flavor_quotas",
+            &[],
+        )
+        .await?;
+    let weights: std::collections::HashMap<String, f64> = weight_rows
+        .iter()
+        .map(|r| (r.get::<_, String>(0), r.get::<_, f64>(1)))
+        .collect();
+
     if !flavor_rows.is_empty() {
         println!();
         println!("=== Per-Flavor Totals (set-quota reference) ===");
         println!(
-            "{:<14} {:>12} {:>14} {:>6}",
-            "FLAVOR", "CPU (cores)", "Memory (GiB)", "GPU"
+            "{:<14} {:>12} {:>14} {:>6} {:>12}",
+            "FLAVOR", "CPU (cores)", "Memory (GiB)", "GPU", "DRF Weight"
         );
         for row in &flavor_rows {
             let flv: &str = row.get(0);
             let cpu: i64 = row.get(1);
             let mem: i64 = row.get(2);
             let gpu: i64 = row.get(3);
+            let w = weights.get(flv).copied().unwrap_or(1.0);
             println!(
-                "{:<14} {:>12} {:>14.1} {:>6}",
-                flv, cpu / 1000, mem as f64 / 1024.0, gpu,
+                "{:<14} {:>12} {:>14.1} {:>6} {:>12}",
+                flv, cpu / 1000, mem as f64 / 1024.0, gpu, w,
             );
         }
 
@@ -636,4 +649,32 @@ fn parse_resource_quantity(s: &str) -> f64 {
         return n.parse::<f64>().unwrap_or(0.0) / 1000.0;
     }
     s.parse::<f64>().unwrap_or(0.0)
+}
+
+// ---------------------------------------------------------------------------
+// set-drf-weight
+// ---------------------------------------------------------------------------
+
+pub async fn set_drf_weight(client: &Client, flavor: &str, weight: f64) -> Result<()> {
+    if weight <= 0.0 {
+        bail!("DRF weight must be > 0");
+    }
+
+    let count = client
+        .execute(
+            "UPDATE flavor_quotas SET drf_weight = $1 WHERE flavor = $2",
+            &[&weight, &flavor],
+        )
+        .await?;
+
+    if count == 0 {
+        bail!(
+            "Flavor '{}' not found in flavor_quotas. \
+             Ensure the Watcher has synced the ClusterQueue.",
+            flavor,
+        );
+    }
+
+    println!("DRF weight for flavor '{}' set to {}", flavor, weight);
+    Ok(())
 }

@@ -238,6 +238,13 @@ enum ClusterCommands {
         #[arg(long)]
         force: bool,
     },
+    /// Set DRF weight for a ResourceFlavor
+    SetDrfWeight {
+        /// ResourceFlavor name (e.g. cpu, gpu-a100)
+        flavor: String,
+        /// DRF weight (must be > 0, default 1.0)
+        weight: f64,
+    },
 }
 
 #[derive(Subcommand)]
@@ -447,6 +454,11 @@ async fn main() -> Result<()> {
                         force,
                     )
                     .await
+                }
+                ClusterCommands::SetDrfWeight { flavor, weight } => {
+                    let conn =
+                        db::connect(&config.database, config.system_namespace()).await?;
+                    cmd::cluster::set_drf_weight(&conn.client, &flavor, weight).await
                 }
             }
         }
