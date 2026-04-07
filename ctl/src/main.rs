@@ -381,7 +381,8 @@ async fn main() -> Result<()> {
             let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
                 UsageCommands::List { namespace } => {
-                    cmd::usage::list(&conn.client, namespace.as_deref()).await
+                    let k8s_client = k8s::client().await?;
+                    cmd::usage::list(&conn.client, &k8s_client, config.system_namespace(), namespace.as_deref()).await
                 }
                 UsageCommands::Reset { namespace, all } => {
                     cmd::usage::reset(&conn.client, namespace.as_deref(), all).await

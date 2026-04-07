@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use anyhow::{bail, Result};
+use k8s_openapi::api::core::v1::ConfigMap;
+use kube::Api;
 use tokio_postgres::Client;
 
 use super::cluster::parse_resource_quantity;
@@ -95,7 +97,18 @@ async fn fetch_flavor_caps(client: &Client) -> HashMap<String, FlavorCap> {
     caps
 }
 
-pub async fn list(client: &Client, namespace: Option<&str>) -> Result<()> {
+async fn fetch_window_days(k8s_client: &kube::Client, system_ns: &str) -> i32 {
+    let cms: Api<ConfigMap> = Api::namespaced(k8s_client.clone(), system_ns);
+    match cms.get("cjob-config").await {
+        Ok(cm) => cm
+            .data
+            .and_then(|d| d.get("FAIR_SHARE_WINDOW_DAYS").and_then(|v| v.parse().ok()))
+            .unwrap_or(7),
+        Err(_) => 7,
+    }
+}
+
+pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, namespace: Option<&str>) -> Result<()> {
     // 1. Daily raw data
     let daily_rows = client
         .query(
@@ -133,9 +146,11 @@ pub async fn list(client: &Client, namespace: Option<&str>) -> Result<()> {
         );
     }
 
-    // 2. 7-day window aggregate
+    // 2. N-day window aggregate (N = FAIR_SHARE_WINDOW_DAYS)
+    let window_days = fetch_window_days(k8s_client, system_ns).await;
+    let window_days_i32: i32 = window_days;
     println!();
-    println!("=== 7-Day Window Aggregate ===");
+    println!("=== {}-Day Window Aggregate ===", window_days);
     let window_rows = client
         .query(
             "SELECT namespace, \
@@ -143,10 +158,10 @@ pub async fn list(client: &Client, namespace: Option<&str>) -> Result<()> {
                SUM(memory_mib_seconds)::BIGINT AS mem, \
                SUM(gpu_seconds)::BIGINT AS gpu \
              FROM namespace_daily_usage \
-             WHERE usage_date > CURRENT_DATE - 7 \
+             WHERE usage_date > CURRENT_DATE - $2 \
                AND ($1::TEXT IS NULL OR namespace = $1) \
              GROUP BY namespace ORDER BY namespace",
-            &[&namespace],
+            &[&namespace, &window_days_i32],
         )
         .await?;
 
@@ -186,11 +201,11 @@ pub async fn list(client: &Client, namespace: Option<&str>) -> Result<()> {
                SUM(u.memory_mib_seconds)::BIGINT AS mem, \
                SUM(u.gpu_seconds)::BIGINT AS gpu \
              FROM namespace_daily_usage u \
-             WHERE u.usage_date > CURRENT_DATE - 7 \
+             WHERE u.usage_date > CURRENT_DATE - $2 \
                AND ($1::TEXT IS NULL OR u.namespace = $1) \
              GROUP BY u.namespace, u.flavor \
              ORDER BY u.namespace, u.flavor",
-            &[&namespace],
+            &[&namespace, &window_days_i32],
         )
         .await?;
 
@@ -235,11 +250,11 @@ pub async fn list(client: &Client, namespace: Option<&str>) -> Result<()> {
         // Compute per-flavor dominant share (dimensionless).
         // consumption (resource·seconds) / (capacity (resource) × window (seconds))
         // gives the average fraction of capacity used over the window.
-        const WINDOW_SECONDS: f64 = 7.0 * 86400.0; // 604800
+        let window_seconds = window_days as f64 * 86400.0;
         if let Some(cap) = flavor_caps.get(flavor) {
-            let cpu_share = if cap.cpu > 0.0 { cpu as f64 / (cap.cpu * WINDOW_SECONDS) } else { 0.0 };
-            let mem_share = if cap.mem > 0.0 { mem as f64 / (cap.mem * WINDOW_SECONDS) } else { 0.0 };
-            let gpu_share = if cap.gpu > 0.0 { gpu as f64 / (cap.gpu * WINDOW_SECONDS) } else { 0.0 };
+            let cpu_share = if cap.cpu > 0.0 { cpu as f64 / (cap.cpu * window_seconds) } else { 0.0 };
+            let mem_share = if cap.mem > 0.0 { mem as f64 / (cap.mem * window_seconds) } else { 0.0 };
+            let gpu_share = if cap.gpu > 0.0 { gpu as f64 / (cap.gpu * window_seconds) } else { 0.0 };
             let dom_share = cpu_share.max(mem_share).max(gpu_share);
             entry.drf_score += dom_share * cap.weight;
         }
