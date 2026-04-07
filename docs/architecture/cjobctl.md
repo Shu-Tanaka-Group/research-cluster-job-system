@@ -151,10 +151,10 @@ user-charlie   -                 -                    -                 -       
 | コマンド | 概要 | 対象 |
 |---|---|---|
 | `cjobctl weight list` | 全 namespace の weight 一覧 | DB: `namespace_weights` |
-| `cjobctl weight set <namespace> <weight>` | weight の設定（UPSERT） | DB: `namespace_weights` |
+| `cjobctl weight set <namespace> <weight>` | weight の設定（UPSERT、実数可） | DB: `namespace_weights` |
 | `cjobctl weight reset <namespace>` | weight をデフォルト（1）に戻す | DB: `namespace_weights` |
+| `cjobctl weight reset --all` | 全 namespace の weight override を削除 | DB: `namespace_weights` |
 | `cjobctl weight exclusive <namespace>` | 指定 namespace にクラスタを専有させる | DB + K8s |
-| `cjobctl weight exclusive --release` | 専有モード解除 | DB: `namespace_weights` |
 
 `weight exclusive` は K8s API で `cjob.io/user-namespace=true` ラベルを持つ namespace を列挙し、指定以外の全 namespace を weight = 0 に設定する。cjobctl は `config.toml` の `[kubernetes]` セクション内 `user_namespace_label` でラベルセレクタを変更できる。
 
@@ -638,7 +638,7 @@ Restarting submit-api... (use 'cjobctl system status' to check)
 
 - `cjobctl jobs cancel`
 - `cjobctl usage reset`
-- `cjobctl weight exclusive --release`
+- `cjobctl weight reset --all`
 - `cjobctl cli remove`
 - `cjobctl system stop`
 - `cjobctl config set`

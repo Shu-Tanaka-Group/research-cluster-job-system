@@ -10,6 +10,7 @@
 
 - `flavor_quotas` テーブルに `drf_weight` 列を追加（`REAL NOT NULL DEFAULT 1.0`）
 - `namespace_daily_usage` テーブルに `flavor` 列を追加し、PK を `(namespace, usage_date, flavor)` に変更
+- `namespace_weights.weight` 列の型を `INTEGER` → `REAL` に変更（既存の整数値は自動変換される）
 
 ## ConfigMap 設定
 
