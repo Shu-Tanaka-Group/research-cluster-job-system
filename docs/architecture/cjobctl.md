@@ -86,19 +86,18 @@ namespace = "cjob-system"   # 省略時デフォルト
 
 #### `-o wide` オプション
 
-`jobs list` の表示カラムは NAMESPACE, JOB_ID, TYPE, STATUS, COMMAND, CREATED, FINISHED とする。TYPE は `completions IS NULL` のジョブを `job`、それ以外を `sweep` と表示する。
+`jobs list` の表示カラムは NAMESPACE, JOB_ID, TYPE, STATUS, FLAVOR, COMMAND, CREATED, FINISHED とする。TYPE は `completions IS NULL` のジョブを `job`、それ以外を `sweep` と表示する。
 
 `-o wide`（`--output wide`）を指定すると、上記に加えて以下のカラムが追加される:
 
 - **DISPATCHED**: ジョブの dispatch 時刻（DB の `dispatched_at` カラム、NULL の場合は `-` 表示）
 - **STARTED**: ジョブの開始時刻（DB の `started_at` カラム、NULL の場合は `-` 表示）
-- **FLAVOR**: 指定 ResourceFlavor 名（DB の `flavor` カラム）
 - **CPU**: 指定 CPU リソース量（DB の `cpu` カラム）
 - **MEMORY**: 指定メモリリソース量（DB の `memory` カラム）
 - **GPU**: 指定 GPU 数（DB の `gpu` カラム、0 の場合は `-` 表示）
 - **NODE**: ジョブ実行ノード名（DB の `node_name` カラム、NULL の場合は `-` 表示）
 
-`-o wide` での時間列の表示順: CREATED → DISPATCHED → STARTED → FINISHED
+`-o wide` でのカラム順: NAMESPACE, JOB_ID, TYPE, STATUS, FLAVOR, COMMAND, CREATED, DISPATCHED, STARTED, FINISHED, CPU, MEMORY, GPU, NODE
 
 `DISPATCHED`・`STARTED` は NULL を含む可能性があるため、`--sort` の NULL 処理は `FINISHED` と同様（`--reverse` 未指定時は `NULLS LAST`、指定時は `NULLS FIRST`）とする。
 
@@ -274,7 +273,7 @@ weight は 0 より大きい値でなければならない。指定 flavor が `
 | `cjobctl config set <key> --from-file <path> [--yes]` | ファイルから設定値を更新 | `Api::<ConfigMap>::patch()` |
 | `cjobctl config dump` | ConfigMap を `kubectl apply` 可能な YAML で出力 | `Api::<ConfigMap>::get()` |
 
-`system logs` の有効なコンポーネント名: `dispatcher`, `watcher`, `submit-api`。Pod のラベル `app=<component>` で特定する。
+`system logs` の有効なコンポーネント名: `dispatcher`, `watcher`, `submit-api`。Pod のラベル `app=<component>` で特定する。`--tail` のデフォルト値は 50。
 
 #### `cjobctl config set`
 

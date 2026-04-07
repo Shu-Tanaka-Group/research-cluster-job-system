@@ -55,15 +55,16 @@ data:
     );
     CREATE TABLE IF NOT EXISTS namespace_weights (
         namespace TEXT PRIMARY KEY,
-        weight    INTEGER NOT NULL DEFAULT 1
+        weight    REAL NOT NULL DEFAULT 1.0
     );
     CREATE TABLE IF NOT EXISTS namespace_daily_usage (
         namespace              TEXT NOT NULL,
         usage_date             DATE NOT NULL,
+        flavor                 TEXT NOT NULL DEFAULT 'cpu',
         cpu_millicores_seconds BIGINT NOT NULL DEFAULT 0,
         memory_mib_seconds     BIGINT NOT NULL DEFAULT 0,
         gpu_seconds            BIGINT NOT NULL DEFAULT 0,
-        PRIMARY KEY (namespace, usage_date)
+        PRIMARY KEY (namespace, usage_date, flavor)
     );
     CREATE TABLE IF NOT EXISTS node_resources (
         node_name           TEXT PRIMARY KEY,
@@ -78,7 +79,20 @@ data:
         cpu         TEXT NOT NULL,
         memory      TEXT NOT NULL,
         gpu         TEXT NOT NULL DEFAULT '0',
+        drf_weight  REAL NOT NULL DEFAULT 1.0,
         updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE TABLE IF NOT EXISTS namespace_resource_quotas (
+        namespace            TEXT PRIMARY KEY,
+        hard_cpu_millicores  INTEGER NOT NULL,
+        hard_memory_mib      INTEGER NOT NULL,
+        hard_gpu             INTEGER NOT NULL DEFAULT 0,
+        hard_count           INTEGER,
+        used_cpu_millicores  INTEGER NOT NULL,
+        used_memory_mib      INTEGER NOT NULL,
+        used_gpu             INTEGER NOT NULL DEFAULT 0,
+        used_count           INTEGER,
+        updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_jobs_k8s_job_name ON jobs (k8s_job_name);
     CREATE INDEX IF NOT EXISTS idx_jobs_namespace_status ON jobs (namespace, status);

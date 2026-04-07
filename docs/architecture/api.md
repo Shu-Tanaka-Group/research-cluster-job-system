@@ -58,7 +58,7 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 | `gpu` | `0` | GPU 数 |
 | `flavor` | サーバ側デフォルト（ConfigMap: `DEFAULT_FLAVOR`、デフォルト `cpu`） | ResourceFlavor 名 |
 
-### response
+### response (201 Created)
 
 ```json
 {
@@ -184,7 +184,7 @@ CLI が受け付ける `_INDEX_` プレースホルダーは CLI クライアン
 }
 ```
 
-### response
+### response (201 Created)
 
 ```json
 {
