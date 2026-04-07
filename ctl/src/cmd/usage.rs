@@ -232,11 +232,14 @@ pub async fn list(client: &Client, namespace: Option<&str>) -> Result<()> {
         entry.total_mem += mem;
         entry.total_gpu += gpu;
 
-        // Compute per-flavor dominant share
+        // Compute per-flavor dominant share (dimensionless).
+        // consumption (resource·seconds) / (capacity (resource) × window (seconds))
+        // gives the average fraction of capacity used over the window.
+        const WINDOW_SECONDS: f64 = 7.0 * 86400.0; // 604800
         if let Some(cap) = flavor_caps.get(flavor) {
-            let cpu_share = if cap.cpu > 0.0 { cpu as f64 / cap.cpu } else { 0.0 };
-            let mem_share = if cap.mem > 0.0 { mem as f64 / cap.mem } else { 0.0 };
-            let gpu_share = if cap.gpu > 0.0 { gpu as f64 / cap.gpu } else { 0.0 };
+            let cpu_share = if cap.cpu > 0.0 { cpu as f64 / (cap.cpu * WINDOW_SECONDS) } else { 0.0 };
+            let mem_share = if cap.mem > 0.0 { mem as f64 / (cap.mem * WINDOW_SECONDS) } else { 0.0 };
+            let gpu_share = if cap.gpu > 0.0 { gpu as f64 / (cap.gpu * WINDOW_SECONDS) } else { 0.0 };
             let dom_share = cpu_share.max(mem_share).max(gpu_share);
             entry.drf_score += dom_share * cap.weight;
         }
