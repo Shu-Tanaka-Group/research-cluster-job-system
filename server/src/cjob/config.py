@@ -34,6 +34,7 @@ class Settings(BaseSettings):
 
     # Dispatcher - Fair Sharing
     FAIR_SHARE_WINDOW_DAYS: int = 7
+    USAGE_RETENTION_DAYS: int = 7
 
     # ResourceFlavor
     RESOURCE_FLAVORS: str = '[{"name": "cpu", "label_selector": "cjob.io/flavor=cpu"}]'

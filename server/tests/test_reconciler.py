@@ -350,7 +350,7 @@ class TestReconcileResourceUsage:
     """Test that RUNNING transition records resource usage."""
 
     def _get_usage(self, db_session, namespace=NS):
-        """Get the daily usage row for today."""
+        """Get the total daily usage across all flavors for today."""
         rows = (
             db_session.query(NamespaceDailyUsage)
             .filter(NamespaceDailyUsage.namespace == namespace)
@@ -358,15 +358,25 @@ class TestReconcileResourceUsage:
         )
         if not rows:
             return None
-        # Sum all rows (should be 1 for today in tests)
+        # Sum all rows across flavors
         total = NamespaceDailyUsage(
             namespace=namespace,
             usage_date=rows[0].usage_date,
+            flavor=rows[0].flavor,
             cpu_millicores_seconds=sum(r.cpu_millicores_seconds for r in rows),
             memory_mib_seconds=sum(r.memory_mib_seconds for r in rows),
             gpu_seconds=sum(r.gpu_seconds for r in rows),
         )
         return total
+
+    def _get_usage_by_flavor(self, db_session, namespace=NS):
+        """Get daily usage rows keyed by flavor."""
+        rows = (
+            db_session.query(NamespaceDailyUsage)
+            .filter(NamespaceDailyUsage.namespace == namespace)
+            .all()
+        )
+        return {r.flavor: r for r in rows}
 
     def test_running_transition_records_usage(self, mock_delete, mock_fetch_nodes, db_session):
         _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
@@ -416,6 +426,36 @@ class TestReconcileResourceUsage:
 
         usage = self._get_usage(db_session)
         assert usage is None  # No usage recorded
+
+    def test_usage_recorded_with_flavor(self, mock_delete, mock_fetch_nodes, db_session):
+        """Usage should be recorded per flavor."""
+        _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
+                     gpu=0, time_limit_seconds=3600, flavor="gpu-a100")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        by_flavor = self._get_usage_by_flavor(db_session)
+        assert "gpu-a100" in by_flavor
+        assert by_flavor["gpu-a100"].cpu_millicores_seconds == 3600 * 2000
+
+    def test_different_flavors_separate_rows(self, mock_delete, mock_fetch_nodes, db_session):
+        """Jobs with different flavors should create separate usage rows."""
+        _insert_job(db_session, 1, status="DISPATCHED", cpu="1", memory="1Gi",
+                     time_limit_seconds=100, flavor="cpu")
+        _insert_job(db_session, 2, status="DISPATCHED", cpu="2", memory="2Gi",
+                     time_limit_seconds=200, flavor="gpu-a100")
+        k8s_jobs = [
+            _make_k8s_job(NS, 1, "cjob-alice-1", active=1),
+            _make_k8s_job(NS, 2, "cjob-alice-2", active=1),
+        ]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        by_flavor = self._get_usage_by_flavor(db_session)
+        assert len(by_flavor) == 2
+        assert by_flavor["cpu"].cpu_millicores_seconds == 100 * 1000
+        assert by_flavor["gpu-a100"].cpu_millicores_seconds == 200 * 2000
 
     def test_sweep_resource_usage_multiplied_by_parallelism(self, mock_delete, mock_fetch_nodes, db_session):
         """Sweep resource usage should be multiplied by parallelism."""
