@@ -31,32 +31,7 @@ User Pod (JupyterHub) → cjob CLI → Submit API → PostgreSQL
 - job_id はユーザー（namespace）ごとの連番（1, 2, 3...）
 - ジョブログは PVC 上（`/home/jovyan/.cjob/logs/<job_id>/`）に保存し、CLI が直接読む
 - submit 時の `cwd`・export 済み環境変数（`PATH` / `VIRTUAL_ENV` 含む）・コマンドを Job Pod で再現
-
-### CLI コマンド
-
-以下は概要把握用の一覧であり、**正本の仕様は [docs/architecture/cli.md](docs/architecture/cli.md) を参照すること**。新規コマンドの追加・オプション変更は cli.md を先に更新し、必要に応じてこの一覧に反映する。
-
-```bash
-cjob add -- <command>                # ジョブ投入
-cjob sweep -n <count> --parallel <n> -- <command>  # パラメータスイープ
-cjob list                            # 一覧表示
-cjob status <job-id>                 # 状態確認
-cjob cancel <job-id>                 # キャンセル（範囲: 1-10, 複数: 1,3,5, 組み合わせ対応）
-cjob hold <job-id>                   # ジョブの実行を保留（範囲・複数・--all 対応）
-cjob release <job-id>                # 保留の解除（範囲・複数・--all 対応）
-cjob logs <job-id>                   # ログ表示（--follow / --index）
-cjob delete <job-id>                 # 完了済みジョブの削除（--all で全件削除）
-cjob usage                           # リソース使用状況の表示
-cjob flavor list                     # 利用可能な flavor 一覧
-cjob flavor info <name>              # 指定 flavor のリソース上限
-cjob reset                           # 全ジョブ履歴・ログ削除、job_id を 1 に戻す
-cjob update                          # CLI バイナリの更新
-cjob config list                     # ユーザー設定の表示
-cjob config add <table> <key> <value>    # リスト型設定に要素を追加
-cjob config remove <table> <key> <value> # リスト型設定から要素を削除
-cjob config set <table> <key> <value>    # スカラー型設定の変更（未実装・将来対応予定）
-cjob config unset <table> <key>          # スカラー型設定の削除（未実装・将来対応予定）
-```
+- CLI の仕様は [docs/architecture/cli.md](docs/architecture/cli.md) を参照
 
 ## プロジェクト情報管理の基本方針
 
