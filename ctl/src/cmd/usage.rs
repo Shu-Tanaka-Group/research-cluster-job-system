@@ -1,7 +1,101 @@
+use std::collections::HashMap;
+
 use anyhow::{bail, Result};
 use tokio_postgres::Client;
 
-pub async fn list(client: &Client, cluster_totals: &ClusterTotals, namespace: Option<&str>) -> Result<()> {
+use super::cluster::parse_resource_quantity;
+
+struct FlavorCap {
+    cpu: f64,
+    mem: f64,
+    gpu: f64,
+    weight: f64,
+}
+
+async fn fetch_flavor_caps(client: &Client) -> HashMap<String, FlavorCap> {
+    let alloc_rows = match client
+        .query(
+            "SELECT flavor, \
+                    COALESCE(SUM(cpu_millicores), 0)::BIGINT AS total_cpu, \
+                    COALESCE(SUM(memory_mib), 0)::BIGINT AS total_mem, \
+                    COALESCE(SUM(gpu), 0)::BIGINT AS total_gpu \
+             FROM node_resources GROUP BY flavor",
+            &[],
+        )
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("Warning: Could not query node_resources ({}). DRF disabled.", e);
+            return HashMap::new();
+        }
+    };
+
+    if alloc_rows.is_empty() {
+        return HashMap::new();
+    }
+
+    // Per-flavor nominalQuota and drf_weight
+    let quota_rows = match client
+        .query("SELECT flavor, cpu, memory, gpu, drf_weight FROM flavor_quotas", &[])
+        .await
+    {
+        Ok(rows) => rows,
+        Err(_) => Vec::new(),
+    };
+
+    let mut quotas: HashMap<String, (f64, f64, f64, f64)> = HashMap::new();
+    for row in &quota_rows {
+        let flavor: &str = row.get(0);
+        let cpu_str: &str = row.get(1);
+        let mem_str: &str = row.get(2);
+        let gpu_str: &str = row.get(3);
+        let weight: f32 = row.get(4);
+        quotas.insert(
+            flavor.to_string(),
+            (
+                parse_resource_quantity(cpu_str) * 1000.0,    // cores → millicores
+                parse_resource_quantity(mem_str) / 1048576.0,  // bytes → MiB
+                parse_resource_quantity(gpu_str),
+                weight as f64,
+            ),
+        );
+    }
+
+    let mut caps = HashMap::new();
+    for row in &alloc_rows {
+        let flavor: &str = row.get(0);
+        let alloc_cpu: i64 = row.get(1);
+        let alloc_mem: i64 = row.get(2);
+        let alloc_gpu: i64 = row.get(3);
+
+        if let Some((q_cpu, q_mem, q_gpu, weight)) = quotas.get(flavor) {
+            caps.insert(
+                flavor.to_string(),
+                FlavorCap {
+                    cpu: (alloc_cpu as f64).min(*q_cpu),
+                    mem: (alloc_mem as f64).min(*q_mem),
+                    gpu: (alloc_gpu as f64).min(*q_gpu),
+                    weight: *weight,
+                },
+            );
+        } else {
+            caps.insert(
+                flavor.to_string(),
+                FlavorCap {
+                    cpu: alloc_cpu as f64,
+                    mem: alloc_mem as f64,
+                    gpu: alloc_gpu as f64,
+                    weight: 1.0,
+                },
+            );
+        }
+    }
+
+    caps
+}
+
+pub async fn list(client: &Client, namespace: Option<&str>) -> Result<()> {
     // 1. Daily raw data
     let daily_rows = client
         .query(
@@ -74,57 +168,98 @@ pub async fn list(client: &Client, cluster_totals: &ClusterTotals, namespace: Op
         );
     }
 
-    // 3. DRF dominant share
+    // 3. DRF dominant share (per-flavor method)
     println!();
     println!("=== DRF Dominant Share ===");
-    let cluster_cpu = cluster_totals.cpu_millicores as f64;
-    let cluster_mem = cluster_totals.memory_mib as f64;
-    let cluster_gpus_f = cluster_totals.gpus as f64;
 
-    let drf_query = format!(
-        "SELECT \
-           u.namespace, \
-           SUM(u.cpu_millicores_seconds)::BIGINT AS cpu_total, \
-           SUM(u.memory_mib_seconds)::BIGINT AS mem_total, \
-           SUM(u.gpu_seconds)::BIGINT AS gpu_total, \
-           COALESCE(w.weight, 1) AS weight, \
-           GREATEST( \
-             COALESCE(SUM(u.cpu_millicores_seconds), 0) * 1.0 / {}, \
-             COALESCE(SUM(u.memory_mib_seconds), 0) * 1.0 / {}, \
-             COALESCE(SUM(u.gpu_seconds), 0) * 1.0 / NULLIF({}, 0) \
-           ) / COALESCE(w.weight, 1) AS weighted_dominant_share \
-         FROM namespace_daily_usage u \
-         LEFT JOIN namespace_weights w ON u.namespace = w.namespace \
-         WHERE u.usage_date > CURRENT_DATE - 7 \
-           AND ($1::TEXT IS NULL OR u.namespace = $1) \
-         GROUP BY u.namespace, w.weight \
-         ORDER BY weighted_dominant_share ASC NULLS FIRST",
-        cluster_totals.cpu_millicores, cluster_totals.memory_mib, cluster_totals.gpus
-    );
-    let drf_rows = client.query(&drf_query, &[&namespace]).await?;
+    let flavor_caps = fetch_flavor_caps(client).await;
+    if flavor_caps.is_empty() {
+        println!("No node_resources data. DRF disabled.");
+        return Ok(());
+    }
+
+    // Fetch per-(namespace, flavor) consumption
+    let usage_rows = client
+        .query(
+            "SELECT u.namespace, u.flavor, \
+               SUM(u.cpu_millicores_seconds)::BIGINT AS cpu, \
+               SUM(u.memory_mib_seconds)::BIGINT AS mem, \
+               SUM(u.gpu_seconds)::BIGINT AS gpu \
+             FROM namespace_daily_usage u \
+             WHERE u.usage_date > CURRENT_DATE - 7 \
+               AND ($1::TEXT IS NULL OR u.namespace = $1) \
+             GROUP BY u.namespace, u.flavor \
+             ORDER BY u.namespace, u.flavor",
+            &[&namespace],
+        )
+        .await?;
+
+    // Fetch namespace weights
+    let weight_rows = client
+        .query("SELECT namespace, weight FROM namespace_weights", &[])
+        .await?;
+    let mut ns_weights: HashMap<String, i32> = HashMap::new();
+    for row in &weight_rows {
+        let ns: &str = row.get(0);
+        let w: i32 = row.get(1);
+        ns_weights.insert(ns.to_string(), w);
+    }
+
+    // Aggregate per namespace: total consumption + per-flavor DRF score
+    struct NsData {
+        total_cpu: i64,
+        total_mem: i64,
+        total_gpu: i64,
+        drf_score: f64,
+    }
+    let mut ns_data: HashMap<String, NsData> = HashMap::new();
+
+    for row in &usage_rows {
+        let ns: &str = row.get(0);
+        let flavor: &str = row.get(1);
+        let cpu: i64 = row.get(2);
+        let mem: i64 = row.get(3);
+        let gpu: i64 = row.get(4);
+
+        let entry = ns_data.entry(ns.to_string()).or_insert(NsData {
+            total_cpu: 0,
+            total_mem: 0,
+            total_gpu: 0,
+            drf_score: 0.0,
+        });
+
+        entry.total_cpu += cpu;
+        entry.total_mem += mem;
+        entry.total_gpu += gpu;
+
+        // Compute per-flavor dominant share
+        if let Some(cap) = flavor_caps.get(flavor) {
+            let cpu_share = if cap.cpu > 0.0 { cpu as f64 / cap.cpu } else { 0.0 };
+            let mem_share = if cap.mem > 0.0 { mem as f64 / cap.mem } else { 0.0 };
+            let gpu_share = if cap.gpu > 0.0 { gpu as f64 / cap.gpu } else { 0.0 };
+            let dom_share = cpu_share.max(mem_share).max(gpu_share);
+            entry.drf_score += dom_share * cap.weight;
+        }
+    }
+
+    // Sort by weighted DRF score ascending
+    let mut ns_list: Vec<(String, &NsData)> = ns_data.iter().map(|(k, v)| (k.clone(), v)).collect();
+    ns_list.sort_by(|a, b| {
+        let w_a = *ns_weights.get(&a.0).unwrap_or(&1) as f64;
+        let w_b = *ns_weights.get(&b.0).unwrap_or(&1) as f64;
+        let score_a = if w_a > 0.0 { a.1.drf_score / w_a } else { f64::INFINITY };
+        let score_b = if w_b > 0.0 { b.1.drf_score / w_b } else { f64::INFINITY };
+        score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     println!(
         "{:<20} {:>14} {:>14} {:>10} {:>8} {:>16}",
         "NAMESPACE", "CPU (core·h)", "Mem (GiB·h)", "GPU (h)", "WEIGHT", "DOM_SHARE"
     );
-    for row in &drf_rows {
-        let ns: &str = row.get(0);
-        let cpu: i64 = row.get(1);
-        let mem: i64 = row.get(2);
-        let gpu: i64 = row.get(3);
-        let weight: i32 = row.get(4);
-
-        // Compute dominant share locally for display
-        let cpu_share = cpu as f64 / cluster_cpu;
-        let mem_share = mem as f64 / cluster_mem;
-        let gpu_share = if cluster_gpus_f > 0.0 {
-            gpu as f64 / cluster_gpus_f
-        } else {
-            0.0
-        };
-        let dom_share = cpu_share.max(mem_share).max(gpu_share);
+    for (ns, data) in &ns_list {
+        let weight = *ns_weights.get(ns.as_str()).unwrap_or(&1);
         let weighted = if weight > 0 {
-            dom_share / weight as f64
+            data.drf_score / weight as f64
         } else {
             f64::INFINITY
         };
@@ -132,9 +267,9 @@ pub async fn list(client: &Client, cluster_totals: &ClusterTotals, namespace: Op
         println!(
             "{:<20} {:>14.1} {:>14.1} {:>10.1} {:>8} {:>16.6}",
             ns,
-            cpu as f64 / 1000.0 / 3600.0,
-            mem as f64 / 1024.0 / 3600.0,
-            gpu as f64 / 3600.0,
+            data.total_cpu as f64 / 1000.0 / 3600.0,
+            data.total_mem as f64 / 1024.0 / 3600.0,
+            data.total_gpu as f64 / 3600.0,
             weight,
             weighted,
         );

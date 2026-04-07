@@ -631,7 +631,7 @@ pub async fn flavor_usage(k8s_client: &kube::Client) -> Result<()> {
     Ok(())
 }
 
-fn parse_resource_quantity(s: &str) -> f64 {
+pub(crate) fn parse_resource_quantity(s: &str) -> f64 {
     // Handle Kubernetes quantity suffixes
     if let Some(n) = s.strip_suffix("Ti") {
         return n.parse::<f64>().unwrap_or(0.0) * 1024.0 * 1024.0 * 1024.0 * 1024.0;

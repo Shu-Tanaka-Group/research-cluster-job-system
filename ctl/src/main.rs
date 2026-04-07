@@ -381,8 +381,7 @@ async fn main() -> Result<()> {
             let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
                 UsageCommands::List { namespace } => {
-                    let totals = cmd::usage::ClusterTotals::from_db(&conn.client).await;
-                    cmd::usage::list(&conn.client, &totals, namespace.as_deref()).await
+                    cmd::usage::list(&conn.client, namespace.as_deref()).await
                 }
                 UsageCommands::Reset { namespace, all } => {
                     cmd::usage::reset(&conn.client, namespace.as_deref(), all).await
