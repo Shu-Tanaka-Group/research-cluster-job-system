@@ -19,9 +19,13 @@ dependencies = [
 [project.optional-dependencies]
 api = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
 test = ["pytest>=8.0"]
+integration = ["pytest>=8.0", "testcontainers[postgres]>=4.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: tests requiring PostgreSQL container (testcontainers)",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/cjob"]

@@ -23,7 +23,38 @@ cargo test
 
 追加の依存インストールは不要。
 
-## 2. テストカバレッジ
+## 2. 統合テスト（PostgreSQL）
+
+### 前提条件
+
+- Docker 互換ランタイム（Docker Desktop / Colima）が起動していること
+- Colima 使用時は以下の環境変数が必要:
+  ```bash
+  export DOCKER_HOST=unix://$HOME/.config/colima/default/docker.sock
+  export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+  ```
+
+### 実行方法
+
+```bash
+cd server
+
+# 統合テストのみ
+uv run --extra integration python -m pytest -m integration -v
+
+# ユニットテスト + 統合テスト
+uv run --extra integration python -m pytest -v
+```
+
+Docker が利用できない環境では統合テストは自動的にスキップされる。
+
+### 仕組み
+
+- `testcontainers[postgres]` でテストセッション開始時に PostgreSQL コンテナを自動起動（`postgres:16-alpine`）
+- 各テストはトランザクションの rollback でデータを隔離（コンテナの再起動は不要）
+- テストセッション終了時にコンテナが自動破棄される
+
+## 3. テストカバレッジ
 
 ### テスト済み
 
@@ -43,6 +74,7 @@ cargo test
 | `tests/test_resource_quota_sync.py` | `watcher/resource_quota_sync.py::sync_resource_quotas` | 16 | ResourceQuota 同期。ユーザー namespace への挿入 / 値更新 / ユーザー namespace 除去時の行削除 / ResourceQuota なし時の行削除 / namespace 一覧 API エラー時のデータ保持 / ResourceQuota 一覧 API エラー時のデータ保持 / ユーザー namespace なしの全削除 / CPU・メモリパース / GPU リソース名取得 / field_selector 設定 / USER_NAMESPACE_LABEL 設定 / 非ユーザー namespace の除外 / ジョブなし namespace の追跡 / count/jobs.batch 同期（値あり・値なし NULL・再同期時更新） |
 | `tests/test_cli_endpoints.py` | `api/routes.py` CLI 配布エンドポイント | 17 | `/v1/cli/version`・`/v1/cli/versions`・`/v1/cli/download` の正常系 / 404 / 認証不要 / バージョンソート / バージョン指定ダウンロード / 無効ディレクトリ除外 / 不正バージョン文字列の拒否（パストラバーサル防止）の検証 |
 | `tests/test_cluster_totals.py` | `dispatcher/scheduler.py::_fetch_flavor_caps` | 6 | DRF 正規化用 per-flavor 容量取得。空テーブル / 単一ノード / 複数ノード合計 / nominalQuota による容量キャップ（weight は容量に乗じず別フィールド）/ 複数 flavor の個別容量 / quota なし時のデフォルト weight |
+| `tests/test_integration_scheduler.py` | `dispatcher/scheduler.py` 5関数（統合テスト） | 22 | PostgreSQL コンテナを使用した統合テスト。`_cleanup_old_usage`（保持期間外削除・境界日付）/ `increment_retry`（retry_after 設定・retry_count 増分・非 DISPATCHING 無操作）/ `fetch_stalled_jobs`（閾値超過検出・最近の dispatch 除外・非 DISPATCHED 除外）/ `estimate_shortest_remaining`（最短残り時間・RUNNING なし・namespace/flavor スコープ）/ `fetch_dispatchable_jobs`（フォールバック namespace 順・budget 超過・DRF 消費量優先・ラウンドロビン・weight 増幅・flavor budget・weight=0 除外・in-flight スコア反映・in-flight BIGINT オーバーフロー回避・retry_after 除外・古い usage 自動削除） |
 | **Rust** | | | |
 | `src/job_ids.rs` | `parse_job_ids` | 7 | ジョブ ID 式のパース（単体 / 範囲 / リスト / 組み合わせ / 重複除去 / エラー） |
 | `src/main.rs` | `parse_duration` / `parse_time_limit_range` | 23 | 時間指定のパース（秒数 / s / m / h / d サフィックス / 空白 / 不正値 / オーバーフロー）/ time_limit 範囲指定のパース（h / m / d / 混合単位 / 秒数 / 片端省略 / コロンなし / 空範囲 / 不正値 / 下限≧上限エラー） |
@@ -52,17 +84,12 @@ cargo test
 | `src/cmd/cli_list.rs` | `parse_versions` / `sort_versions` | 9 | ls 出力パース（latest 除外 / 空入力 / パース不能エントリ）/ ソート（降順 / プレリリース優先 / 設計書出力例の再現） |
 | `src/cmd/cli_set_latest.rs` | `run`（バリデーション） | 2 | プレリリース版の拒否（beta / rc） |
 
-**合計: Python 358 + Rust (cli) 62 + Rust (cjobctl) 28 = 448 テスト**
+**合計: Python 358 + Python 統合 22 + Rust (cli) 62 + Rust (cjobctl) 28 = 470 テスト**
 
 ### 未テスト
 
 | 対象 | 理由 |
 |---|---|
-| `dispatcher/scheduler.py::fetch_dispatchable_jobs` | PostgreSQL 固有の CTE（`ROW_NUMBER() OVER` + `NOW()`）・`GREATEST` ・`NULLIF` を使用。SQLite インメモリ DB では実行不可。テストには testcontainers 等で実 PostgreSQL が必要 |
-| `dispatcher/scheduler.py::_cleanup_old_usage` | `CURRENT_DATE` 演算が PostgreSQL 固有。`fetch_dispatchable_jobs` 内で呼び出される |
-| `dispatcher/scheduler.py::increment_retry` | `MAKE_INTERVAL(secs => :interval)` が PostgreSQL 固有関数 |
-| `dispatcher/scheduler.py::fetch_stalled_jobs` | `NOW() - MAKE_INTERVAL(secs => :threshold)` が PostgreSQL 固有。`apply_gap_filling` テストではモックで代替 |
-| `dispatcher/scheduler.py::estimate_shortest_remaining` | `EXTRACT(EPOCH FROM ...)` + `MAKE_INTERVAL` が PostgreSQL 固有。`apply_gap_filling` テストではモックで代替 |
 | `api/routes.py` | FastAPI TestClient で テスト可能だが、services.py のテストでビジネスロジックはカバー済み。HTTP ステータスコード・認証・JSON シリアライズの検証が未実施 |
 | `dispatcher/main.py` | メインループ。K8s `load_incluster_config()` やシグナルハンドリングに依存し、ユニットテストが困難 |
 | `watcher/main.py` | 同上 |
@@ -81,4 +108,4 @@ Python テストは SQLite インメモリ DB（`sqlite:///:memory:`）を使用
 - **allocate_job_id のモック**: `ON CONFLICT ... DO UPDATE ... RETURNING` 構文は PostgreSQL 固有のためモックで代替（`test_services.py` のみ）
 - **JobEvent 挿入の抑制**: `test_services.py` では JobEvent の BIGSERIAL 問題を回避するため `session.add` をフィルタリング
 
-これらの制約により、PostgreSQL 固有の raw SQL を含む関数（`fetch_dispatchable_jobs` / `increment_retry`）はテスト対象外となっている。
+これらの制約により、PostgreSQL 固有の raw SQL を含む関数は SQLite テストの対象外となっている。これらの関数は `testcontainers[postgres]` を使用した統合テスト（§2）でカバーしている。
