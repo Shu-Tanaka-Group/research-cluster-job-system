@@ -17,7 +17,7 @@ pub async fn list(client: &Client) -> Result<()> {
     println!("{:<20} {}", "NAMESPACE", "WEIGHT");
     for row in &rows {
         let ns: &str = row.get(0);
-        let weight: i32 = row.get(1);
+        let weight: f32 = row.get(1);
         println!("{:<20} {}", ns, weight);
     }
     println!();
@@ -25,20 +25,21 @@ pub async fn list(client: &Client) -> Result<()> {
     Ok(())
 }
 
-pub async fn set(client: &Client, namespace: &str, weight: i32) -> Result<()> {
-    if weight < 0 {
+pub async fn set(client: &Client, namespace: &str, weight: f64) -> Result<()> {
+    if weight < 0.0 {
         bail!("Weight must be >= 0");
     }
 
+    let weight_f32 = weight as f32;
     client
         .execute(
             "INSERT INTO namespace_weights (namespace, weight) VALUES ($1, $2) \
              ON CONFLICT (namespace) DO UPDATE SET weight = $2",
-            &[&namespace, &weight],
+            &[&namespace, &weight_f32],
         )
         .await?;
 
-    println!("Set weight for '{}' to {}.", namespace, weight);
+    println!("Set weight for '{}' to {}.", namespace, weight_f32);
     Ok(())
 }
 
@@ -96,8 +97,8 @@ pub async fn exclusive(client: &Client, namespace: &str, user_namespaces: &[Stri
     Ok(())
 }
 
-pub async fn release(client: &Client) -> Result<()> {
-    eprint!("Release exclusive mode (delete all weight overrides)? [y/N] ");
+pub async fn reset_all(client: &Client) -> Result<()> {
+    eprint!("Delete all weight overrides? [y/N] ");
     std::io::Write::flush(&mut std::io::stderr())?;
     let mut input = String::new();
     std::io::stdin().read_line(&mut input)?;

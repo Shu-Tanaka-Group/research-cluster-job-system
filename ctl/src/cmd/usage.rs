@@ -213,11 +213,11 @@ pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, n
     let weight_rows = client
         .query("SELECT namespace, weight FROM namespace_weights", &[])
         .await?;
-    let mut ns_weights: HashMap<String, i32> = HashMap::new();
+    let mut ns_weights: HashMap<String, f64> = HashMap::new();
     for row in &weight_rows {
         let ns: &str = row.get(0);
-        let w: i32 = row.get(1);
-        ns_weights.insert(ns.to_string(), w);
+        let w: f32 = row.get(1);
+        ns_weights.insert(ns.to_string(), w as f64);
     }
 
     // Aggregate per namespace: total consumption + per-flavor DRF score
@@ -263,8 +263,8 @@ pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, n
     // Sort by weighted DRF score ascending
     let mut ns_list: Vec<(String, &NsData)> = ns_data.iter().map(|(k, v)| (k.clone(), v)).collect();
     ns_list.sort_by(|a, b| {
-        let w_a = *ns_weights.get(&a.0).unwrap_or(&1) as f64;
-        let w_b = *ns_weights.get(&b.0).unwrap_or(&1) as f64;
+        let w_a = *ns_weights.get(&a.0).unwrap_or(&1.0);
+        let w_b = *ns_weights.get(&b.0).unwrap_or(&1.0);
         let score_a = if w_a > 0.0 { a.1.drf_score / w_a } else { f64::INFINITY };
         let score_b = if w_b > 0.0 { b.1.drf_score / w_b } else { f64::INFINITY };
         score_a.partial_cmp(&score_b).unwrap_or(std::cmp::Ordering::Equal)
@@ -275,9 +275,9 @@ pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, n
         "NAMESPACE", "CPU (core·h)", "Mem (GiB·h)", "GPU (h)", "WEIGHT", "DOM_SHARE"
     );
     for (ns, data) in &ns_list {
-        let weight = *ns_weights.get(ns.as_str()).unwrap_or(&1);
-        let weighted = if weight > 0 {
-            data.drf_score / weight as f64
+        let weight = *ns_weights.get(ns.as_str()).unwrap_or(&1.0);
+        let weighted = if weight > 0.0 {
+            data.drf_score / weight
         } else {
             f64::INFINITY
         };

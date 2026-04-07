@@ -5,7 +5,7 @@ pub async fn migrate(client: &Client) -> Result<()> {
     let ddl = "\
         CREATE TABLE IF NOT EXISTS namespace_weights ( \
             namespace TEXT PRIMARY KEY, \
-            weight    INTEGER NOT NULL DEFAULT 1 \
+            weight    REAL NOT NULL DEFAULT 1.0 \
         ); \
         CREATE TABLE IF NOT EXISTS namespace_daily_usage ( \
             namespace              TEXT NOT NULL, \
@@ -55,7 +55,9 @@ pub async fn migrate(client: &Client) -> Result<()> {
         ALTER TABLE namespace_resource_quotas ADD COLUMN IF NOT EXISTS hard_count INTEGER; \
         ALTER TABLE namespace_resource_quotas ADD COLUMN IF NOT EXISTS used_count INTEGER; \
         ALTER TABLE flavor_quotas ADD COLUMN IF NOT EXISTS drf_weight REAL NOT NULL DEFAULT 1.0; \
-        ALTER TABLE namespace_daily_usage ADD COLUMN IF NOT EXISTS flavor TEXT NOT NULL DEFAULT 'cpu';";
+        ALTER TABLE namespace_daily_usage ADD COLUMN IF NOT EXISTS flavor TEXT NOT NULL DEFAULT 'cpu'; \
+        ALTER TABLE namespace_weights ALTER COLUMN weight TYPE REAL USING weight::REAL; \
+        ALTER TABLE namespace_weights ALTER COLUMN weight SET DEFAULT 1.0;";
 
     client
         .batch_execute(ddl)
