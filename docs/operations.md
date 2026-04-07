@@ -442,13 +442,14 @@ cjobctl system stop
 以下の処理が順番に実行される。
 
 1. Submit API を replicas=0 にスケールダウン（新規ジョブ投入を遮断）
-2. DB のジョブ状態を更新:
+2. Dispatcher を replicas=0 にスケールダウン（再 dispatch を防止）
+3. Watcher を replicas=0 にスケールダウン（DB 状態の上書きを防止）
+4. DB のジョブ状態を更新:
    - DISPATCHING / DISPATCHED → QUEUED に戻す
    - RUNNING → FAILED（`last_error: system shutdown`）
    - QUEUED → 変更なし（起動後に自動的に再 dispatch される）
    - HELD → 変更なし（ユーザーが `cjob release` するまで保留を維持）
-3. 全ユーザー namespace の K8s Job を削除
-4. Dispatcher、Watcher を replicas=0 にスケールダウン
+5. 全ユーザー namespace の K8s Job を削除
 
 ユーザーの `cjob.io/user-namespace` ラベルは変更されない。停止前後でアクセス権限は保持される。
 
