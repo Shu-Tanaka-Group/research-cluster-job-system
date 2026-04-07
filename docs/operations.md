@@ -196,6 +196,26 @@ cjobctl weight exclusive --release
 
 専有中に新しい namespace が作成された場合は、専有コマンドを再実行して追加分を weight = 0 にする。
 
+## 3.1 flavor の DRF weight 管理
+
+flavor ごとの DRF への寄与を調整する重み（drf_weight）を管理する。GPU など貴重なリソースに大きい値、低スペック flavor に小さい値を設定する。
+
+デフォルトは 1.0（全 flavor 均一）。`flavor_quotas` テーブルに行がない場合は Watcher が ClusterQueue から同期するまで待つ。
+
+```bash
+# 現在の DRF weight を確認（Per-Flavor Totals の DRF Weight 列）
+cjobctl cluster resources
+
+# GPU flavor の weight を 2.0 に設定
+cjobctl cluster set-drf-weight gpu-a100 2.0
+
+# 低スペック flavor の weight を 0.5 に設定
+cjobctl cluster set-drf-weight cpu-slow 0.5
+
+# デフォルト（1.0）に戻す
+cjobctl cluster set-drf-weight gpu-a100 1.0
+```
+
 ## 4. 累計リソース消費量の手動リセット
 
 ```bash

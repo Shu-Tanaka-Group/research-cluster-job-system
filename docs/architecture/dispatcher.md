@@ -46,29 +46,37 @@ queued AS (
   WHERE status = 'QUEUED'            -- HELD ジョブはディスパッチ対象外
     AND (retry_after IS NULL OR retry_after <= NOW())
 ),
--- in_flight CTE: DISPATCHING/DISPATCHED ジョブの予測消費量を集計
+-- in_flight CTE: DISPATCHING/DISPATCHED ジョブの予測消費量を集計（drf_weight 乗算）
 in_flight AS (
-  SELECT namespace,
-    SUM(time_limit_seconds * cpu_millicores
-        * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END) AS cpu_millicores_seconds,
-    SUM(time_limit_seconds * memory_mib
-        * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END) AS memory_mib_seconds,
-    SUM(time_limit_seconds * gpu
-        * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END) AS gpu_seconds
-  FROM jobs
-  WHERE status IN ('DISPATCHING', 'DISPATCHED')
-  GROUP BY namespace
+  SELECT j.namespace,
+    SUM(j.time_limit_seconds * j.cpu_millicores
+        * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END
+        * COALESCE(fq2.drf_weight, 1)
+    ) AS cpu_millicores_seconds,
+    SUM(j.time_limit_seconds * j.memory_mib
+        * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END
+        * COALESCE(fq2.drf_weight, 1)
+    ) AS memory_mib_seconds,
+    SUM(j.time_limit_seconds * j.gpu
+        * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END
+        * COALESCE(fq2.drf_weight, 1)
+    ) AS gpu_seconds
+  FROM jobs j
+  LEFT JOIN flavor_quotas fq2 ON j.flavor = fq2.flavor
+  WHERE j.status IN ('DISPATCHING', 'DISPATCHED')
+  GROUP BY j.namespace
 )
 SELECT q.* FROM queued q
   LEFT JOIN active a ON q.namespace = a.namespace AND q.flavor = a.flavor
-  LEFT JOIN (                              -- 直近 N 日のウィンドウ集計
-    SELECT namespace,
-           SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,
-           SUM(memory_mib_seconds) AS memory_mib_seconds,
-           SUM(gpu_seconds) AS gpu_seconds
-    FROM namespace_daily_usage
-    WHERE usage_date > CURRENT_DATE - :window_days
-    GROUP BY namespace
+  LEFT JOIN (                              -- 直近 N 日のウィンドウ集計（drf_weight 乗算）
+    SELECT u.namespace,
+           SUM(u.cpu_millicores_seconds * COALESCE(fq.drf_weight, 1)) AS cpu_millicores_seconds,
+           SUM(u.memory_mib_seconds * COALESCE(fq.drf_weight, 1)) AS memory_mib_seconds,
+           SUM(u.gpu_seconds * COALESCE(fq.drf_weight, 1)) AS gpu_seconds
+    FROM namespace_daily_usage u
+    LEFT JOIN flavor_quotas fq ON u.flavor = fq.flavor
+    WHERE u.usage_date > CURRENT_DATE - :window_days
+    GROUP BY u.namespace
   ) u ON q.namespace = u.namespace
   LEFT JOIN in_flight inf ON q.namespace = inf.namespace
   LEFT JOIN namespace_weights w ON q.namespace = w.namespace
@@ -85,7 +93,7 @@ ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC,  -- ラウンドロビン（各 nam
 LIMIT :fetch_limit;                        -- 候補を余剰取得（DISPATCH_BATCH_SIZE × DISPATCH_FETCH_MULTIPLIER）
 ```
 
-このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_daily_usage` のウィンドウ集計はサブクエリで行い、namespace ごとに 1 行に集約されるため JOIN のコストは無視できる（20 namespace × 7 日 = 140 行程度）。`in_flight` CTE も `idx_jobs_namespace_status` インデックスを利用し、DISPATCHING/DISPATCHED ジョブ（通常 `DISPATCH_BUDGET_PER_NAMESPACE × namespace 数 × flavor 数` 以下）を効率的に集計する。
+このクエリは `idx_jobs_namespace_status` インデックスにより効率化される。`namespace_daily_usage` のウィンドウ集計はサブクエリで行い、`flavor_quotas` と JOIN して `drf_weight` を乗じた上で namespace ごとに 1 行に集約するため JOIN のコストは無視できる（20 namespace × 7 日 × 3 flavor = 420 行程度、`flavor_quotas` は 2〜5 行）。`in_flight` CTE も `idx_jobs_namespace_status` インデックスを利用し、`flavor_quotas` と JOIN して `drf_weight` を乗じる。DISPATCHING/DISPATCHED ジョブ（通常 `DISPATCH_BUDGET_PER_NAMESPACE × namespace 数 × flavor 数` 以下）を効率的に集計する。
 
 **budget の flavor 分離：** `active` CTE は `(namespace, flavor)` 単位で active ジョブ数を集計し、`queued` CTE には namespace 単位の `rn` に加えて `(namespace, flavor)` 単位の `flavor_rn` を付与する。`active` との JOIN は `(namespace, flavor)` でマッチし、WHERE 句の budget 条件には `flavor_rn` を使用する。これにより、ある flavor の active ジョブが budget を占有しても、同じ namespace の別 flavor のジョブは独立した budget で dispatch される。ラウンドロビン用の `rn` は namespace 単位のままであり、flavor 数が多い namespace がラウンドロビン枠を多く占有する問題は発生しない。
 
