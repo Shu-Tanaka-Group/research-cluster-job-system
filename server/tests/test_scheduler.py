@@ -397,48 +397,133 @@ class TestFetchDispatchableJobsLimit:
     so we mock the session and assert the bound parameters instead.
     """
 
-    def _mock_session(self, cluster_totals_row):
-        """Build a mocked Session that handles the 3 execute calls.
+    def _mock_session(self, alloc_rows, quota_rows=None):
+        """Build a mocked Session that handles the 4 execute calls.
 
         1. _cleanup_old_usage
-        2. _fetch_cluster_totals (reads .mappings().first())
-        3. main SELECT (iterated via `for row in result.mappings()`)
+        2. _fetch_cluster_totals: alloc query (reads .mappings().all())
+        3. _fetch_cluster_totals: quota query (reads .mappings().all())
+        4. main SELECT (iterated via `for row in result.mappings()`)
         """
+        if quota_rows is None:
+            quota_rows = []
+
         cleanup_result = MagicMock()
-        totals_result = MagicMock()
-        totals_result.mappings.return_value.first.return_value = cluster_totals_row
+        alloc_result = MagicMock()
+        alloc_result.mappings.return_value.all.return_value = alloc_rows
+        quota_result = MagicMock()
+        quota_result.mappings.return_value.all.return_value = quota_rows
         main_result = MagicMock()
         main_result.mappings.return_value = iter([])
 
         session = MagicMock()
-        session.execute.side_effect = [cleanup_result, totals_result, main_result]
+        session.execute.side_effect = [
+            cleanup_result, alloc_result, quota_result, main_result,
+        ]
         return session
 
     def test_fetch_limit_uses_multiplier_drf_path(self):
         """DRF-enabled branch binds fetch_limit = BATCH_SIZE * FETCH_MULTIPLIER."""
         session = self._mock_session(
-            {"total_cpu": 1000, "total_memory": 4096, "total_gpu": 0}
+            [{"flavor": "cpu", "total_cpu": 1000, "total_memory": 4096, "total_gpu": 0}],
         )
         settings = _fetch_settings(batch_size=50, fetch_multiplier=10)
 
         fetch_dispatchable_jobs(session, settings)
 
-        # The 3rd execute call is the main SELECT; its 2nd positional arg is params.
-        main_call = session.execute.call_args_list[2]
+        # The 4th execute call is the main SELECT; its 2nd positional arg is params.
+        main_call = session.execute.call_args_list[3]
         params = main_call.args[1]
         assert params["fetch_limit"] == 500
         assert "batch_size" not in params
 
     def test_fetch_limit_uses_multiplier_fallback_path(self):
         """Fallback branch (empty node_resources) also uses the multiplier."""
-        session = self._mock_session(
-            {"total_cpu": 0, "total_memory": 0, "total_gpu": 0}
-        )
+        session = self._mock_session([])
         settings = _fetch_settings(batch_size=20, fetch_multiplier=5)
 
         fetch_dispatchable_jobs(session, settings)
 
+        # alloc_rows is empty so quota query is skipped; main SELECT is 3rd call.
         main_call = session.execute.call_args_list[2]
         params = main_call.args[1]
         assert params["fetch_limit"] == 100
         assert "batch_size" not in params
+
+    def test_cluster_totals_capped_by_nominal_quota(self):
+        """DRF totals should be MIN(allocatable, nominalQuota) per flavor."""
+        # allocatable: cpu=256000m, mem=1048576MiB, gpu=0
+        # nominalQuota: cpu=128 (=128000m), mem=500Gi (=512000MiB), gpu=0
+        # expected: cpu=128000, mem=512000, gpu=0
+        session = self._mock_session(
+            [{"flavor": "cpu", "total_cpu": 256000, "total_memory": 1048576, "total_gpu": 0}],
+            [{"flavor": "cpu", "cpu": "128", "memory": "500Gi", "gpu": "0"}],
+        )
+        settings = _fetch_settings(batch_size=50, fetch_multiplier=10)
+
+        fetch_dispatchable_jobs(session, settings)
+
+        main_call = session.execute.call_args_list[3]
+        params = main_call.args[1]
+        assert params["cluster_cpu_millicores"] == 128000
+        assert params["cluster_memory_mib"] == 512000
+        assert params["cluster_gpus"] == 0
+
+    def test_cluster_totals_uses_allocatable_when_quota_larger(self):
+        """When nominalQuota > allocatable, allocatable should be used."""
+        # allocatable: cpu=64000m, mem=262144MiB, gpu=4
+        # nominalQuota: cpu=128 (=128000m), mem=500Gi (=512000MiB), gpu=8
+        # expected: cpu=64000, mem=262144, gpu=4
+        session = self._mock_session(
+            [{"flavor": "gpu", "total_cpu": 64000, "total_memory": 262144, "total_gpu": 4}],
+            [{"flavor": "gpu", "cpu": "128", "memory": "500Gi", "gpu": "8"}],
+        )
+        settings = _fetch_settings(batch_size=50, fetch_multiplier=10)
+
+        fetch_dispatchable_jobs(session, settings)
+
+        main_call = session.execute.call_args_list[3]
+        params = main_call.args[1]
+        assert params["cluster_cpu_millicores"] == 64000
+        assert params["cluster_memory_mib"] == 262144
+        assert params["cluster_gpus"] == 4
+
+    def test_cluster_totals_no_quota_uses_allocatable(self):
+        """When flavor_quotas is empty, raw allocatable totals should be used."""
+        session = self._mock_session(
+            [{"flavor": "cpu", "total_cpu": 256000, "total_memory": 1048576, "total_gpu": 0}],
+            [],  # no quota rows
+        )
+        settings = _fetch_settings(batch_size=50, fetch_multiplier=10)
+
+        fetch_dispatchable_jobs(session, settings)
+
+        main_call = session.execute.call_args_list[3]
+        params = main_call.args[1]
+        assert params["cluster_cpu_millicores"] == 256000
+        assert params["cluster_memory_mib"] == 1048576
+
+    def test_cluster_totals_multi_flavor(self):
+        """Totals should sum MIN(alloc, quota) across multiple flavors."""
+        # cpu flavor: alloc=256000, quota=200000 -> 200000
+        # gpu flavor: alloc=64000, quota=128000 -> 64000 (alloc is smaller)
+        # total: 264000
+        session = self._mock_session(
+            [
+                {"flavor": "cpu", "total_cpu": 256000, "total_memory": 1048576, "total_gpu": 0},
+                {"flavor": "gpu", "total_cpu": 64000, "total_memory": 524288, "total_gpu": 4},
+            ],
+            [
+                {"flavor": "cpu", "cpu": "200", "memory": "500Gi", "gpu": "0"},
+                {"flavor": "gpu", "cpu": "128", "memory": "1000Gi", "gpu": "4"},
+            ],
+        )
+        settings = _fetch_settings(batch_size=50, fetch_multiplier=10)
+
+        fetch_dispatchable_jobs(session, settings)
+
+        main_call = session.execute.call_args_list[3]
+        params = main_call.args[1]
+        assert params["cluster_cpu_millicores"] == 200000 + 64000
+        assert params["cluster_memory_mib"] == 512000 + 524288
+        assert params["cluster_gpus"] == 0 + 4

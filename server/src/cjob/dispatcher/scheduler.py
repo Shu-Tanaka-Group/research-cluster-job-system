@@ -25,16 +25,60 @@ def _cleanup_old_usage(session: Session, settings: Settings):
 
 
 def _fetch_cluster_totals(session: Session) -> tuple[int, int, int]:
-    """Fetch cluster resource totals from node_resources table."""
-    row = session.execute(
+    """Fetch cluster resource totals, capped by nominalQuota per flavor.
+
+    For each flavor, takes MIN(allocatable total, nominalQuota) and sums
+    across all flavors. If flavor_quotas is empty (Watcher not yet synced),
+    falls back to raw allocatable totals.
+    """
+    # Per-flavor allocatable from node_resources
+    alloc_rows = session.execute(
         text(
-            "SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu, "
-            "       COALESCE(SUM(memory_mib), 0) AS total_memory, "
-            "       COALESCE(SUM(gpu), 0) AS total_gpu "
-            "FROM node_resources"
+            "SELECT flavor, "
+            "  COALESCE(SUM(cpu_millicores), 0) AS total_cpu, "
+            "  COALESCE(SUM(memory_mib), 0) AS total_memory, "
+            "  COALESCE(SUM(gpu), 0) AS total_gpu "
+            "FROM node_resources "
+            "GROUP BY flavor"
         )
-    ).mappings().first()
-    return row["total_cpu"], row["total_memory"], row["total_gpu"]
+    ).mappings().all()
+
+    if not alloc_rows:
+        return 0, 0, 0
+
+    # Per-flavor nominalQuota from flavor_quotas
+    quota_rows = session.execute(
+        text("SELECT flavor, cpu, memory, gpu FROM flavor_quotas")
+    ).mappings().all()
+
+    quotas: dict[str, dict[str, int]] = {}
+    for row in quota_rows:
+        quotas[row["flavor"]] = {
+            "cpu": parse_cpu_millicores(row["cpu"]),
+            "mem": parse_memory_mib(row["memory"]),
+            "gpu": int(row["gpu"]),
+        }
+
+    total_cpu = 0
+    total_mem = 0
+    total_gpu = 0
+
+    for row in alloc_rows:
+        flavor = row["flavor"]
+        alloc_cpu = row["total_cpu"]
+        alloc_mem = row["total_memory"]
+        alloc_gpu = row["total_gpu"]
+
+        if flavor in quotas:
+            total_cpu += min(alloc_cpu, quotas[flavor]["cpu"])
+            total_mem += min(alloc_mem, quotas[flavor]["mem"])
+            total_gpu += min(alloc_gpu, quotas[flavor]["gpu"])
+        else:
+            total_cpu += alloc_cpu
+            total_mem += alloc_mem
+            total_gpu += alloc_gpu
+
+    return total_cpu, total_mem, total_gpu
 
 
 def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
