@@ -87,7 +87,15 @@ pub async fn run(
     scale_deployment(k8s_client, system_namespace, DEPLOYMENT_SUBMIT_API, 0).await?;
     println!("Scaled down {} to 0 replicas.", DEPLOYMENT_SUBMIT_API);
 
-    // Step 3: Update job states in DB
+    // Step 3: Scale down Dispatcher (before DB changes to prevent re-dispatch)
+    scale_deployment(k8s_client, system_namespace, DEPLOYMENT_DISPATCHER, 0).await?;
+    println!("Scaled down {} to 0 replicas.", DEPLOYMENT_DISPATCHER);
+
+    // Step 4: Scale down Watcher (before DB changes to prevent state overwrite)
+    scale_deployment(k8s_client, system_namespace, DEPLOYMENT_WATCHER, 0).await?;
+    println!("Scaled down {} to 0 replicas.", DEPLOYMENT_WATCHER);
+
+    // Step 5: Update job states in DB
     let reverted_dispatching = db_client
         .execute(
             "UPDATE jobs SET status = 'QUEUED', retry_after = NULL, retry_count = 0 \
@@ -120,20 +128,13 @@ pub async fn run(
         println!("Failed {} RUNNING job(s).", failed_running);
     }
 
-    // Step 4: Delete K8s Jobs
+    // Step 6: Delete K8s Jobs
     let deleted = delete_all_cjob_k8s_jobs(k8s_client).await?;
     if deleted > 0 {
         println!("Deleted {} K8s Job(s).", deleted);
     } else {
         println!("No K8s Jobs to delete.");
     }
-
-    // Step 5: Scale down Dispatcher and Watcher
-    scale_deployment(k8s_client, system_namespace, DEPLOYMENT_DISPATCHER, 0).await?;
-    println!("Scaled down {} to 0 replicas.", DEPLOYMENT_DISPATCHER);
-
-    scale_deployment(k8s_client, system_namespace, DEPLOYMENT_WATCHER, 0).await?;
-    println!("Scaled down {} to 0 replicas.", DEPLOYMENT_WATCHER);
 
     println!("CJob system stopped. PostgreSQL remains running.");
     Ok(())
