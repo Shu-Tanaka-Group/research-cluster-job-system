@@ -90,6 +90,7 @@ ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User P
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
 |---|---|---|---|---|---|
 | `FAIR_SHARE_WINDOW_DAYS` | ConfigMap | 7 | Dispatcher | 全体 | DRF の消費量集計に使用するスライディングウィンドウの日数。直近 N 日分の日別消費量を合計して dominant share を計算する |
+| `USAGE_RETENTION_DAYS` | ConfigMap | 7 | Dispatcher | 全体 | `namespace_daily_usage` の保持日数。`FAIR_SHARE_WINDOW_DAYS` と独立しており、DRF 以外の用途で消費量データを参照する場合に長い期間を設定できる |
 
 DRF 正規化に使用するクラスタ全体のリソース容量は、`node_resources` テーブル（[database.md](database.md) §6）から `SUM()` で動的に取得する。従来の `CLUSTER_TOTAL_CPU_MILLICORES` / `CLUSTER_TOTAL_MEMORY_MIB` / `CLUSTER_TOTAL_GPUS` は廃止された。`node_resources` の CPU・memory は DaemonSet Pod の request 分を差し引いた effective allocatable である（[watcher.md](watcher.md) §1.1 参照）。
 
