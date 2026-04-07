@@ -37,6 +37,7 @@ const CONFIG_KEYS: &[ConfigKeyMeta] = &[
     ConfigKeyMeta { key: "GAP_FILLING_ENABLED", value_type: ValueType::Boolean, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "GAP_FILLING_STALL_THRESHOLD_SEC", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "FAIR_SHARE_WINDOW_DAYS", value_type: ValueType::Integer, components: &["dispatcher", "submit-api"], updatable: true },
+    ConfigKeyMeta { key: "USAGE_RETENTION_DAYS", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "CPU_LIMIT_BUFFER_MULTIPLIER", value_type: ValueType::Float, components: &["dispatcher"], updatable: true },
     // ResourceFlavor
     ConfigKeyMeta { key: "RESOURCE_FLAVORS", value_type: ValueType::Json, components: &["dispatcher", "watcher", "submit-api"], updatable: true },

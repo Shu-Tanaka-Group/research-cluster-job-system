@@ -19,6 +19,7 @@ data:
   GAP_FILLING_ENABLED: "true"
   GAP_FILLING_STALL_THRESHOLD_SEC: "300"
   FAIR_SHARE_WINDOW_DAYS: "7"
+  USAGE_RETENTION_DAYS: "7"
   RESOURCE_FLAVORS: |
     [
       {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},

@@ -107,9 +107,11 @@ def _record_resource_usage(session: Session, job: Job):
     session.execute(
         text(
             "INSERT INTO namespace_daily_usage "
-            "(namespace, usage_date, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds) "
-            "VALUES (:namespace, CURRENT_DATE, :delta_cpu, :delta_mem, :delta_gpu) "
-            "ON CONFLICT (namespace, usage_date) DO UPDATE SET "
+            "(namespace, usage_date, flavor, "
+            "cpu_millicores_seconds, memory_mib_seconds, gpu_seconds) "
+            "VALUES (:namespace, CURRENT_DATE, :flavor, "
+            ":delta_cpu, :delta_mem, :delta_gpu) "
+            "ON CONFLICT (namespace, usage_date, flavor) DO UPDATE SET "
             "cpu_millicores_seconds = namespace_daily_usage.cpu_millicores_seconds "
             "+ :delta_cpu, "
             "memory_mib_seconds = namespace_daily_usage.memory_mib_seconds "
@@ -118,6 +120,7 @@ def _record_resource_usage(session: Session, job: Job):
         ),
         {
             "namespace": job.namespace,
+            "flavor": job.flavor,
             "delta_cpu": delta_cpu,
             "delta_mem": delta_mem,
             "delta_gpu": delta_gpu,

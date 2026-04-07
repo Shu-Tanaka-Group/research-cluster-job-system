@@ -100,6 +100,12 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: FAIR_SHARE_WINDOW_DAYS
+            - name: USAGE_RETENTION_DAYS
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: USAGE_RETENTION_DAYS
+                  optional: true
             - name: RESOURCE_FLAVORS
               valueFrom:
                 configMapKeyRef:

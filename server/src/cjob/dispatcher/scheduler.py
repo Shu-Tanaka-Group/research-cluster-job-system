@@ -13,23 +13,23 @@ logger = logging.getLogger(__name__)
 
 
 def _cleanup_old_usage(session: Session, settings: Settings):
-    """Delete namespace_daily_usage rows outside the sliding window."""
+    """Delete namespace_daily_usage rows outside the retention window."""
     session.execute(
         text(
             "DELETE FROM namespace_daily_usage "
-            "WHERE usage_date <= CURRENT_DATE - :window_days"
+            "WHERE usage_date <= CURRENT_DATE - :retention_days"
         ),
-        {"window_days": settings.FAIR_SHARE_WINDOW_DAYS},
+        {"retention_days": settings.USAGE_RETENTION_DAYS},
     )
     session.commit()
 
 
-def _fetch_cluster_totals(session: Session) -> tuple[int, int, int]:
-    """Fetch cluster resource totals, capped by nominalQuota per flavor.
+def _fetch_cluster_totals(session: Session) -> tuple[float, float, float]:
+    """Fetch cluster resource totals, capped by nominalQuota and weighted.
 
-    For each flavor, takes MIN(allocatable total, nominalQuota) and sums
-    across all flavors. If flavor_quotas is empty (Watcher not yet synced),
-    falls back to raw allocatable totals.
+    For each flavor, takes MIN(allocatable total, nominalQuota) * drf_weight
+    and sums across all flavors. If flavor_quotas is empty (Watcher not yet
+    synced), falls back to raw allocatable totals (weight 1.0).
     """
     # Per-flavor allocatable from node_resources
     alloc_rows = session.execute(
@@ -46,22 +46,23 @@ def _fetch_cluster_totals(session: Session) -> tuple[int, int, int]:
     if not alloc_rows:
         return 0, 0, 0
 
-    # Per-flavor nominalQuota from flavor_quotas
+    # Per-flavor nominalQuota and drf_weight from flavor_quotas
     quota_rows = session.execute(
-        text("SELECT flavor, cpu, memory, gpu FROM flavor_quotas")
+        text("SELECT flavor, cpu, memory, gpu, drf_weight FROM flavor_quotas")
     ).mappings().all()
 
-    quotas: dict[str, dict[str, int]] = {}
+    quotas: dict[str, dict[str, int | float]] = {}
     for row in quota_rows:
         quotas[row["flavor"]] = {
             "cpu": parse_cpu_millicores(row["cpu"]),
             "mem": parse_memory_mib(row["memory"]),
             "gpu": int(row["gpu"]),
+            "weight": float(row["drf_weight"]),
         }
 
-    total_cpu = 0
-    total_mem = 0
-    total_gpu = 0
+    total_cpu = 0.0
+    total_mem = 0.0
+    total_gpu = 0.0
 
     for row in alloc_rows:
         flavor = row["flavor"]
@@ -70,9 +71,10 @@ def _fetch_cluster_totals(session: Session) -> tuple[int, int, int]:
         alloc_gpu = row["total_gpu"]
 
         if flavor in quotas:
-            total_cpu += min(alloc_cpu, quotas[flavor]["cpu"])
-            total_mem += min(alloc_mem, quotas[flavor]["mem"])
-            total_gpu += min(alloc_gpu, quotas[flavor]["gpu"])
+            weight = quotas[flavor]["weight"]
+            total_cpu += min(alloc_cpu, quotas[flavor]["cpu"]) * weight
+            total_mem += min(alloc_mem, quotas[flavor]["mem"]) * weight
+            total_gpu += min(alloc_gpu, quotas[flavor]["gpu"]) * weight
         else:
             total_cpu += alloc_cpu
             total_mem += alloc_mem
@@ -156,28 +158,33 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
                 "    AND (retry_after IS NULL OR retry_after <= NOW())"
                 "), "
                 "usage AS ("
-                "  SELECT namespace,"
-                "    SUM(cpu_millicores_seconds) AS cpu_millicores_seconds,"
-                "    SUM(memory_mib_seconds) AS memory_mib_seconds,"
-                "    SUM(gpu_seconds) AS gpu_seconds"
-                "  FROM namespace_daily_usage"
-                "  WHERE usage_date > CURRENT_DATE - :window_days"
-                "  GROUP BY namespace"
+                "  SELECT u.namespace,"
+                "    SUM(u.cpu_millicores_seconds * COALESCE(fq.drf_weight, 1)) AS cpu_millicores_seconds,"
+                "    SUM(u.memory_mib_seconds * COALESCE(fq.drf_weight, 1)) AS memory_mib_seconds,"
+                "    SUM(u.gpu_seconds * COALESCE(fq.drf_weight, 1)) AS gpu_seconds"
+                "  FROM namespace_daily_usage u"
+                "  LEFT JOIN flavor_quotas fq ON u.flavor = fq.flavor"
+                "  WHERE u.usage_date > CURRENT_DATE - :window_days"
+                "  GROUP BY u.namespace"
                 "), "
                 "in_flight AS ("
-                "  SELECT namespace,"
-                "    SUM(time_limit_seconds * cpu_millicores"
-                "        * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END"
+                "  SELECT j.namespace,"
+                "    SUM(j.time_limit_seconds * j.cpu_millicores"
+                "        * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END"
+                "        * COALESCE(fq2.drf_weight, 1)"
                 "    ) AS cpu_millicores_seconds,"
-                "    SUM(time_limit_seconds * memory_mib"
-                "        * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END"
+                "    SUM(j.time_limit_seconds * j.memory_mib"
+                "        * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END"
+                "        * COALESCE(fq2.drf_weight, 1)"
                 "    ) AS memory_mib_seconds,"
-                "    SUM(time_limit_seconds * gpu"
-                "        * CASE WHEN completions IS NOT NULL THEN parallelism ELSE 1 END"
+                "    SUM(j.time_limit_seconds * j.gpu"
+                "        * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END"
+                "        * COALESCE(fq2.drf_weight, 1)"
                 "    ) AS gpu_seconds"
-                "  FROM jobs"
-                "  WHERE status IN ('DISPATCHING', 'DISPATCHED')"
-                "  GROUP BY namespace"
+                "  FROM jobs j"
+                "  LEFT JOIN flavor_quotas fq2 ON j.flavor = fq2.flavor"
+                "  WHERE j.status IN ('DISPATCHING', 'DISPATCHED')"
+                "  GROUP BY j.namespace"
                 ") "
                 "SELECT q.* FROM queued q"
                 "  LEFT JOIN active a"

@@ -162,10 +162,11 @@ user-charlie   -                 -                    -                 -       
 
 | コマンド | 概要 | 対象 |
 |---|---|---|
-| `cjobctl cluster resources` | ノードごとの allocatable、クラスタ合計、ノード最大値（リジェクト閾値）を表示 | DB: `node_resources` |
+| `cjobctl cluster resources` | ノードごとの allocatable、クラスタ合計、ノード最大値（リジェクト閾値）を表示 | DB: `node_resources`, `flavor_quotas` |
 | `cjobctl cluster flavor-usage` | ResourceFlavor ごとのリソース使用率を表示 | K8s: ClusterQueue |
 | `cjobctl cluster show-quota` | ClusterQueue の nominalQuota を ResourceFlavor ごとに表示 | K8s: ClusterQueue |
 | `cjobctl cluster set-quota --flavor <name> [--cpu <n>] [--memory <s>] [--gpu <n>] [--force]` | 指定 ResourceFlavor の nominalQuota を更新 | DB + K8s: ClusterQueue |
+| `cjobctl cluster set-drf-weight <flavor> <weight>` | 指定 flavor の DRF weight を設定 | DB: `flavor_quotas` |
 
 #### `cjobctl cluster resources`
 
@@ -184,9 +185,9 @@ Memory: 640.0 GiB (655360 MiB)
 GPU:    4
 
 === Per-Flavor Totals (set-quota reference) ===
-FLAVOR      CPU (cores)   Memory (GiB)   GPU
-cpu              128         512.0          0
-gpu-a100          32         128.0          4
+FLAVOR      CPU (cores)   Memory (GiB)   GPU   DRF Weight
+cpu              128         512.0          0   1.0
+gpu-a100          32         128.0          4   2.0
 
 === Per-Flavor Max Node Allocatable ===
 FLAVOR      CPU (cores)   Memory (GiB)   GPU
@@ -194,7 +195,7 @@ cpu               64         256.0          0
 gpu-a100          32         128.0          4
 ```
 
-`Per-Flavor Totals` は `cjobctl cluster set-quota` のバリデーションが使用する値と一致する。CPU は各ノードの `cpu_millicores` を整数コアに切り下げてから合算（bin-packing 考慮）し、memory/GPU は単純合算。一方 `Cluster Totals (for DRF normalization)` は Dispatcher の DRF 正規化に使う cluster-wide の effective allocatable 合計（切り下げなし）を示す。
+`Per-Flavor Totals` は `cjobctl cluster set-quota` のバリデーションが使用する値と一致する。CPU は各ノードの `cpu_millicores` を整数コアに切り下げてから合算（bin-packing 考慮）し、memory/GPU は単純合算。一方 `Cluster Totals (for DRF normalization)` は Dispatcher の DRF 正規化に使う cluster-wide の effective allocatable 合計（切り下げなし）を示す。`DRF Weight` は `cjobctl cluster set-drf-weight` で設定した値を表示する。
 
 #### `cjobctl cluster flavor-usage`
 
@@ -248,6 +249,19 @@ cjobctl cluster set-quota --flavor gpu-a100 --gpu 4
 指定値は `node_resources` テーブルの allocatable 合計（指定 flavor のノードのみ）と比較してバリデーションされる。allocatable を超過する場合はエラーとなるが、`--force` で上書き可能。`--flavor` に指定する名前は Kueue ResourceFlavor の `metadata.name` と一致させる（DB の `node_resources.flavor` 列の値とも統一されている）。
 
 CPU の allocatable 合計は、ノードごとの `cpu_millicores` を整数コアに切り下げてから合算する（`SUM((cpu_millicores / 1000) * 1000)`）。これは、各ノードの端数コア（例: DaemonSet Pod 差し引き後の 0.633 cores の余剰）が整数コアジョブの bin-packing 制約上使用できないため、nominalQuota は「各ノードの整数コア部分の合計」以下に抑える必要があるという考え方に基づく。メモリと GPU は切り下げず単純合算する。
+
+#### `cjobctl cluster set-drf-weight`
+
+指定 flavor の DRF weight を設定する。DRF 計算時に消費量と容量の両方にこの weight が乗じられる。GPU など貴重なリソースに大きい値（例: 2.0）、低スペック flavor に小さい値（例: 0.5）を設定する。デフォルトは 1.0。
+
+```bash
+cjobctl cluster set-drf-weight gpu-a100 2.0
+cjobctl cluster set-drf-weight cpu-slow 0.5
+# デフォルトに戻す場合
+cjobctl cluster set-drf-weight gpu-a100 1.0
+```
+
+weight は 0 より大きい値でなければならない。指定 flavor が `flavor_quotas` テーブルに存在しない場合はエラーとなる（Watcher が ClusterQueue を同期済みである必要がある）。
 
 ### 5.5 K8s 状態確認
 
@@ -322,6 +336,7 @@ CLI 側で以下のバリデーションを行う:
 | `GAP_FILLING_ENABLED` | bool | dispatcher |
 | `GAP_FILLING_STALL_THRESHOLD_SEC` | int | dispatcher |
 | `FAIR_SHARE_WINDOW_DAYS` | int | dispatcher, submit-api |
+| `USAGE_RETENTION_DAYS` | int | dispatcher |
 | `CPU_LIMIT_BUFFER_MULTIPLIER` | float | dispatcher |
 | `RESOURCE_FLAVORS` | json | dispatcher, watcher, submit-api |
 | `DEFAULT_FLAVOR` | string | submit-api |
