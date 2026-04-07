@@ -689,10 +689,14 @@ def get_usage(session: Session, namespace: str) -> UsageResponse:
 
     result = session.execute(
         text(
-            "SELECT usage_date, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds "
+            "SELECT usage_date, "
+            "  SUM(cpu_millicores_seconds) AS cpu_millicores_seconds, "
+            "  SUM(memory_mib_seconds) AS memory_mib_seconds, "
+            "  SUM(gpu_seconds) AS gpu_seconds "
             "FROM namespace_daily_usage "
             "WHERE namespace = :namespace "
             "  AND usage_date > CURRENT_DATE - :window_days "
+            "GROUP BY usage_date "
             "ORDER BY usage_date ASC"
         ),
         {"namespace": namespace, "window_days": window_days},

@@ -1,5 +1,5 @@
 import json
-from functools import lru_cache
+from functools import cached_property, lru_cache
 
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # Logging
     LOG_LEVEL: str = "INFO"
 
-    @property
+    @cached_property
     def flavors(self) -> list[FlavorDefinition]:
         return [FlavorDefinition(**item) for item in json.loads(self.RESOURCE_FLAVORS)]
 

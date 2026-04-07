@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 
 from cjob.metrics import JOBS_COMPLETED_TOTAL
 from cjob.models import Job, JobEvent
-from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 
 logger = logging.getLogger(__name__)
 
@@ -100,8 +99,8 @@ def _merge_node_names(existing: str | None, new_names: list[str]) -> str | None:
 def _record_resource_usage(session: Session, job: Job):
     """Add resource usage to namespace_daily_usage on RUNNING transition."""
     parallelism = job.parallelism if job.completions is not None else 1
-    delta_cpu = job.time_limit_seconds * parse_cpu_millicores(job.cpu) * parallelism
-    delta_mem = job.time_limit_seconds * parse_memory_mib(job.memory) * parallelism
+    delta_cpu = job.time_limit_seconds * job.cpu_millicores * parallelism
+    delta_mem = job.time_limit_seconds * job.memory_mib * parallelism
     delta_gpu = job.time_limit_seconds * job.gpu * parallelism
 
     session.execute(

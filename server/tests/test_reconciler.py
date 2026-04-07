@@ -47,6 +47,8 @@ def _insert_job(session, job_id, status="DISPATCHED", namespace=NS, user="alice"
         time_limit_seconds=86400,
         status=status,
         log_dir=f"/home/jovyan/.cjob/logs/{job_id}",
+        cpu_millicores=1000,
+        memory_mib=1024,
     )
     defaults.update(kwargs)
     job = Job(**defaults)
@@ -380,7 +382,8 @@ class TestReconcileResourceUsage:
 
     def test_running_transition_records_usage(self, mock_delete, mock_fetch_nodes, db_session):
         _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
-                     gpu=0, time_limit_seconds=3600)
+                     gpu=0, time_limit_seconds=3600,
+                     cpu_millicores=2000, memory_mib=4096)
         k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
 
         reconcile_cycle(db_session, k8s_jobs)
@@ -393,9 +396,11 @@ class TestReconcileResourceUsage:
 
     def test_second_running_accumulates_usage(self, mock_delete, mock_fetch_nodes, db_session):
         _insert_job(db_session, 1, status="DISPATCHED", cpu="1", memory="1Gi",
-                     time_limit_seconds=100)
+                     time_limit_seconds=100,
+                     cpu_millicores=1000, memory_mib=1024)
         _insert_job(db_session, 2, status="DISPATCHED", cpu="2", memory="2Gi",
-                     time_limit_seconds=200)
+                     time_limit_seconds=200,
+                     cpu_millicores=2000, memory_mib=2048)
         k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
 
         reconcile_cycle(db_session, k8s_jobs)
@@ -430,7 +435,8 @@ class TestReconcileResourceUsage:
     def test_usage_recorded_with_flavor(self, mock_delete, mock_fetch_nodes, db_session):
         """Usage should be recorded per flavor."""
         _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
-                     gpu=0, time_limit_seconds=3600, flavor="gpu-a100")
+                     gpu=0, time_limit_seconds=3600, flavor="gpu-a100",
+                     cpu_millicores=2000, memory_mib=4096)
         k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
 
         reconcile_cycle(db_session, k8s_jobs)
@@ -442,9 +448,11 @@ class TestReconcileResourceUsage:
     def test_different_flavors_separate_rows(self, mock_delete, mock_fetch_nodes, db_session):
         """Jobs with different flavors should create separate usage rows."""
         _insert_job(db_session, 1, status="DISPATCHED", cpu="1", memory="1Gi",
-                     time_limit_seconds=100, flavor="cpu")
+                     time_limit_seconds=100, flavor="cpu",
+                     cpu_millicores=1000, memory_mib=1024)
         _insert_job(db_session, 2, status="DISPATCHED", cpu="2", memory="2Gi",
-                     time_limit_seconds=200, flavor="gpu-a100")
+                     time_limit_seconds=200, flavor="gpu-a100",
+                     cpu_millicores=2000, memory_mib=2048)
         k8s_jobs = [
             _make_k8s_job(NS, 1, "cjob-alice-1", active=1),
             _make_k8s_job(NS, 2, "cjob-alice-2", active=1),
@@ -462,7 +470,8 @@ class TestReconcileResourceUsage:
         _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
                      gpu=0, time_limit_seconds=3600,
                      completions=100, parallelism=10,
-                     succeeded_count=0, failed_count=0)
+                     succeeded_count=0, failed_count=0,
+                     cpu_millicores=2000, memory_mib=4096)
         k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=10)]
 
         reconcile_cycle(db_session, k8s_jobs)
