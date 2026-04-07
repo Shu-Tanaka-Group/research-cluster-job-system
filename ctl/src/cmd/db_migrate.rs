@@ -53,12 +53,33 @@ pub async fn migrate(client: &Client) -> Result<()> {
             updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW() \
         ); \
         ALTER TABLE namespace_resource_quotas ADD COLUMN IF NOT EXISTS hard_count INTEGER; \
-        ALTER TABLE namespace_resource_quotas ADD COLUMN IF NOT EXISTS used_count INTEGER;";
+        ALTER TABLE namespace_resource_quotas ADD COLUMN IF NOT EXISTS used_count INTEGER; \
+        ALTER TABLE flavor_quotas ADD COLUMN IF NOT EXISTS drf_weight REAL NOT NULL DEFAULT 1.0; \
+        ALTER TABLE namespace_daily_usage ADD COLUMN IF NOT EXISTS flavor TEXT NOT NULL DEFAULT 'cpu';";
 
     client
         .batch_execute(ddl)
         .await
         .context("Failed to run schema migration")?;
+
+    // Change namespace_daily_usage PK to include flavor (idempotent)
+    let pk_migration = "\
+        DO $$ \
+        BEGIN \
+          IF NOT EXISTS ( \
+            SELECT 1 FROM pg_constraint c \
+            JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = ANY(c.conkey) \
+            WHERE c.conname = 'namespace_daily_usage_pkey' AND a.attname = 'flavor' \
+          ) THEN \
+            ALTER TABLE namespace_daily_usage DROP CONSTRAINT namespace_daily_usage_pkey; \
+            ALTER TABLE namespace_daily_usage ADD PRIMARY KEY (namespace, usage_date, flavor); \
+          END IF; \
+        END $$;";
+
+    client
+        .batch_execute(pk_migration)
+        .await
+        .context("Failed to migrate namespace_daily_usage PK")?;
 
     // Backfill cpu_millicores from cpu string column
     let backfill_cpu = "\

@@ -4,6 +4,7 @@ from sqlalchemy import (
     BigInteger,
     Date,
     DateTime,
+    Float,
     ForeignKeyConstraint,
     Index,
     Integer,
@@ -81,6 +82,7 @@ class NamespaceDailyUsage(Base):
 
     namespace: Mapped[str] = mapped_column(String, primary_key=True)
     usage_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    flavor: Mapped[str] = mapped_column(String, primary_key=True, server_default="cpu")
     cpu_millicores_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     memory_mib_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
     gpu_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
@@ -106,6 +108,7 @@ class FlavorQuota(Base):
     cpu: Mapped[str] = mapped_column(String, nullable=False)
     memory: Mapped[str] = mapped_column(String, nullable=False)
     gpu: Mapped[str] = mapped_column(String, nullable=False, server_default="0")
+    drf_weight: Mapped[float] = mapped_column(Float, nullable=False, server_default="1.0")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
