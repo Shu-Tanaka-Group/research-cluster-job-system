@@ -24,12 +24,15 @@ def _cleanup_old_usage(session: Session, settings: Settings):
     session.commit()
 
 
-def _fetch_cluster_totals(session: Session) -> tuple[float, float, float]:
-    """Fetch cluster resource totals, capped by nominalQuota and weighted.
+def _fetch_flavor_caps(
+    session: Session,
+) -> dict[str, dict[str, float]]:
+    """Fetch per-flavor capacity and DRF weight.
 
-    For each flavor, takes MIN(allocatable total, nominalQuota) * drf_weight
-    and sums across all flavors. If flavor_quotas is empty (Watcher not yet
-    synced), falls back to raw allocatable totals (weight 1.0).
+    For each flavor, takes MIN(allocatable total, nominalQuota) as capacity
+    and stores drf_weight separately.  If flavor_quotas is empty (Watcher not
+    yet synced), falls back to raw allocatable totals with weight 1.0.
+    Returns empty dict when node_resources is empty (DRF disabled).
     """
     # Per-flavor allocatable from node_resources
     alloc_rows = session.execute(
@@ -44,7 +47,7 @@ def _fetch_cluster_totals(session: Session) -> tuple[float, float, float]:
     ).mappings().all()
 
     if not alloc_rows:
-        return 0, 0, 0
+        return {}
 
     # Per-flavor nominalQuota and drf_weight from flavor_quotas
     quota_rows = session.execute(
@@ -60,10 +63,7 @@ def _fetch_cluster_totals(session: Session) -> tuple[float, float, float]:
             "weight": float(row["drf_weight"]),
         }
 
-    total_cpu = 0.0
-    total_mem = 0.0
-    total_gpu = 0.0
-
+    caps: dict[str, dict[str, float]] = {}
     for row in alloc_rows:
         flavor = row["flavor"]
         alloc_cpu = row["total_cpu"]
@@ -71,16 +71,21 @@ def _fetch_cluster_totals(session: Session) -> tuple[float, float, float]:
         alloc_gpu = row["total_gpu"]
 
         if flavor in quotas:
-            weight = quotas[flavor]["weight"]
-            total_cpu += min(alloc_cpu, quotas[flavor]["cpu"]) * weight
-            total_mem += min(alloc_mem, quotas[flavor]["mem"]) * weight
-            total_gpu += min(alloc_gpu, quotas[flavor]["gpu"]) * weight
+            caps[flavor] = {
+                "cpu": float(min(alloc_cpu, quotas[flavor]["cpu"])),
+                "mem": float(min(alloc_mem, quotas[flavor]["mem"])),
+                "gpu": float(min(alloc_gpu, quotas[flavor]["gpu"])),
+                "weight": quotas[flavor]["weight"],
+            }
         else:
-            total_cpu += alloc_cpu
-            total_mem += alloc_mem
-            total_gpu += alloc_gpu
+            caps[flavor] = {
+                "cpu": float(alloc_cpu),
+                "mem": float(alloc_mem),
+                "gpu": float(alloc_gpu),
+                "weight": 1.0,
+            }
 
-    return total_cpu, total_mem, total_gpu
+    return caps
 
 
 def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
@@ -91,11 +96,11 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
     """
     _cleanup_old_usage(session, settings)
 
-    cluster_cpu, cluster_mem, cluster_gpus = _fetch_cluster_totals(session)
+    flavor_caps = _fetch_flavor_caps(session)
 
     # If node_resources is empty (Watcher not yet running), fall back to
     # simple namespace-name ordering without DRF.
-    if cluster_cpu == 0 and cluster_mem == 0:
+    if not flavor_caps:
         logger.debug("node_resources is empty; DRF disabled, using namespace order")
         result = session.execute(
             text(
@@ -137,9 +142,32 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
             },
         )
     else:
+        # Build VALUES clause for per-flavor capacities
+        values_parts = []
+        params: dict = {
+            "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
+            "fetch_limit": (
+                settings.DISPATCH_BATCH_SIZE * settings.DISPATCH_FETCH_MULTIPLIER
+            ),
+            "round_size": settings.DISPATCH_ROUND_SIZE,
+            "window_days": settings.FAIR_SHARE_WINDOW_DAYS,
+        }
+        for i, (flavor, cap) in enumerate(flavor_caps.items()):
+            cast = "::TEXT, :cpu_{0}::FLOAT, :mem_{0}::FLOAT, :gpu_{0}::FLOAT, :w_{0}::FLOAT".format(i) if i == 0 else ", :cpu_{0}, :mem_{0}, :gpu_{0}, :w_{0}".format(i)
+            values_parts.append(f"(:f_{i}{cast})")
+            params[f"f_{i}"] = flavor
+            params[f"cpu_{i}"] = cap["cpu"]
+            params[f"mem_{i}"] = cap["mem"]
+            params[f"gpu_{i}"] = cap["gpu"]
+            params[f"w_{i}"] = cap["weight"]
+        values_sql = ", ".join(values_parts)
+
         result = session.execute(
             text(
-                "WITH active AS ("
+                f"WITH flavor_caps(flavor, cap_cpu, cap_mem, cap_gpu, w) AS ("
+                f"  VALUES {values_sql}"
+                f"), "
+                "active AS ("
                 "  SELECT namespace, flavor, COUNT(*) AS active_count"
                 "  FROM jobs"
                 "  WHERE status IN ('DISPATCHING', 'DISPATCHED', 'RUNNING')"
@@ -158,63 +186,66 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
                 "    AND (retry_after IS NULL OR retry_after <= NOW())"
                 "), "
                 "usage AS ("
-                "  SELECT u.namespace,"
-                "    SUM(u.cpu_millicores_seconds * COALESCE(fq.drf_weight, 1)) AS cpu_millicores_seconds,"
-                "    SUM(u.memory_mib_seconds * COALESCE(fq.drf_weight, 1)) AS memory_mib_seconds,"
-                "    SUM(u.gpu_seconds * COALESCE(fq.drf_weight, 1)) AS gpu_seconds"
+                "  SELECT u.namespace, u.flavor,"
+                "    SUM(u.cpu_millicores_seconds) AS cpu_ms,"
+                "    SUM(u.memory_mib_seconds) AS mem_ms,"
+                "    SUM(u.gpu_seconds) AS gpu_s"
                 "  FROM namespace_daily_usage u"
-                "  LEFT JOIN flavor_quotas fq ON u.flavor = fq.flavor"
                 "  WHERE u.usage_date > CURRENT_DATE - :window_days"
-                "  GROUP BY u.namespace"
+                "  GROUP BY u.namespace, u.flavor"
                 "), "
                 "in_flight AS ("
-                "  SELECT j.namespace,"
+                "  SELECT j.namespace, j.flavor,"
                 "    SUM(j.time_limit_seconds * j.cpu_millicores"
                 "        * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END"
-                "        * COALESCE(fq2.drf_weight, 1)"
-                "    ) AS cpu_millicores_seconds,"
+                "    ) AS cpu_ms,"
                 "    SUM(j.time_limit_seconds * j.memory_mib"
                 "        * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END"
-                "        * COALESCE(fq2.drf_weight, 1)"
-                "    ) AS memory_mib_seconds,"
+                "    ) AS mem_ms,"
                 "    SUM(j.time_limit_seconds * j.gpu"
                 "        * CASE WHEN j.completions IS NOT NULL THEN j.parallelism ELSE 1 END"
-                "        * COALESCE(fq2.drf_weight, 1)"
-                "    ) AS gpu_seconds"
+                "    ) AS gpu_s"
                 "  FROM jobs j"
-                "  LEFT JOIN flavor_quotas fq2 ON j.flavor = fq2.flavor"
                 "  WHERE j.status IN ('DISPATCHING', 'DISPATCHED')"
-                "  GROUP BY j.namespace"
+                "  GROUP BY j.namespace, j.flavor"
+                "), "
+                "drf_scores AS ("
+                "  SELECT nfc.namespace,"
+                "    SUM("
+                "      GREATEST("
+                "        nfc.total_cpu / fc.cap_cpu,"
+                "        nfc.total_mem / fc.cap_mem,"
+                "        nfc.total_gpu / NULLIF(fc.cap_gpu, 0)"
+                "      ) * fc.w"
+                "    ) AS drf_score"
+                "  FROM ("
+                "    SELECT COALESCE(u.namespace, inf.namespace) AS namespace,"
+                "           COALESCE(u.flavor, inf.flavor) AS flavor,"
+                "           COALESCE(u.cpu_ms, 0) + COALESCE(inf.cpu_ms, 0) AS total_cpu,"
+                "           COALESCE(u.mem_ms, 0) + COALESCE(inf.mem_ms, 0) AS total_mem,"
+                "           COALESCE(u.gpu_s, 0) + COALESCE(inf.gpu_s, 0) AS total_gpu"
+                "    FROM usage u"
+                "    FULL OUTER JOIN in_flight inf"
+                "      ON u.namespace = inf.namespace AND u.flavor = inf.flavor"
+                "  ) nfc"
+                "  JOIN flavor_caps fc ON nfc.flavor = fc.flavor"
+                "  GROUP BY nfc.namespace"
                 ") "
                 "SELECT q.* FROM queued q"
                 "  LEFT JOIN active a"
                 "    ON q.namespace = a.namespace AND q.flavor = a.flavor"
-                "  LEFT JOIN usage u ON q.namespace = u.namespace"
-                "  LEFT JOIN in_flight inf ON q.namespace = inf.namespace"
+                "  LEFT JOIN drf_scores d ON q.namespace = d.namespace"
                 "  LEFT JOIN namespace_weights w ON q.namespace = w.namespace "
                 "WHERE COALESCE(a.active_count, 0) < :dispatch_limit "
                 "  AND q.flavor_rn <= :dispatch_limit - COALESCE(a.active_count, 0) "
                 "  AND COALESCE(w.weight, 1) > 0 "
                 "ORDER BY CEIL(q.rn * 1.0 / :round_size) ASC, "
-                "  GREATEST("
-                "    (COALESCE(u.cpu_millicores_seconds, 0) + COALESCE(inf.cpu_millicores_seconds, 0)) * 1.0 / :cluster_cpu_millicores,"
-                "    (COALESCE(u.memory_mib_seconds, 0) + COALESCE(inf.memory_mib_seconds, 0)) * 1.0 / :cluster_memory_mib,"
-                "    (COALESCE(u.gpu_seconds, 0) + COALESCE(inf.gpu_seconds, 0)) * 1.0 / NULLIF(:cluster_gpus, 0)"
-                "  ) / COALESCE(w.weight, 1) ASC NULLS FIRST, "
+                "  COALESCE(d.drf_score, 0)"
+                "    / COALESCE(w.weight, 1) ASC NULLS FIRST, "
                 "  q.namespace ASC "
                 "LIMIT :fetch_limit"
             ),
-            {
-                "dispatch_limit": settings.DISPATCH_BUDGET_PER_NAMESPACE,
-                "fetch_limit": (
-                    settings.DISPATCH_BATCH_SIZE * settings.DISPATCH_FETCH_MULTIPLIER
-                ),
-                "round_size": settings.DISPATCH_ROUND_SIZE,
-                "window_days": settings.FAIR_SHARE_WINDOW_DAYS,
-                "cluster_cpu_millicores": cluster_cpu,
-                "cluster_memory_mib": cluster_mem,
-                "cluster_gpus": cluster_gpus,
-            },
+            params,
         )
 
     jobs = []
