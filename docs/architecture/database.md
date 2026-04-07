@@ -237,14 +237,22 @@ FROM node_resources
 WHERE flavor = :flavor;
 ```
 
-**Dispatcher（DRF 正規化）**: クラスタ全体のリソース合計を取得する。従来 ConfigMap で手動設定していた `CLUSTER_TOTAL_CPU_MILLICORES` / `CLUSTER_TOTAL_MEMORY_MIB` / `CLUSTER_TOTAL_GPUS` の代わりに使用する。
+**Dispatcher（DRF 正規化）**: flavor ごとの allocatable 合計を取得し、`flavor_quotas` テーブル（§7）の nominalQuota と比較して `MIN(allocatable, nominalQuota)` を全 flavor で合算する。これにより、nominalQuota が allocatable より小さい場合に、実際に使用可能なリソース量で正規化される。`flavor_quotas` が空の場合は allocatable 合計をそのまま使用し、`flavor_quotas` に存在しない flavor は quota 制約なしとして allocatable をそのまま加算する。
 
 ```sql
-SELECT COALESCE(SUM(cpu_millicores), 0) AS total_cpu,
+-- flavor ごとの allocatable 合計
+SELECT flavor,
+       COALESCE(SUM(cpu_millicores), 0) AS total_cpu,
        COALESCE(SUM(memory_mib), 0) AS total_memory,
        COALESCE(SUM(gpu), 0) AS total_gpu
-FROM node_resources;
+FROM node_resources
+GROUP BY flavor;
+
+-- nominalQuota（§7.2 と同じクエリ）
+SELECT flavor, cpu, memory, gpu FROM flavor_quotas;
 ```
+
+Python 側で flavor ごとに `MIN(allocatable, nominalQuota)` を計算し、全 flavor で合算する。nominalQuota の TEXT 値は `parse_cpu_millicores()` / `parse_memory_mib()` でパースする。
 
 **cjobctl（flavor 別 allocatable 合計）**: `set-quota` のバリデーションで、指定 flavor に対応するノード群の allocatable 合計を取得する。flavor 名は Kueue ResourceFlavor 名と統一されているため、変換処理なしでそのままクエリに使用する。
 
