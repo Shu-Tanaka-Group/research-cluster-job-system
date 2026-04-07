@@ -393,6 +393,7 @@ Resource Usage (past 7 days)
 
 - CPU は core·h（コア時間）、メモリは GiB·h（ギビバイト時間）の単位で表示されます
 - GPU を使用している場合は GPU 列（GPU·h）も表示されます
+- 複数の flavor（CPU ノードと GPU ノードなど）を使用している場合、各日の値は全 flavor の合計です
 - リソース消費量はジョブが実行状態になった時点で、`--time-limit` の値をもとに計上されます
 
 ## 7. ユーザー設定の管理（`cjob config`）

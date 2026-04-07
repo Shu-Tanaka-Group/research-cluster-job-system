@@ -28,16 +28,18 @@
 - コンテナイメージ名取得（`CJOB_IMAGE` 環境変数から取得、未設定時は `JUPYTER_IMAGE` にフォールバック）
 - コマンド文字列の保存
 - ユーザー namespace 解決（ServiceAccount の namespace ファイルから取得）
-- namespace ごとのジョブ総数上限チェック（QUEUED / DISPATCHING / DISPATCHED / RUNNING / HELD / CANCELLED の合計）
+- namespace ごとのジョブ総数上限チェック（QUEUED / DISPATCHING / DISPATCHED / HELD / CANCELLED の合計。RUNNING は `DISPATCH_BUDGET_PER_NAMESPACE` で制限されるためカウント対象外）
 - ジョブ ID 発行
 - 内部 DB へのジョブ登録（QUEUED 状態で保存）
 
 ### 1.3 Dispatcher 機能
 
 - 定期的に DB をスキャンして QUEUED ジョブを取得
-- dispatch budget の計算
-- namespace 間の公平なスケジューリング（各 namespace の最古の QUEUED ジョブを優先）
-- Kubernetes Job 生成
+- `(namespace, flavor)` 単位の dispatch budget 計算
+- DRF（Dominant Resource Fairness）による namespace 間の公平なスケジューリング（消費量ベースの優先制御 + ラウンドロビン）
+- 隙間充填（gap filling）による大型ジョブ待機中の小型ジョブ dispatch
+- ResourceQuota プレチェックによる dispatch 前のクォータ確認
+- Kubernetes Job 生成（flavor の `label_selector` に基づく `nodeSelector` 設定を含む）
 - Job 作成成功・失敗時の DB 状態更新
 - K8s 一時障害時の遅延再試行（`retry_after` タイムスタンプで管理）
 - 起動時の DISPATCHING 状態リセット
