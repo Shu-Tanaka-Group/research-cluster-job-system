@@ -153,8 +153,16 @@ def fetch_dispatchable_jobs(session: Session, settings: Settings) -> list[Job]:
             "window_days": settings.FAIR_SHARE_WINDOW_DAYS,
         }
         for i, (flavor, cap) in enumerate(flavor_caps.items()):
-            cast = "::TEXT, :cpu_{0}::FLOAT, :mem_{0}::FLOAT, :gpu_{0}::FLOAT, :w_{0}::FLOAT".format(i) if i == 0 else ", :cpu_{0}, :mem_{0}, :gpu_{0}, :w_{0}".format(i)
-            values_parts.append(f"(:f_{i}{cast})")
+            if i == 0:
+                # First row needs explicit CAST to define column types
+                row = (
+                    f"(CAST(:f_{i} AS TEXT), CAST(:cpu_{i} AS FLOAT),"
+                    f" CAST(:mem_{i} AS FLOAT), CAST(:gpu_{i} AS FLOAT),"
+                    f" CAST(:w_{i} AS FLOAT))"
+                )
+            else:
+                row = f"(:f_{i}, :cpu_{i}, :mem_{i}, :gpu_{i}, :w_{i})"
+            values_parts.append(row)
             params[f"f_{i}"] = flavor
             params[f"cpu_{i}"] = cap["cpu"]
             params[f"mem_{i}"] = cap["mem"]
