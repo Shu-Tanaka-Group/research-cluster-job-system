@@ -228,6 +228,7 @@ CLI が受け付ける `_INDEX_` プレースホルダーは CLI クライアン
 | パラメータ | 型 | 省略時の挙動 |
 |---|---|---|
 | `status` | 文字列（任意） | 全ステータスを返す |
+| `flavor` | 文字列（任意） | 全 flavor を返す |
 | `time_limit_ge` | 整数（任意、秒） | フィルタしない |
 | `time_limit_lt` | 整数（任意、秒） | フィルタしない |
 | `limit` | 整数（任意） | 全件返す（注: CLI はデフォルトで `limit=50` を送信する。API を直接利用する場合は適切な `limit` の指定を推奨） |
@@ -242,6 +243,7 @@ GET /v1/jobs
 GET /v1/jobs?status=RUNNING
 GET /v1/jobs?status=FAILED&limit=10
 GET /v1/jobs?limit=50&order=desc
+GET /v1/jobs?flavor=gpu-a100
 GET /v1/jobs?status=QUEUED&time_limit_ge=21600
 GET /v1/jobs?time_limit_lt=43200
 GET /v1/jobs?time_limit_ge=21600&time_limit_lt=43200
@@ -255,6 +257,7 @@ GET /v1/jobs?time_limit_ge=21600&time_limit_lt=43200
     {
       "job_id": 1,
       "status": "RUNNING",
+      "flavor": "cpu",
       "command": "python main.py --alpha 0.1 --beta 16",
       "created_at": "2026-03-23T12:34:56Z",
       "finished_at": null,
