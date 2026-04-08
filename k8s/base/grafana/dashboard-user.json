@@ -130,7 +130,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
+        "w": 5,
         "x": 0,
         "y": 1
       },
@@ -196,8 +196,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 6,
+        "w": 5,
+        "x": 10,
         "y": 1
       },
       "id": 2,
@@ -224,6 +224,72 @@
         }
       ],
       "title": "GPU 予約率",
+      "type": "gauge"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "CPU Sub フレーバーの予約率（ジョブが要求しているリソースの合計 / クォータ上限）。実際の消費量とは異なります。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.6
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
+            ]
+          },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 5,
+        "y": 1
+      },
+      "id": 22,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "targets": [
+        {
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-sub\", resource=\"cpu\"}\n/\nkueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-sub\", resource=\"cpu\"}",
+          "legendFormat": "CPU Sub 予約率",
+          "refId": "A"
+        }
+      ],
+      "title": "CPU Sub 予約率",
       "type": "gauge"
     },
     {
@@ -260,8 +326,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 12,
+        "w": 5,
+        "x": 15,
         "y": 1
       },
       "id": 3,
@@ -327,8 +393,8 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 6,
-        "x": 18,
+        "w": 4,
+        "x": 20,
         "y": 1
       },
       "id": 4,
@@ -1439,6 +1505,214 @@
         "x": 0,
         "y": 32
       },
+      "id": 107,
+      "title": "CPU Sub Flavor の詳細",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "CPU Sub フレーバーの CPU コア予約量（ジョブが要求している合計）とクォータ上限。上限に近いほど新規ジョブの待ち時間が長くなります。実際の消費量とは異なります。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "コア数",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "クォータ上限"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 33
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-sub\", resource=\"cpu\"}",
+          "legendFormat": "予約中",
+          "refId": "A"
+        },
+        {
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-sub\", resource=\"cpu\"}",
+          "legendFormat": "クォータ上限",
+          "refId": "B"
+        }
+      ],
+      "title": "CPU Sub CPU 予約量の推移",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "description": "CPU Sub フレーバーのメモリ予約量（ジョブが要求している合計）とクォータ上限（GiB）。実際の消費量とは異なります。",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisLabel": "GiB",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "showPoints": "never",
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            }
+          },
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "クォータ上限"
+            },
+            "properties": [
+              {
+                "id": "custom.lineStyle",
+                "value": {
+                  "dash": [
+                    10,
+                    10
+                  ],
+                  "fill": "dash"
+                }
+              },
+              {
+                "id": "custom.fillOpacity",
+                "value": 0
+              },
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 33
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "kueue_cluster_queue_resource_usage{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-sub\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "legendFormat": "予約中",
+          "refId": "A"
+        },
+        {
+          "expr": "kueue_cluster_queue_nominal_quota{cluster_queue=\"cjob-cluster-queue\", flavor=\"cpu-sub\", resource=\"memory\"} / 1024 / 1024 / 1024",
+          "legendFormat": "クォータ上限",
+          "refId": "B"
+        }
+      ],
+      "title": "CPU Sub メモリ予約量の推移",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
       "id": 104,
       "title": "待ち時間の分析",
       "type": "row"
@@ -1480,7 +1754,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 40
       },
       "id": 11,
       "options": {
@@ -1586,7 +1860,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 40
       },
       "id": 12,
       "options": {
@@ -1619,7 +1893,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 39
+        "y": 46
       },
       "id": 105,
       "title": "時間帯別の傾向",
@@ -1652,7 +1926,7 @@
         "h": 6,
         "w": 24,
         "x": 0,
-        "y": 40
+        "y": 47
       },
       "id": 13,
       "options": {

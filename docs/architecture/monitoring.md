@@ -107,6 +107,7 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | Panel | Type | DataSource | 内容 | 閾値 |
 |---|---|---|---|---|
 | CPU 予約率 | Gauge | Prometheus | cpu の CPU 予約率（ジョブ要求合計 / クォータ上限） | green < 60%, yellow < 85%, red >= 85% |
+| CPU Sub 予約率 | Gauge | Prometheus | cpu-sub の CPU 予約率（ジョブ要求合計 / クォータ上限） | green < 60%, yellow < 85%, red >= 85% |
 | GPU 予約率 | Gauge | Prometheus | gpu の GPU 予約率（ジョブ要求合計 / クォータ上限） | green < 50%, yellow < 75%, red >= 75% |
 | 待機中ジョブ数 | Stat | PostgreSQL | DB 上の待機中ジョブ数（QUEUED + DISPATCHING + DISPATCHED） | green < 5, yellow < 20, red >= 20 |
 | リソース割当て待ち (P50) | Stat | Prometheus | Kueue の admission wait time の中央値（直近 1 時間） | green < 60s, yellow < 300s, red >= 300s |
@@ -144,14 +145,21 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | GPU ノード CPU 予約量 | Time series | Prometheus | gpu の CPU 予約量 vs クォータ上限 |
 | GPU ノード メモリ予約量 | Time series | Prometheus | gpu のメモリ予約量 vs クォータ上限（GiB 表示） |
 
-#### Row 6: 待ち時間の分析
+#### Row 6: CPU Sub Flavor の詳細
+
+| Panel | Type | DataSource | 内容 |
+|---|---|---|---|
+| CPU 予約量の推移 | Time series | Prometheus | cpu-sub の CPU 予約量 vs クォータ上限 |
+| メモリ予約量の推移 | Time series | Prometheus | cpu-sub のメモリ予約量 vs クォータ上限（GiB 表示） |
+
+#### Row 7: 待ち時間の分析
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
 | リソース割当て待ち時間の推移 (P50 / P95) | Time series | Prometheus | Kueue の admission wait time のパーセンタイル推移 |
 | 最近のジョブ待ち時間 | Table | PostgreSQL | 直近 6 時間のジョブの実績待ち時間（started_at - created_at） |
 
-#### Row 7: 時間帯別の傾向
+#### Row 8: 時間帯別の傾向
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
@@ -203,6 +211,11 @@ sum(increase(cjob_jobs_completed_total[10m]))
 kueue_cluster_queue_resource_usage{cluster_queue="cjob-cluster-queue", flavor="cpu", resource="cpu"}
 /
 kueue_cluster_queue_nominal_quota{cluster_queue="cjob-cluster-queue", flavor="cpu", resource="cpu"}
+
+# CPU Sub 使用率ゲージ
+kueue_cluster_queue_resource_usage{cluster_queue="cjob-cluster-queue", flavor="cpu-sub", resource="cpu"}
+/
+kueue_cluster_queue_nominal_quota{cluster_queue="cjob-cluster-queue", flavor="cpu-sub", resource="cpu"}
 
 # GPU 使用率ゲージ
 kueue_cluster_queue_resource_usage{cluster_queue="cjob-cluster-queue", flavor="gpu-a100", resource="nvidia.com/gpu"}
