@@ -10,7 +10,7 @@ pub fn print_job_ids(jobs: &[JobSummary]) {
 
 pub fn print_job_table(jobs: &[JobSummary]) {
     if jobs.is_empty() {
-        println!("ジョブがありません。");
+        println!("No jobs found.");
         return;
     }
 
@@ -73,7 +73,7 @@ fn format_time_limit(job: &JobDetailResponse) -> String {
                     .num_seconds()
                     .max(0) as u32;
                 let remaining = job.time_limit_seconds.saturating_sub(elapsed);
-                return format!("{} (残り {})", limit_str, format_duration(remaining));
+                return format!("{} ({} remaining)", limit_str, format_duration(remaining));
             }
         }
     }
@@ -218,7 +218,7 @@ mod tests {
         // Use a started_at far in the past so remaining is 0
         let job = make_job("RUNNING", 3600, Some("2020-01-01T00:00:00Z"));
         let result = format_time_limit(&job);
-        assert!(result.contains("残り"));
+        assert!(result.contains("remaining"));
         assert!(result.contains("0m"));
     }
 
@@ -229,7 +229,7 @@ mod tests {
         let job = make_job("RUNNING", 86400, Some(&now));
         let result = format_time_limit(&job);
         assert!(result.starts_with("1d 0h"));
-        assert!(result.contains("残り"));
+        assert!(result.contains("remaining"));
     }
 
     #[test]
@@ -280,6 +280,6 @@ mod tests {
         let job = make_sweep_job();
         let result = format_time_limit(&job);
         assert!(result.contains("6h 0m"));
-        assert!(result.contains("残り"));
+        assert!(result.contains("remaining"));
     }
 }

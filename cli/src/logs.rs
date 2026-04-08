@@ -23,31 +23,31 @@ pub async fn show_logs(job_id: u32, follow: bool, index: Option<u32>, client: &C
 
     let log_dir = match &job.log_dir {
         Some(d) => d.as_str(),
-        None => bail!("ジョブ {} の log_dir が設定されていません", job_id),
+        None => bail!("log_dir is not set for job {}", job_id),
     };
 
     let is_sweep = job.completions.is_some();
 
     // Validate --index usage
     if index.is_some() && !is_sweep {
-        bail!("--index はスイープジョブのみ使用できます");
+        bail!("--index can only be used with sweep jobs");
     }
 
     // For sweep with --follow but no --index
     if is_sweep && follow && index.is_none() {
-        bail!("スイープの全インデックスを追跡するには --index を指定してください\n例: cjob logs --follow {} --index 0", job_id);
+        bail!("specify --index to follow a sweep job\ne.g. cjob logs --follow {} --index 0", job_id);
     }
 
     match job.status.as_str() {
         "HELD" => {
-            println!("ジョブ {} は保留中です。(HELD)", job_id);
-            println!("`cjob release {}` でキューに戻せます。", job_id);
+            println!("Job {} is held. (HELD)", job_id);
+            println!("Run `cjob release {}` to re-queue.", job_id);
             return Ok(());
         }
         "QUEUED" | "DISPATCHING" | "DISPATCHED" => {
             if !follow {
-                println!("ジョブ {} はまだ開始されていません。({})", job_id, job.status);
-                println!("`cjob logs --follow {}` でログの追跡ができます。", job_id);
+                println!("Job {} has not started yet. ({})", job_id, job.status);
+                println!("Run `cjob logs --follow {}` to follow logs.", job_id);
                 return Ok(());
             }
             wait_for_start(job_id, client).await?;
@@ -85,12 +85,12 @@ pub async fn show_logs(job_id: u32, follow: bool, index: Option<u32>, client: &C
             if stdout_path(log_dir).exists() {
                 print_full_logs(log_dir)?;
             } else {
-                println!("No logs available（reset 処理中）");
+                println!("No logs available (reset in progress)");
             }
             return Ok(());
         }
         _ => {
-            println!("不明なステータス: {}", job.status);
+            println!("Unknown status: {}", job.status);
             return Ok(());
         }
     }
@@ -157,11 +157,11 @@ async fn wait_for_start(job_id: u32, client: &CjobClient) -> Result<()> {
         if start.elapsed() >= WAIT_TIMEOUT {
             let job = client.get_job(job_id).await?;
             eprintln!(
-                "タイムアウトしました。ジョブはまだ {} 状態です。",
+                "Timed out. Job is still in {} state.",
                 job.status
             );
-            eprintln!("`cjob status {}` で状態を確認してください。", job_id);
-            bail!("タイムアウト");
+            eprintln!("Run `cjob status {}` to check the status.", job_id);
+            bail!("timed out");
         }
 
         let job = client.get_job(job_id).await?;
@@ -171,29 +171,29 @@ async fn wait_for_start(job_id: u32, client: &CjobClient) -> Result<()> {
 
         match job.status.as_str() {
             "HELD" => {
-                bail!("ジョブ {} は保留中です。`cjob release {}` でキューに戻してください。", job_id, job_id);
+                bail!("Job {} is held. Run `cjob release {}` to re-queue.", job_id, job_id);
             }
             "QUEUED" | "DISPATCHING" | "DISPATCHED" => {
                 eprint!(
-                    "\rジョブ {} の開始を待機中... ({}) [{:01}:{:02}]",
+                    "\rWaiting for job {} to start... ({}) [{:01}:{:02}]",
                     job_id, job.status, mins, secs
                 );
                 io::stderr().flush().ok();
                 tokio::time::sleep(POLL_INTERVAL).await;
             }
             "RUNNING" => {
-                eprintln!("\nジョブ {} が開始しました。ログを追跡します。", job_id);
+                eprintln!("\nJob {} has started. Following logs.", job_id);
                 return Ok(());
             }
             "SUCCEEDED" | "FAILED" => {
-                eprintln!("\nジョブ {} は {} で完了しました。", job_id, job.status);
+                eprintln!("\nJob {} finished with {}.", job_id, job.status);
                 return Ok(());
             }
             "CANCELLED" => {
-                bail!("ジョブ {} はキャンセルされました。", job_id);
+                bail!("Job {} was cancelled.", job_id);
             }
             _ => {
-                bail!("ジョブ {} の状態が不明です: {}", job_id, job.status);
+                bail!("Unknown status for job {}: {}", job_id, job.status);
             }
         }
     }
@@ -228,7 +228,7 @@ async fn tail_logs(log_dir: &str) -> Result<()> {
     let start = Instant::now();
     while !path.exists() {
         if start.elapsed() >= Duration::from_secs(30) {
-            bail!("ログファイルの生成を待機中にタイムアウトしました");
+            bail!("timed out waiting for log file to appear");
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
     }

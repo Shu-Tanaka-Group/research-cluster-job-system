@@ -14,13 +14,13 @@ pub fn parse_job_ids(expr: &str) -> Result<Vec<u32>> {
             let start: u32 = start_str
                 .trim()
                 .parse()
-                .map_err(|_| anyhow::anyhow!("無効な job_id: {}", start_str.trim()))?;
+                .map_err(|_| anyhow::anyhow!("invalid job_id: {}", start_str.trim()))?;
             let end: u32 = end_str
                 .trim()
                 .parse()
-                .map_err(|_| anyhow::anyhow!("無効な job_id: {}", end_str.trim()))?;
+                .map_err(|_| anyhow::anyhow!("invalid job_id: {}", end_str.trim()))?;
             if start > end {
-                bail!("無効な範囲: {}-{}", start, end);
+                bail!("invalid range: {}-{}", start, end);
             }
             for id in start..=end {
                 ids.push(id);
@@ -28,7 +28,7 @@ pub fn parse_job_ids(expr: &str) -> Result<Vec<u32>> {
         } else {
             let id: u32 = part
                 .parse()
-                .map_err(|_| anyhow::anyhow!("無効な job_id: {}", part))?;
+                .map_err(|_| anyhow::anyhow!("invalid job_id: {}", part))?;
             ids.push(id);
         }
     }

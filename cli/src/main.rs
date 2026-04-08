@@ -9,7 +9,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "cjob", about = "CJob - ジョブキューシステム CLI", version)]
+#[command(name = "cjob", about = "CJob - Job queue system CLI", version)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -17,200 +17,200 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// ジョブを投入する
+    /// Submit a job
     Add {
-        /// コマンド（-- の後に指定）
+        /// Command (specify after --)
         #[arg(trailing_var_arg = true, required = true)]
         command: Vec<String>,
 
-        /// CPU リソース（例: "2"）
+        /// CPU resource (e.g. "2")
         #[arg(long, default_value = "1")]
         cpu: String,
 
-        /// メモリリソース（例: "4Gi"）
+        /// Memory resource (e.g. "4Gi")
         #[arg(long, default_value = "1Gi")]
         memory: String,
 
-        /// GPU 数（例: 1）
+        /// Number of GPUs (e.g. 1)
         #[arg(long, default_value = "0")]
         gpu: u32,
 
-        /// ResourceFlavor 名（例: "cpu", "gpu-a100"）
+        /// ResourceFlavor name (e.g. "cpu", "gpu-a100")
         #[arg(long)]
         flavor: Option<String>,
 
-        /// 実行時間の上限（例: 3600, 1h, 6h, 1d, 3d）
+        /// Time limit (e.g. 3600, 1h, 6h, 1d, 3d)
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
     },
-    /// パラメータスイープを投入する
+    /// Submit a parameter sweep
     Sweep {
-        /// タスク数
+        /// Number of tasks
         #[arg(short = 'n', long = "count")]
         count: u32,
 
-        /// 並列数
+        /// Parallelism
         #[arg(long = "parallel", default_value = "1")]
         parallel: u32,
 
-        /// 実行時間の上限（例: 3600, 1h, 6h, 1d, 3d）
+        /// Time limit (e.g. 3600, 1h, 6h, 1d, 3d)
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
 
-        /// CPU リソース（例: "2"）
+        /// CPU resource (e.g. "2")
         #[arg(long, default_value = "1")]
         cpu: String,
 
-        /// メモリリソース（例: "4Gi"）
+        /// Memory resource (e.g. "4Gi")
         #[arg(long, default_value = "1Gi")]
         memory: String,
 
-        /// GPU 数（例: 1）
+        /// Number of GPUs (e.g. 1)
         #[arg(long, default_value = "0")]
         gpu: u32,
 
-        /// ResourceFlavor 名（例: "cpu", "gpu-a100"）
+        /// ResourceFlavor name (e.g. "cpu", "gpu-a100")
         #[arg(long)]
         flavor: Option<String>,
 
-        /// コマンド（-- の後に指定）
+        /// Command (specify after --)
         #[arg(trailing_var_arg = true, required = true)]
         command: Vec<String>,
     },
-    /// ジョブ一覧を表示する
+    /// List jobs
     List {
-        /// ステータスでフィルタ
+        /// Filter by status
         #[arg(long)]
         status: Option<String>,
 
-        /// flavor でフィルタ
+        /// Filter by flavor
         #[arg(long)]
         flavor: Option<String>,
 
-        /// time_limit の範囲でフィルタ（例: 6h:12h, :12h, 6h:）
+        /// Filter by time_limit range (e.g. 6h:12h, :12h, 6h:)
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
 
-        /// 出力形式（ids: ジョブIDをコンマ区切りで出力）
+        /// Output format (ids: print job IDs comma-separated)
         #[arg(long)]
         format: Option<String>,
 
-        /// 表示件数を制限
+        /// Limit the number of results
         #[arg(long)]
         limit: Option<u32>,
 
-        /// JOB_ID の降順で表示する
+        /// Display in descending JOB_ID order
         #[arg(long)]
         reverse: bool,
 
-        /// 全件表示する
+        /// Show all jobs
         #[arg(long)]
         all: bool,
     },
-    /// ジョブの詳細を表示する
+    /// Show job details
     Status {
-        /// ジョブ ID
+        /// Job ID
         job_id: u32,
     },
-    /// ジョブをキャンセルする
+    /// Cancel a job
     Cancel {
-        /// ジョブ ID（例: 1, 1-5, 1,3,5, 1-5,8,10-12）
+        /// Job ID (e.g. 1, 1-5, 1,3,5, 1-5,8,10-12)
         job_ids: String,
     },
-    /// ジョブの実行を保留する
+    /// Hold job execution
     Hold {
-        /// ジョブ ID（例: 1, 1-5, 1,3,5, 1-5,8,10-12）
+        /// Job ID (e.g. 1, 1-5, 1,3,5, 1-5,8,10-12)
         job_ids: Option<String>,
 
-        /// QUEUED 状態のジョブを全て保留にする
+        /// Hold all QUEUED jobs
         #[arg(long)]
         all: bool,
     },
-    /// 保留中のジョブをキューに戻す
+    /// Re-queue held jobs
     Release {
-        /// ジョブ ID（例: 1, 1-5, 1,3,5, 1-5,8,10-12）
+        /// Job ID (e.g. 1, 1-5, 1,3,5, 1-5,8,10-12)
         job_ids: Option<String>,
 
-        /// HELD 状態のジョブを全てキューに戻す
+        /// Re-queue all HELD jobs
         #[arg(long)]
         all: bool,
     },
-    /// ジョブのパラメータを変更する
+    /// Modify job parameters
     Set {
-        /// ジョブ ID（例: 1, 1-5, 1,3,5, 1-5,8,10-12）
+        /// Job ID (e.g. 1, 1-5, 1,3,5, 1-5,8,10-12)
         job_ids: String,
 
-        /// CPU リソース（例: "2", "4"）
+        /// CPU resource (e.g. "2", "4")
         #[arg(long)]
         cpu: Option<String>,
 
-        /// メモリリソース（例: "4Gi", "16Gi"）
+        /// Memory resource (e.g. "4Gi", "16Gi")
         #[arg(long)]
         memory: Option<String>,
 
-        /// GPU 数（例: 1）
+        /// Number of GPUs (e.g. 1)
         #[arg(long)]
         gpu: Option<u32>,
 
-        /// ResourceFlavor 名（例: "cpu-sub", "gpu-a100"）
+        /// ResourceFlavor name (e.g. "cpu-sub", "gpu-a100")
         #[arg(long)]
         flavor: Option<String>,
 
-        /// 実行時間の上限（例: 3600, 1h, 6h, 1d, 3d）
+        /// Time limit (e.g. 3600, 1h, 6h, 1d, 3d)
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
     },
-    /// 完了済みジョブを削除する
+    /// Delete completed jobs
     Delete {
-        /// ジョブ ID（例: 1, 1-5, 1,3,5）
+        /// Job ID (e.g. 1, 1-5, 1,3,5)
         job_ids: Option<String>,
 
-        /// 完了済みジョブを全て削除
+        /// Delete all completed jobs
         #[arg(long)]
         all: bool,
     },
-    /// リソース使用状況を表示する
+    /// Show resource usage
     Usage,
-    /// 全ジョブ履歴をリセットする
+    /// Reset all job history
     Reset,
-    /// ジョブのログを表示する
+    /// Show job logs
     Logs {
-        /// ジョブ ID
+        /// Job ID
         job_id: u32,
 
-        /// リアルタイムでログを追跡する
+        /// Follow logs in real time
         #[arg(long)]
         follow: bool,
 
-        /// スイープのインデックス指定
+        /// Sweep index
         #[arg(long)]
         index: Option<u32>,
     },
-    /// 計算リソースの種類を表示する
+    /// Show available resource flavors
     Flavor {
         #[command(subcommand)]
         action: FlavorCommands,
     },
-    /// ユーザー設定を管理する
+    /// Manage user settings
     Config {
         #[command(subcommand)]
         action: ConfigCommands,
     },
-    /// CLI を最新バージョンに更新する
+    /// Update CLI to the latest version
     Update {
-        /// プレリリース版を含める
+        /// Include pre-release versions
         #[arg(long = "pre")]
         pre: bool,
 
-        /// 確認をスキップする
+        /// Skip confirmation
         #[arg(short = 'y', long = "yes")]
         yes: bool,
 
-        /// 利用可能なバージョン一覧を表示する
+        /// List available versions
         #[arg(long = "list", conflicts_with = "version")]
         list: bool,
 
-        /// 指定バージョンをインストールする
+        /// Install a specific version
         #[arg(long = "version")]
         version: Option<String>,
     },
@@ -218,51 +218,51 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum FlavorCommands {
-    /// 利用可能な種類の一覧を表示する
+    /// List available flavors
     List,
-    /// 指定した種類のリソース上限を表示する
+    /// Show resource limits for a flavor
     Info {
-        /// 種類の名前（例: cpu, gpu）
+        /// Flavor name (e.g. cpu, gpu)
         name: String,
     },
 }
 
 #[derive(Subcommand)]
 enum ConfigCommands {
-    /// 全設定を表示する
+    /// Show all settings
     List,
-    /// リスト型の設定に要素を追加する
+    /// Add a value to a list setting
     Add {
-        /// テーブル名（例: env）
+        /// Table name (e.g. env)
         table: String,
-        /// キー名（例: exclude）
+        /// Key name (e.g. exclude)
         key: String,
-        /// 追加する値
+        /// Value to add
         value: String,
     },
-    /// リスト型の設定から要素を削除する
+    /// Remove a value from a list setting
     Remove {
-        /// テーブル名（例: env）
+        /// Table name (e.g. env)
         table: String,
-        /// キー名（例: exclude）
+        /// Key name (e.g. exclude)
         key: String,
-        /// 削除する値
+        /// Value to remove
         value: String,
     },
-    /// スカラー型の設定値を変更する
+    /// Set a scalar setting value
     Set {
-        /// テーブル名
+        /// Table name
         table: String,
-        /// キー名
+        /// Key name
         key: String,
-        /// 設定する値
+        /// Value to set
         value: String,
     },
-    /// スカラー型の設定値を削除する
+    /// Unset a scalar setting value
     Unset {
-        /// テーブル名
+        /// Table name
         table: String,
-        /// キー名
+        /// Key name
         key: String,
     },
 }
@@ -378,19 +378,19 @@ fn parse_duration(s: &str) -> Result<u32> {
     } else if s.ends_with('s') {
         (&s[..s.len() - 1], 1u32)
     } else {
-        anyhow::bail!("不正な時間指定です: {}（例: 3600, 30m, 1h, 6h, 1d, 3d）", s);
+        anyhow::bail!("invalid duration: {} (e.g. 3600, 30m, 1h, 6h, 1d, 3d)", s);
     };
     let num: u32 = num_str.parse().map_err(|_| {
-        anyhow::anyhow!("不正な時間指定です: {}（例: 3600, 30m, 1h, 6h, 1d, 3d）", s)
+        anyhow::anyhow!("invalid duration: {} (e.g. 3600, 30m, 1h, 6h, 1d, 3d)", s)
     })?;
     num.checked_mul(multiplier)
-        .ok_or_else(|| anyhow::anyhow!("時間指定が大きすぎます: {}", s))
+        .ok_or_else(|| anyhow::anyhow!("duration too large: {}", s))
 }
 
 fn parse_time_limit_range(s: &str) -> Result<(Option<u32>, Option<u32>)> {
     let Some((min_str, max_str)) = s.split_once(':') else {
         anyhow::bail!(
-            "不正な範囲指定です: {}（例: 6h:12h, :12h, 6h:）",
+            "invalid range format: {} (e.g. 6h:12h, :12h, 6h:)",
             s
         );
     };
@@ -405,12 +405,12 @@ fn parse_time_limit_range(s: &str) -> Result<(Option<u32>, Option<u32>)> {
         Some(parse_duration(max_str)?)
     };
     if ge.is_none() && lt.is_none() {
-        anyhow::bail!("不正な範囲指定です: {}（例: 6h:12h, :12h, 6h:）", s);
+        anyhow::bail!("invalid range format: {} (e.g. 6h:12h, :12h, 6h:)", s);
     }
     if let (Some(g), Some(l)) = (ge, lt) {
         if g >= l {
             anyhow::bail!(
-                "範囲の下限が上限以上です: {}（下限 < 上限 にしてください）",
+                "range lower bound must be less than upper bound: {}",
                 s
             );
         }
@@ -436,7 +436,7 @@ async fn cmd_add(
         .unwrap_or_default();
 
     if image.is_empty() {
-        anyhow::bail!("CJOB_IMAGE または JUPYTER_IMAGE 環境変数が設定されていません");
+        anyhow::bail!("CJOB_IMAGE or JUPYTER_IMAGE environment variable is not set");
     }
 
     // Collect exported environment variables, filtering by user config
@@ -465,7 +465,7 @@ async fn cmd_add(
     };
 
     let resp = client.submit_job(&req).await?;
-    println!("ジョブ {} を投入しました。({})", resp.job_id, resp.status);
+    println!("Submitted job {}. ({})", resp.job_id, resp.status);
     Ok(())
 }
 
@@ -489,7 +489,7 @@ async fn cmd_sweep(
         .unwrap_or_default();
 
     if image.is_empty() {
-        anyhow::bail!("CJOB_IMAGE または JUPYTER_IMAGE 環境変数が設定されていません");
+        anyhow::bail!("CJOB_IMAGE or JUPYTER_IMAGE environment variable is not set");
     }
 
     // Collect exported environment variables, filtering by user config
@@ -527,7 +527,7 @@ async fn cmd_sweep(
 
     let resp = client.submit_sweep(&req).await?;
     println!(
-        "スイープ {} を投入しました。({}, {} タスク, 並列 {})",
+        "Submitted sweep {}. ({}, {} tasks, parallelism {})",
         resp.job_id, resp.status, count, parallel
     );
     Ok(())
@@ -547,11 +547,11 @@ async fn cmd_list(
     all: bool,
 ) -> Result<()> {
     if let Some(0) = limit {
-        anyhow::bail!("--limit には 1 以上の値を指定してください");
+        anyhow::bail!("--limit must be at least 1");
     }
     if let Some(ref f) = format {
         if f != "ids" {
-            anyhow::bail!("--format には ids を指定してください");
+            anyhow::bail!("--format must be 'ids'");
         }
     }
 
@@ -574,8 +574,8 @@ async fn cmd_list(
         if let Some(lim) = effective_limit {
             if resp.total_count > lim {
                 eprintln!(
-                    "（{}件中最新の{}件を表示。全件表示するには --all を使用してください）",
-                    resp.total_count, lim
+                    "(Showing {} of {} jobs. Use --all to show all.)",
+                    lim, resp.total_count
                 );
             }
         }
@@ -599,17 +599,17 @@ async fn cmd_cancel(client: &client::CjobClient, job_ids_expr: &str) -> Result<(
             .get("status")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
-        println!("ジョブ {}: {}", ids[0], status);
+        println!("Job {}: {}", ids[0], status);
     } else {
         let resp = client.cancel_bulk(&ids).await?;
         if !resp.cancelled.is_empty() {
-            println!("キャンセルしました: {:?}", resp.cancelled);
+            println!("Cancelled: {:?}", resp.cancelled);
         }
         if !resp.skipped.is_empty() {
-            println!("スキップしました（完了済みまたはキャンセル済み）: {:?}", resp.skipped);
+            println!("Skipped (already completed or cancelled): {:?}", resp.skipped);
         }
         if !resp.not_found.is_empty() {
-            println!("見つかりませんでした: {:?}", resp.not_found);
+            println!("Not found: {:?}", resp.not_found);
         }
     }
     Ok(())
@@ -625,7 +625,7 @@ async fn cmd_hold(
     } else if let Some(expr) = job_ids_expr {
         Some(job_ids::parse_job_ids(&expr)?)
     } else {
-        anyhow::bail!("job_id を指定するか --all を使用してください");
+        anyhow::bail!("specify job_id or use --all");
     };
 
     if let Some(ref ids) = job_ids {
@@ -635,20 +635,20 @@ async fn cmd_hold(
                 .get("status")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            println!("ジョブ {}: {}", ids[0], status);
+            println!("Job {}: {}", ids[0], status);
             return Ok(());
         }
     }
 
     let resp = client.hold_bulk(job_ids).await?;
     if !resp.held.is_empty() {
-        println!("保留しました: {:?}", resp.held);
+        println!("Held: {:?}", resp.held);
     }
     if !resp.skipped.is_empty() {
-        println!("スキップしました（QUEUED 以外）: {:?}", resp.skipped);
+        println!("Skipped (not QUEUED): {:?}", resp.skipped);
     }
     if !resp.not_found.is_empty() {
-        println!("見つかりませんでした: {:?}", resp.not_found);
+        println!("Not found: {:?}", resp.not_found);
     }
     Ok(())
 }
@@ -663,7 +663,7 @@ async fn cmd_release(
     } else if let Some(expr) = job_ids_expr {
         Some(job_ids::parse_job_ids(&expr)?)
     } else {
-        anyhow::bail!("job_id を指定するか --all を使用してください");
+        anyhow::bail!("specify job_id or use --all");
     };
 
     if let Some(ref ids) = job_ids {
@@ -673,20 +673,20 @@ async fn cmd_release(
                 .get("status")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            println!("ジョブ {}: {}", ids[0], status);
+            println!("Job {}: {}", ids[0], status);
             return Ok(());
         }
     }
 
     let resp = client.release_bulk(job_ids).await?;
     if !resp.released.is_empty() {
-        println!("キューに戻しました: {:?}", resp.released);
+        println!("Released: {:?}", resp.released);
     }
     if !resp.skipped.is_empty() {
-        println!("スキップしました（HELD 以外）: {:?}", resp.skipped);
+        println!("Skipped (not HELD): {:?}", resp.skipped);
     }
     if !resp.not_found.is_empty() {
-        println!("見つかりませんでした: {:?}", resp.not_found);
+        println!("Not found: {:?}", resp.not_found);
     }
     Ok(())
 }
@@ -702,7 +702,7 @@ async fn cmd_set(
 ) -> Result<()> {
     if cpu.is_none() && memory.is_none() && gpu.is_none() && flavor.is_none() && time_limit.is_none() {
         anyhow::bail!(
-            "変更するパラメータを1つ以上指定してください（--cpu, --memory, --gpu, --flavor, --time-limit）"
+            "specify at least one parameter to modify (--cpu, --memory, --gpu, --flavor, --time-limit)"
         );
     }
 
@@ -726,7 +726,7 @@ async fn cmd_set(
             .get("status")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
-        println!("ジョブ {}: {}", ids[0], status);
+        println!("Job {}: {}", ids[0], status);
     } else {
         let req = client::SetRequest {
             job_ids: ids,
@@ -738,13 +738,13 @@ async fn cmd_set(
         };
         let resp = client.set_bulk(&req).await?;
         if !resp.modified.is_empty() {
-            println!("変更しました: {:?}", resp.modified);
+            println!("Modified: {:?}", resp.modified);
         }
         if !resp.skipped.is_empty() {
-            println!("スキップしました（QUEUED / HELD 以外）: {:?}", resp.skipped);
+            println!("Skipped (not QUEUED / HELD): {:?}", resp.skipped);
         }
         if !resp.not_found.is_empty() {
-            println!("見つかりませんでした: {:?}", resp.not_found);
+            println!("Not found: {:?}", resp.not_found);
         }
     }
     Ok(())
@@ -760,7 +760,7 @@ async fn cmd_delete(
     } else if let Some(expr) = job_ids_expr {
         Some(job_ids::parse_job_ids(&expr)?)
     } else {
-        anyhow::bail!("job_id を指定するか --all を使用してください");
+        anyhow::bail!("specify job_id or use --all");
     };
 
     let resp = client.delete_jobs(job_ids).await?;
@@ -770,27 +770,27 @@ async fn cmd_delete(
         for log_dir in &resp.log_dirs {
             let _ = std::fs::remove_dir_all(log_dir);
         }
-        println!("削除しました: {:?}", resp.deleted);
+        println!("Deleted: {:?}", resp.deleted);
     }
     for item in &resp.skipped {
         match item.reason.as_str() {
             "running" => println!(
-                "ジョブ {}: 実行中のため削除できませんでした。先に cjob cancel を実行してください",
+                "Job {}: cannot delete while running. Run cjob cancel first.",
                 item.job_id
             ),
             "held" => println!(
-                "ジョブ {}: 保留中のため削除できませんでした。先に cjob cancel または cjob release を実行してください",
+                "Job {}: cannot delete while held. Run cjob cancel or cjob release first.",
                 item.job_id
             ),
             "deleting" => println!(
-                "ジョブ {}: リセット処理中のため削除できませんでした",
+                "Job {}: cannot delete during reset",
                 item.job_id
             ),
-            _ => println!("ジョブ {}: スキップ ({})", item.job_id, item.reason),
+            _ => println!("Job {}: skipped ({})", item.job_id, item.reason),
         }
     }
     if !resp.not_found.is_empty() {
-        println!("見つかりませんでした: {:?}", resp.not_found);
+        println!("Not found: {:?}", resp.not_found);
     }
     Ok(())
 }
@@ -802,7 +802,7 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
     // Check for DELETING jobs
     let has_deleting = list_resp.jobs.iter().any(|j| j.status == "DELETING");
     if has_deleting {
-        println!("前回のリセット処理がまだ完了していません。しばらく待ってから再試行してください。");
+        println!("Previous reset is still in progress. Please wait and try again.");
         return Ok(());
     }
 
@@ -814,21 +814,21 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
         .map(|j| j.job_id)
         .collect();
     if !active.is_empty() {
-        println!("完了していないジョブがあるためリセットできません。");
+        println!("Cannot reset: there are incomplete jobs.");
         let active_str: Vec<String> = active.iter().map(|id| id.to_string()).collect();
-        println!("完了待ちのジョブ: {}", active_str.join(", "));
+        println!("Pending jobs: {}", active_str.join(", "));
         return Ok(());
     }
 
     let total = list_resp.jobs.len();
     if total == 0 {
-        println!("リセットするジョブがありません。");
+        println!("No jobs to reset.");
         return Ok(());
     }
 
     // Confirmation prompt
-    if !confirm(&format!("全 {} 件のジョブとログを削除します。よろしいですか？", total))? {
-        println!("中止しました。");
+    if !confirm(&format!("Delete all {} jobs and their logs. Are you sure?", total))? {
+        println!("Aborted.");
         return Ok(());
     }
 
@@ -837,7 +837,7 @@ async fn cmd_reset(client: &client::CjobClient) -> Result<()> {
 
     // Call reset API
     client.reset().await?;
-    println!("リセットを開始しました。バックグラウンドでクリーンアップが完了するまでお待ちください。");
+    println!("Reset started. Please wait for background cleanup to complete.");
     Ok(())
 }
 
@@ -912,7 +912,7 @@ async fn cmd_usage(client: &client::CjobClient) -> Result<()> {
     println!("{}", "─".repeat(50));
 
     if resp.daily.is_empty() {
-        println!("  使用実績がありません。");
+        println!("  No usage data.");
     } else {
         // Check if GPU column is needed
         let has_gpu = resp.total_gpu_seconds > 0;
@@ -983,7 +983,7 @@ async fn cmd_update(
         let resp = client.get_cli_versions().await?;
         match resp.versions.first() {
             Some(v) => v.clone(),
-            None => anyhow::bail!("利用可能なバージョンがありません"),
+            None => anyhow::bail!("no versions available"),
         }
     } else {
         let resp = client.get_cli_version().await?;
@@ -991,16 +991,16 @@ async fn cmd_update(
     };
 
     if current_version == target_version {
-        println!("すでに最新バージョンです ({})", current_version);
+        println!("Already up to date ({})", current_version);
         return Ok(());
     }
 
     if !yes {
         if !confirm(&format!(
-            "更新しますか？ {} → {}",
+            "Update? {} -> {}",
             current_version, target_version
         ))? {
-            println!("中止しました。");
+            println!("Aborted.");
             return Ok(());
         }
     }
@@ -1008,7 +1008,7 @@ async fn cmd_update(
     let binary = client.download_cli_binary(Some(&target_version)).await?;
     replace_binary(&binary)?;
 
-    println!("更新が完了しました。({})", target_version);
+    println!("Update complete. ({})", target_version);
     Ok(())
 }
 
@@ -1026,7 +1026,7 @@ async fn cmd_update_list(
     };
 
     if versions.is_empty() {
-        println!("利用可能なバージョンがありません。");
+        println!("No versions available.");
         return Ok(());
     }
 
@@ -1095,7 +1095,7 @@ async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> 
         None => {
             let available: Vec<&str> = resp.flavors.iter().map(|f| f.name.as_str()).collect();
             anyhow::bail!(
-                "flavor '{}' は存在しません。利用可能な flavor: {}",
+                "flavor '{}' does not exist. Available flavors: {}",
                 name,
                 available.join(", ")
             );
@@ -1103,13 +1103,13 @@ async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> 
     };
 
     println!("name:   {}", flavor.name);
-    println!("GPU:    {}", if flavor.has_gpu { "対応" } else { "非対応" });
+    println!("GPU:    {}", if flavor.has_gpu { "yes" } else { "no" });
 
     let quota = match &flavor.quota {
         Some(q) => q,
         None => {
             println!();
-            println!("（リソース情報がまだ取得されていません）");
+            println!("(Resource information is not available yet)");
             return Ok(());
         }
     };
@@ -1168,16 +1168,16 @@ async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> 
 fn cmd_config_list() -> Result<()> {
     let cfg = config::load()?;
     let toml_str = toml::to_string_pretty(&cfg)
-        .map_err(|e| anyhow::anyhow!("設定のシリアライズに失敗しました: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("failed to serialize config: {}", e))?;
     print!("{}", toml_str);
     Ok(())
 }
 
 fn cmd_config_add(table: &str, key: &str, value: &str) -> Result<()> {
     match config::lookup_key_type(table, key) {
-        None => anyhow::bail!("不明な設定: {}.{}", table, key),
+        None => anyhow::bail!("unknown setting: {}.{}", table, key),
         Some(config::KeyType::Scalar) => {
-            anyhow::bail!("{}.{} はスカラー型です。set / unset を使用してください", table, key);
+            anyhow::bail!("{}.{} is a scalar setting. Use set / unset instead", table, key);
         }
         Some(config::KeyType::List) => {}
     }
@@ -1197,9 +1197,9 @@ fn cmd_config_add(table: &str, key: &str, value: &str) -> Result<()> {
 
 fn cmd_config_remove(table: &str, key: &str, value: &str) -> Result<()> {
     match config::lookup_key_type(table, key) {
-        None => anyhow::bail!("不明な設定: {}.{}", table, key),
+        None => anyhow::bail!("unknown setting: {}.{}", table, key),
         Some(config::KeyType::Scalar) => {
-            anyhow::bail!("{}.{} はスカラー型です。set / unset を使用してください", table, key);
+            anyhow::bail!("{}.{} is a scalar setting. Use set / unset instead", table, key);
         }
         Some(config::KeyType::List) => {}
     }
@@ -1217,26 +1217,26 @@ fn cmd_config_remove(table: &str, key: &str, value: &str) -> Result<()> {
 
 fn cmd_config_set(table: &str, key: &str, _value: &str) -> Result<()> {
     match config::lookup_key_type(table, key) {
-        None => anyhow::bail!("不明な設定: {}.{}", table, key),
+        None => anyhow::bail!("unknown setting: {}.{}", table, key),
         Some(config::KeyType::List) => {
-            anyhow::bail!("{}.{} はリスト型です。add / remove を使用してください", table, key);
+            anyhow::bail!("{}.{} is a list setting. Use add / remove instead", table, key);
         }
         Some(config::KeyType::Scalar) => {
             // Future: implement scalar set
-            todo!("スカラー型の設定は未実装です")
+            todo!("scalar settings are not implemented yet")
         }
     }
 }
 
 fn cmd_config_unset(table: &str, key: &str) -> Result<()> {
     match config::lookup_key_type(table, key) {
-        None => anyhow::bail!("不明な設定: {}.{}", table, key),
+        None => anyhow::bail!("unknown setting: {}.{}", table, key),
         Some(config::KeyType::List) => {
-            anyhow::bail!("{}.{} はリスト型です。add / remove を使用してください", table, key);
+            anyhow::bail!("{}.{} is a list setting. Use add / remove instead", table, key);
         }
         Some(config::KeyType::Scalar) => {
             // Future: implement scalar unset
-            todo!("スカラー型の設定は未実装です")
+            todo!("scalar settings are not implemented yet")
         }
     }
 }
@@ -1246,20 +1246,20 @@ fn replace_binary(binary: &[u8]) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let current_exe = std::env::current_exe()
-        .context("実行ファイルのパスを取得できませんでした")?;
+        .context("failed to get executable path")?;
     let tmp_path = current_exe
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("実行ファイルの親ディレクトリを取得できませんでした"))?
+        .ok_or_else(|| anyhow::anyhow!("failed to get parent directory of executable"))?
         .join(".cjob.update.tmp");
 
     std::fs::write(&tmp_path, binary)
-        .context("一時ファイルの書き込みに失敗しました")?;
+        .context("failed to write temporary file")?;
     std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o755))
-        .context("実行権限の設定に失敗しました")?;
+        .context("failed to set executable permissions")?;
 
     if let Err(e) = std::fs::rename(&tmp_path, &current_exe) {
         let _ = std::fs::remove_file(&tmp_path);
-        return Err(anyhow::anyhow!(e).context("バイナリの置き換えに失敗しました"));
+        return Err(anyhow::anyhow!(e).context("failed to replace binary"));
     }
 
     Ok(())

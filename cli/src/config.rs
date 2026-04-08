@@ -37,7 +37,7 @@ pub fn config_path() -> Result<PathBuf> {
         PathBuf::from(xdg)
     } else {
         let home = std::env::var("HOME")
-            .map_err(|_| anyhow::anyhow!("HOME 環境変数が設定されていません"))?;
+            .map_err(|_| anyhow::anyhow!("HOME environment variable is not set"))?;
         PathBuf::from(home).join(".config")
     };
     Ok(config_dir.join("cjob").join("config.toml"))
@@ -50,13 +50,13 @@ pub fn load() -> Result<CjobConfig> {
         return Ok(CjobConfig::default());
     }
     let content = std::fs::read_to_string(&path)
-        .with_context(|| format!("設定ファイルの読み込みに失敗しました: {}", path.display()))?;
+        .with_context(|| format!("failed to read config file: {}", path.display()))?;
     parse_toml(&content)
 }
 
 /// Parses a TOML string into CjobConfig.
 pub fn parse_toml(content: &str) -> Result<CjobConfig> {
-    toml::from_str(content).context("設定ファイルのパースに失敗しました")
+    toml::from_str(content).context("failed to parse config file")
 }
 
 /// Saves the config to the default path, creating parent directories if needed.
@@ -64,12 +64,12 @@ pub fn save(config: &CjobConfig) -> Result<()> {
     let path = config_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
-            .with_context(|| format!("ディレクトリの作成に失敗しました: {}", parent.display()))?;
+            .with_context(|| format!("failed to create directory: {}", parent.display()))?;
     }
     let content =
-        toml::to_string_pretty(config).context("設定のシリアライズに失敗しました")?;
+        toml::to_string_pretty(config).context("failed to serialize config")?;
     std::fs::write(&path, content)
-        .with_context(|| format!("設定ファイルの書き込みに失敗しました: {}", path.display()))?;
+        .with_context(|| format!("failed to write config file: {}", path.display()))?;
     Ok(())
 }
 
