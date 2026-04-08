@@ -1,3 +1,5 @@
+🇯🇵 [日本語](README.md)
+
 > *This document was auto-translated from the [Japanese original](README.md) by Claude and may contain errors. Refer to the original for the authoritative content.*
 
 <div style="text-align: center;" align="center">
