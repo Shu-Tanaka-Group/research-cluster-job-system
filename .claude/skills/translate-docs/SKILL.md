@@ -36,9 +36,22 @@ $ARGUMENTS
 - コードブロック内のコード・コマンドは翻訳しない
 - コードブロック内の日本語コメントは英語に翻訳する
 - 技術用語（Kubernetes, Kueue, PostgreSQL, FastAPI 等）はそのまま使う
-- 日本語版内のファイルパスへのリンクは `docs_en/` 内の対応パスに書き換える
-  - 例: `docs/architecture/cli.md` → `docs_en/architecture/cli.md`
+- 英語版ドキュメント内のリンクは、対応する英語版ファイルを指すようにする
+  - 同じディレクトリ階層内の相対リンクはそのまま維持する（`docs_en/` 内の相対パスとして自然に英語版を指すため）
+    - 例: `docs_en/architecture/system_design.md` 内の `[resources.md](resources.md)` → そのまま（`docs_en/architecture/resources.md` を指す）
+    - 例: `docs_en/architecture/system_design.md` 内の `[deployment.md](../deployment.md)` → そのまま（`docs_en/deployment.md` を指す）
+  - 日本語版の絶対パス形式のリンクは `docs_en/` 内の対応パスに書き換える
+    - 例: `docs/architecture/cli.md` → `docs_en/architecture/cli.md`
   - `README.md` へのリンクは `README.en.md` に書き換える
-  - 上記以外の `docs/` 外へのリンクはそのまま維持する
+  - ドキュメント以外へのリンク（ソースコード、外部 URL 等）はそのまま維持する
+  - 日本語版の見出しアンカー（`#xxx`）は英語版の見出しに合わせて英語のアンカーに書き換える
+    - 例: `deployment.md#11-namespace-作成スクリプト完成版` → `deployment.md#11-namespace-creation-script-complete-version`
 - 固有名詞（CJob, cjob, cjobctl 等）はそのまま使う
 - 既存の英語版がある場合は、変更された部分のみ更新するのではなく、全体を再翻訳する（用語や文体の一貫性を保つため）
+- 翻訳したファイルの冒頭（タイトルの前）に以下の注意書きを挿入する:
+  ```
+  > *This document was auto-translated from the [Japanese original](<日本語版への相対パス>) by Claude and may contain errors. Refer to the original for the authoritative content.*
+  ```
+  - `<日本語版への相対パス>` は翻訳先ファイルから見た日本語版ファイルへの相対パスとする
+    - 例: `docs_en/architecture/cli.md` → `../../docs/architecture/cli.md`
+    - 例: `README.en.md` → `README.md`
