@@ -229,7 +229,27 @@ def cancel_job(job_id: int, token: str = Depends(extract_bearer)):
 
 ---
 
-## 8. 信頼の根拠
+## 8. CLI-API 間の通信路
+
+### 8.1 現在の方針
+
+CLI と Submit API の通信はクラスタ内 HTTP（平文）で行う。クラスタ内ネットワークは NetworkPolicy（§5）で保護されており、クラスタ外への露出はないため、現時点では TLS を導入しない。
+
+### 8.2 TLS 証明書検証（`CJOB_INSECURE_SKIP_VERIFY`）
+
+CLI は環境変数 `CJOB_INSECURE_SKIP_VERIFY` で TLS 証明書検証の有無を制御する。デフォルトは検証スキップ（`true` 相当）。HTTP 通信ではこの設定は実質的に影響しない。
+
+| 値 | 動作 |
+|---|---|
+| 未設定 | 検証スキップ（デフォルト） |
+| `0` または `false` | 検証を実施 |
+| 上記以外 | 検証スキップ |
+
+> **注意**: `CJOB_API_URL` を HTTPS エンドポイントに変更する場合は、事前に CLI の `skip_tls_verify()` のデフォルト値を `false`（検証有効）に変更すること。現在のデフォルト（検証スキップ）のままでは TLS 証明書が検証されず、MITM 攻撃に対して脆弱になる。
+
+---
+
+## 9. 信頼の根拠
 
 | 要素 | 説明 |
 |---|---|
@@ -240,7 +260,7 @@ def cancel_job(job_id: int, token: str = Depends(extract_bearer)):
 
 ---
 
-## 9. フロー全体図
+## 10. フロー全体図
 
 ```
 [ユーザーログイン]
