@@ -6,6 +6,7 @@ description: Translate Japanese documentation in docs/ to English and save to do
 # Translate Documentation to English
 
 `docs/` 配下の日本語ドキュメントを英語に翻訳し、`docs_en/` 配下に同じディレクトリ構成で配置する。
+`README.md` は例外として、プロジェクトルートに `README.en.md` として配置する。
 
 ## 対象の決定
 
@@ -20,11 +21,13 @@ $ARGUMENTS
 
 1. 対象ファイルを特定する
    - 引数があればそのファイルを対象とする（例: `docs/architecture/cli.md`）
-   - 引数がなければ `git diff --name-only main -- docs/` で変更されたファイルを検出する
+   - 引数がなければ `git diff --name-only main -- docs/ README.md` で変更されたファイルを検出する
 2. 対象ファイルごとに以下を実行する:
    a. 日本語版ファイルを読む
-   b. `docs_en/` 配下の対応するパスに英語版が既にあれば読む
-   c. 英語に翻訳して `docs_en/` に書き出す
+   b. 英語版の対応パスにファイルが既にあれば読む
+   c. 英語に翻訳して書き出す
+      - `docs/` 配下のファイル → `docs_en/` 配下の同じパスに配置
+      - `README.md` → プロジェクトルートの `README.en.md` に配置
 3. 翻訳結果をユーザーに報告する
 
 ## 翻訳ルール
@@ -35,6 +38,7 @@ $ARGUMENTS
 - 技術用語（Kubernetes, Kueue, PostgreSQL, FastAPI 等）はそのまま使う
 - 日本語版内のファイルパスへのリンクは `docs_en/` 内の対応パスに書き換える
   - 例: `docs/architecture/cli.md` → `docs_en/architecture/cli.md`
-  - `docs/` 外へのリンク（README.md 等）はそのまま維持する
+  - `README.md` へのリンクは `README.en.md` に書き換える
+  - 上記以外の `docs/` 外へのリンクはそのまま維持する
 - 固有名詞（CJob, cjob, cjobctl 等）はそのまま使う
 - 既存の英語版がある場合は、変更された部分のみ更新するのではなく、全体を再翻訳する（用語や文体の一貫性を保つため）
