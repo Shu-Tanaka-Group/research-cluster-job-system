@@ -132,6 +132,29 @@ class SingleReleaseResponse(BaseModel):
     status: str
 
 
+class SetParams(BaseModel):
+    cpu: str | None = None
+    memory: str | None = None
+    gpu: int | None = None
+    flavor: str | None = None
+    time_limit_seconds: int | None = None
+
+
+class SetRequest(SetParams):
+    job_ids: list[int]
+
+
+class SingleSetResponse(BaseModel):
+    job_id: int
+    status: str
+
+
+class SetResponse(BaseModel):
+    modified: list[int]
+    skipped: list[int]
+    not_found: list[int]
+
+
 class DeleteRequest(BaseModel):
     job_ids: list[int] | None = None
 

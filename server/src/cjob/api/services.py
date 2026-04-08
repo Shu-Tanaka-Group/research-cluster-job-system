@@ -25,6 +25,7 @@ from .schemas import (
     ReleaseResponse,
     ResourceQuota,
     ResourceSpec,
+    SetResponse,
     SkippedItem,
     SweepSubmitRequest,
     UsageResponse,
@@ -38,6 +39,7 @@ CANCELLABLE_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING", "HELD"
 DELETABLE_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED"}
 HOLDABLE_STATUSES = {"QUEUED"}
 RELEASABLE_STATUSES = {"HELD"}
+SETTABLE_STATUSES = {"QUEUED", "HELD"}
 # Statuses counted toward MAX_QUEUED_JOBS_PER_NAMESPACE
 COUNTED_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "CANCELLED", "HELD"}
 
@@ -56,6 +58,117 @@ def allocate_job_id(session: Session, namespace: str) -> int:
     return result.scalar_one()
 
 
+def _validate_resources(
+    session: Session, flavor: str, cpu: str, memory: str, gpu: int,
+    time_limit_seconds: int,
+) -> None:
+    """Validate resources against flavor limits, node allocatable, quotas, and time limit bounds.
+
+    All parameters must be fully resolved (no None defaults). Raises HTTPException on failure.
+    """
+    from fastapi import HTTPException
+
+    settings = get_settings()
+
+    # Flavor existence check
+    flavor_def = settings.get_flavor_definition(flavor)
+    if flavor_def is None:
+        available = ", ".join(f.name for f in settings.flavors)
+        raise HTTPException(
+            status_code=400,
+            detail=f"指定された flavor '{flavor}' は存在しません。利用可能な flavor: {available}",
+        )
+
+    # Check resource exceeds max node allocatable (per-flavor)
+    max_resources = session.execute(
+        text(
+            "SELECT MAX(cpu_millicores) AS max_cpu, "
+            "       MAX(memory_mib) AS max_memory, "
+            "       MAX(gpu) AS max_gpu "
+            "FROM node_resources "
+            "WHERE flavor = :flavor"
+        ),
+        {"flavor": flavor},
+    ).mappings().first()
+
+    # Fetch nominalQuota for the flavor
+    quota_row = session.execute(
+        text("SELECT cpu, memory, gpu FROM flavor_quotas WHERE flavor = :flavor"),
+        {"flavor": flavor},
+    ).mappings().first()
+
+    if max_resources and max_resources["max_cpu"] is not None:
+        req_cpu = parse_cpu_millicores(cpu)
+        req_mem = parse_memory_mib(memory)
+
+        effective_cpu = max_resources["max_cpu"]
+        cpu_source = "最大ノード"
+        effective_memory = max_resources["max_memory"]
+        memory_source = "最大ノード"
+
+        if quota_row:
+            quota_cpu = parse_cpu_millicores(quota_row["cpu"])
+            quota_mem = parse_memory_mib(quota_row["memory"])
+            if quota_cpu < effective_cpu:
+                effective_cpu = quota_cpu
+                cpu_source = "クォータ"
+            if quota_mem < effective_memory:
+                effective_memory = quota_mem
+                memory_source = "クォータ"
+
+        if req_cpu > effective_cpu:
+            raise HTTPException(
+                status_code=400,
+                detail=f"要求 CPU ({cpu}) が flavor '{flavor}' の{cpu_source} "
+                       f"({effective_cpu}m) を超えています",
+            )
+        if req_mem > effective_memory:
+            raise HTTPException(
+                status_code=400,
+                detail=f"要求メモリ ({memory}) が flavor '{flavor}' の{memory_source} "
+                       f"({effective_memory}Mi) を超えています",
+            )
+
+    # Check GPU resource
+    if gpu > 0:
+        if flavor_def.gpu_resource_name is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"flavor '{flavor}' は GPU をサポートしていません",
+            )
+        max_gpu = max_resources["max_gpu"] if max_resources and max_resources["max_gpu"] is not None else 0
+        if max_gpu == 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"flavor '{flavor}' に GPU ノードが登録されていません",
+            )
+        effective_gpu = max_gpu
+        gpu_source = "最大ノード"
+        if quota_row:
+            quota_gpu = int(quota_row["gpu"])
+            if quota_gpu < effective_gpu:
+                effective_gpu = quota_gpu
+                gpu_source = "クォータ"
+        if gpu > effective_gpu:
+            raise HTTPException(
+                status_code=400,
+                detail=f"要求 GPU ({gpu}) が flavor '{flavor}' の{gpu_source} "
+                       f"({effective_gpu}) を超えています",
+            )
+
+    # Validate time_limit bounds
+    if time_limit_seconds > settings.MAX_TIME_LIMIT_SECONDS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"time_limit_seconds は {settings.MAX_TIME_LIMIT_SECONDS} 秒（7日）以下で指定してください",
+        )
+    if time_limit_seconds <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="time_limit_seconds は 1 以上で指定してください",
+        )
+
+
 def _validate_common(
     session: Session, namespace: str, resources: ResourceSpec,
     time_limit_seconds: int | None,
@@ -65,15 +178,9 @@ def _validate_common(
 
     settings = get_settings()
 
-    # Resolve flavor
+    # Resolve flavor and time_limit
     flavor = resources.flavor or settings.DEFAULT_FLAVOR
-    flavor_def = settings.get_flavor_definition(flavor)
-    if flavor_def is None:
-        available = ", ".join(f.name for f in settings.flavors)
-        raise HTTPException(
-            status_code=400,
-            detail=f"指定された flavor '{flavor}' は存在しません。利用可能な flavor: {available}",
-        )
+    time_limit = time_limit_seconds if time_limit_seconds is not None else settings.DEFAULT_TIME_LIMIT_SECONDS
 
     # Check for DELETING jobs (reset in progress)
     deleting_count = (
@@ -101,95 +208,8 @@ def _validate_common(
             detail=f"投入可能なジョブ数の上限（{settings.MAX_QUEUED_JOBS_PER_NAMESPACE}件）に達しています",
         )
 
-    # Check resource exceeds max node allocatable (per-flavor)
-    max_resources = session.execute(
-        text(
-            "SELECT MAX(cpu_millicores) AS max_cpu, "
-            "       MAX(memory_mib) AS max_memory, "
-            "       MAX(gpu) AS max_gpu "
-            "FROM node_resources "
-            "WHERE flavor = :flavor"
-        ),
-        {"flavor": flavor},
-    ).mappings().first()
-
-    # Fetch nominalQuota for the flavor
-    quota_row = session.execute(
-        text("SELECT cpu, memory, gpu FROM flavor_quotas WHERE flavor = :flavor"),
-        {"flavor": flavor},
-    ).mappings().first()
-
-    if max_resources and max_resources["max_cpu"] is not None:
-        req_cpu = parse_cpu_millicores(resources.cpu)
-        req_mem = parse_memory_mib(resources.memory)
-
-        effective_cpu = max_resources["max_cpu"]
-        cpu_source = "最大ノード"
-        effective_memory = max_resources["max_memory"]
-        memory_source = "最大ノード"
-
-        if quota_row:
-            quota_cpu = parse_cpu_millicores(quota_row["cpu"])
-            quota_mem = parse_memory_mib(quota_row["memory"])
-            if quota_cpu < effective_cpu:
-                effective_cpu = quota_cpu
-                cpu_source = "クォータ"
-            if quota_mem < effective_memory:
-                effective_memory = quota_mem
-                memory_source = "クォータ"
-
-        if req_cpu > effective_cpu:
-            raise HTTPException(
-                status_code=400,
-                detail=f"要求 CPU ({resources.cpu}) が flavor '{flavor}' の{cpu_source} "
-                       f"({effective_cpu}m) を超えています",
-            )
-        if req_mem > effective_memory:
-            raise HTTPException(
-                status_code=400,
-                detail=f"要求メモリ ({resources.memory}) が flavor '{flavor}' の{memory_source} "
-                       f"({effective_memory}Mi) を超えています",
-            )
-
-    # Check GPU resource
-    if resources.gpu > 0:
-        if flavor_def.gpu_resource_name is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"flavor '{flavor}' は GPU をサポートしていません",
-            )
-        max_gpu = max_resources["max_gpu"] if max_resources and max_resources["max_gpu"] is not None else 0
-        if max_gpu == 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"flavor '{flavor}' に GPU ノードが登録されていません",
-            )
-        effective_gpu = max_gpu
-        gpu_source = "最大ノード"
-        if quota_row:
-            quota_gpu = int(quota_row["gpu"])
-            if quota_gpu < effective_gpu:
-                effective_gpu = quota_gpu
-                gpu_source = "クォータ"
-        if resources.gpu > effective_gpu:
-            raise HTTPException(
-                status_code=400,
-                detail=f"要求 GPU ({resources.gpu}) が flavor '{flavor}' の{gpu_source} "
-                       f"({effective_gpu}) を超えています",
-            )
-
-    # Resolve time_limit_seconds
-    time_limit = time_limit_seconds if time_limit_seconds is not None else settings.DEFAULT_TIME_LIMIT_SECONDS
-    if time_limit > settings.MAX_TIME_LIMIT_SECONDS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"time_limit_seconds は {settings.MAX_TIME_LIMIT_SECONDS} 秒（7日）以下で指定してください",
-        )
-    if time_limit <= 0:
-        raise HTTPException(
-            status_code=400,
-            detail="time_limit_seconds は 1 以上で指定してください",
-        )
+    # Validate resources, GPU, and time limit
+    _validate_resources(session, flavor, resources.cpu, resources.memory, resources.gpu, time_limit)
 
     return time_limit, flavor
 
@@ -604,6 +624,97 @@ def release_bulk(
                 released.append(jid)
 
     return ReleaseResponse(released=released, skipped=skipped, not_found=not_found)
+
+
+def set_single(
+    session: Session, namespace: str, job_id: int,
+    cpu: str | None, memory: str | None, gpu: int | None,
+    flavor: str | None, time_limit_seconds: int | None,
+) -> dict:
+    job = session.get(Job, (namespace, job_id))
+    if job is None:
+        return {"not_found": True}
+
+    if job.status not in SETTABLE_STATUSES:
+        return {"job_id": job_id, "status": job.status, "skipped": True}
+
+    # Merge: use new value if provided, else keep existing
+    new_cpu = cpu if cpu is not None else job.cpu
+    new_memory = memory if memory is not None else job.memory
+    new_gpu = gpu if gpu is not None else job.gpu
+    new_flavor = flavor if flavor is not None else job.flavor
+    new_time_limit = time_limit_seconds if time_limit_seconds is not None else job.time_limit_seconds
+
+    # Validate the merged resource set
+    _validate_resources(session, new_flavor, new_cpu, new_memory, new_gpu, new_time_limit)
+
+    # Compute derived fields
+    new_cpu_millicores = parse_cpu_millicores(new_cpu)
+    new_memory_mib = parse_memory_mib(new_memory)
+
+    # CAS update: only update if status is still QUEUED or HELD
+    result = session.execute(
+        text(
+            "UPDATE jobs SET cpu = :cpu, memory = :memory, gpu = :gpu, "
+            "flavor = :flavor, time_limit_seconds = :tl, "
+            "cpu_millicores = :cpu_m, memory_mib = :mem_m "
+            "WHERE namespace = :ns AND job_id = :jid "
+            "AND status IN ('QUEUED', 'HELD')"
+        ),
+        {
+            "cpu": new_cpu, "memory": new_memory, "gpu": new_gpu,
+            "flavor": new_flavor, "tl": new_time_limit,
+            "cpu_m": new_cpu_millicores, "mem_m": new_memory_mib,
+            "ns": namespace, "jid": job_id,
+        },
+    )
+
+    if result.rowcount == 0:
+        # Status changed between read and write (race condition)
+        session.expire(job)
+        return {"job_id": job_id, "status": job.status, "skipped": True}
+
+    # Record event with changed fields
+    changes = {}
+    if cpu is not None and cpu != job.cpu:
+        changes["cpu"] = {"old": job.cpu, "new": new_cpu}
+    if memory is not None and memory != job.memory:
+        changes["memory"] = {"old": job.memory, "new": new_memory}
+    if gpu is not None and gpu != job.gpu:
+        changes["gpu"] = {"old": job.gpu, "new": new_gpu}
+    if flavor is not None and flavor != job.flavor:
+        changes["flavor"] = {"old": job.flavor, "new": new_flavor}
+    if time_limit_seconds is not None and new_time_limit != job.time_limit_seconds:
+        changes["time_limit_seconds"] = {"old": job.time_limit_seconds, "new": new_time_limit}
+
+    session.add(
+        JobEvent(namespace=namespace, job_id=job_id, event_type="SET", payload_json=changes)
+    )
+    session.flush()
+
+    # Return current status (job ORM object is stale after raw SQL, but status was not changed)
+    return {"job_id": job_id, "status": job.status}
+
+
+def set_bulk(
+    session: Session, namespace: str, job_ids: list[int],
+    cpu: str | None, memory: str | None, gpu: int | None,
+    flavor: str | None, time_limit_seconds: int | None,
+) -> SetResponse:
+    modified = []
+    skipped = []
+    not_found = []
+
+    for jid in job_ids:
+        result = set_single(session, namespace, jid, cpu, memory, gpu, flavor, time_limit_seconds)
+        if result.get("not_found"):
+            not_found.append(jid)
+        elif result.get("skipped"):
+            skipped.append(jid)
+        else:
+            modified.append(jid)
+
+    return SetResponse(modified=modified, skipped=skipped, not_found=not_found)
 
 
 def delete_jobs(
