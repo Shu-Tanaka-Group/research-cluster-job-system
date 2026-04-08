@@ -13,6 +13,7 @@
 - `cjob cancel`
 - `cjob hold`
 - `cjob release`
+- `cjob set`
 - `cjob delete`
 - `cjob usage`
 - `cjob reset`

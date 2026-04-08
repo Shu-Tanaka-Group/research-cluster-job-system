@@ -293,7 +293,57 @@ cjob list --time-limit 6h:12h
 cjob cancel 5
 ```
 
-## 5. プログラムが使う CPU コア数と `--cpu` の合わせ方
+## 5. 投入済みジョブのパラメータを変更する（`cjob set`）
+
+投入済みの待機中（QUEUED）または保留中（HELD）のジョブについて、リソースや実行時間の設定を変更できます。たとえば、CPU ノードが混雑しているときに別の種類のノードにジョブを移したい場合や、リソース量や実行時間を投入後に調整したい場合に使えます。
+
+### 5.1 基本的な使い方
+
+```bash
+# ジョブ 5 の flavor を変更する
+cjob set 5 --flavor cpu-sub
+
+# ジョブ 5 の CPU とメモリを変更する
+cjob set 5 --cpu 4 --memory 16Gi
+
+# ジョブ 5 の実行時間の上限を変更する
+cjob set 5 --time-limit 12h
+
+# 複数のパラメータを同時に変更する
+cjob set 5 --flavor cpu-sub --cpu 4 --memory 16Gi --time-limit 12h
+```
+
+指定したオプションだけが更新され、指定しなかった項目は元の値のまま保持されます。オプションを1つも指定しなかった場合はエラーになります。
+
+### 5.2 複数のジョブをまとめて変更する
+
+`cjob cancel` や `cjob hold` と同様に、範囲指定や複数指定ができます。
+
+```bash
+# 範囲指定
+cjob set 10-20 --flavor cpu-sub
+
+# 複数指定
+cjob set 10,11,12 --flavor cpu-sub
+
+# 組み合わせ
+cjob set 10-20,25,30 --cpu 8
+```
+
+`cjob list` の `--format ids` と組み合わせると、条件に合うジョブをまとめて変更できます。
+
+```bash
+# 待機中の CPU ジョブを全て cpu-sub に変更する
+cjob set $(cjob list --status QUEUED --flavor cpu --format ids) --flavor cpu-sub
+```
+
+### 5.3 変更できるジョブの条件
+
+変更できるのは **QUEUED（待機中）** または **HELD（保留中）** のジョブだけです。すでに実行中（RUNNING）やディスパッチ処理中（DISPATCHING / DISPATCHED）のジョブは変更できません。変更できないジョブが指定された場合はスキップされます。
+
+バリデーションルールは `cjob add` と同じです。たとえば、GPU を持たない種類のノードに変更するときに `--gpu 1` が設定されているジョブはエラーになります。
+
+## 6. プログラムが使う CPU コア数と `--cpu` の合わせ方
 
 `--cpu` はシステムがジョブに割り当てる CPU コア数です。一方、プログラムが実際に何コア使うかは、プログラム自身の設定によって決まります。**この 2 つが合っていないと、リソースを効率的に使えません。**
 
@@ -351,7 +401,7 @@ cjob add --cpu 4 -- python main.py
 cjob sweep -n 50 --parallel 5 --cpu 4 -- python main.py --trial _INDEX_
 ```
 
-## 6. リソース使用状況の確認（`cjob usage`）
+## 7. リソース使用状況の確認（`cjob usage`）
 
 `cjob usage` を実行すると、現在のリソース消費状況と直近の使用実績を確認できます。
 
@@ -396,7 +446,7 @@ Resource Usage (past 7 days)
 - 複数の flavor（CPU ノードと GPU ノードなど）を使用している場合、各日の値は全 flavor の合計です
 - リソース消費量はジョブが実行状態になった時点で、`--time-limit` の値をもとに計上されます
 
-## 7. ユーザー設定の管理（`cjob config`）
+## 8. ユーザー設定の管理（`cjob config`）
 
 `cjob config` コマンドを使って、CJob の動作をカスタマイズできます。設定は `~/.config/cjob/config.toml` に保存されます（環境変数 `XDG_CONFIG_HOME` が設定されている場合は `$XDG_CONFIG_HOME/cjob/config.toml`）。
 
