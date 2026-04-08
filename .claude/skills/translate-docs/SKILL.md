@@ -42,3 +42,10 @@ $ARGUMENTS
   - 上記以外の `docs/` 外へのリンクはそのまま維持する
 - 固有名詞（CJob, cjob, cjobctl 等）はそのまま使う
 - 既存の英語版がある場合は、変更された部分のみ更新するのではなく、全体を再翻訳する（用語や文体の一貫性を保つため）
+- 翻訳したファイルの冒頭（タイトルの前）に以下の注意書きを挿入する:
+  ```
+  > *This document was auto-translated from the [Japanese original](<日本語版への相対パス>) by Claude and may contain errors. Refer to the original for the authoritative content.*
+  ```
+  - `<日本語版への相対パス>` は翻訳先ファイルから見た日本語版ファイルへの相対パスとする
+    - 例: `docs_en/architecture/cli.md` → `../../docs/architecture/cli.md`
+    - 例: `README.en.md` → `README.md`
