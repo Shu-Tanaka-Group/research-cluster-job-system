@@ -286,7 +286,7 @@ impl CjobClient {
         let http = reqwest::Client::builder()
             .danger_accept_invalid_certs(Self::skip_tls_verify())
             .build()
-            .context("HTTP クライアントの初期化に失敗しました")?;
+            .context("failed to initialize HTTP client")?;
 
         Ok(Self {
             base_url,
@@ -302,7 +302,7 @@ impl CjobClient {
         let http = reqwest::Client::builder()
             .danger_accept_invalid_certs(Self::skip_tls_verify())
             .build()
-            .context("HTTP クライアントの初期化に失敗しました")?;
+            .context("failed to initialize HTTP client")?;
 
         Ok(Self {
             base_url,
@@ -323,7 +323,7 @@ impl CjobClient {
             .json(req)
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -336,7 +336,7 @@ impl CjobClient {
             .json(req)
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -380,7 +380,7 @@ impl CjobClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -392,7 +392,7 @@ impl CjobClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -404,7 +404,7 @@ impl CjobClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -420,7 +420,7 @@ impl CjobClient {
             .json(&req)
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -434,7 +434,7 @@ impl CjobClient {
             .json(&req)
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -446,7 +446,7 @@ impl CjobClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -460,7 +460,7 @@ impl CjobClient {
             .json(&req)
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -472,7 +472,7 @@ impl CjobClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -486,7 +486,7 @@ impl CjobClient {
             .json(&req)
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -499,7 +499,7 @@ impl CjobClient {
             .json(params)
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -512,7 +512,7 @@ impl CjobClient {
             .json(req)
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -524,7 +524,7 @@ impl CjobClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -536,7 +536,7 @@ impl CjobClient {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -547,7 +547,7 @@ impl CjobClient {
             .get(format!("{}/v1/flavors", self.base_url))
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -558,7 +558,7 @@ impl CjobClient {
             .get(format!("{}/v1/cli/version", self.base_url))
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -569,7 +569,7 @@ impl CjobClient {
             .get(format!("{}/v1/cli/versions", self.base_url))
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         handle_error_response(&resp.status(), resp).await
     }
@@ -584,11 +584,11 @@ impl CjobClient {
             .get(&url)
             .send()
             .await
-            .context("API への接続に失敗しました")?;
+            .context("failed to connect to API")?;
 
         let status_code = resp.status();
         if status_code.is_success() {
-            return Ok(resp.bytes().await.context("バイナリのダウンロードに失敗しました")?.to_vec());
+            return Ok(resp.bytes().await.context("failed to download binary")?.to_vec());
         }
 
         let body: ErrorResponse = resp
@@ -605,7 +605,7 @@ impl CjobClient {
             .or(body.message)
             .unwrap_or_else(|| format!("HTTP {}", status_code));
 
-        bail!("エラー ({}): {}", status_code, msg)
+        bail!("error ({}): {}", status_code, msg)
     }
 }
 
@@ -615,7 +615,7 @@ async fn handle_error_response<T: serde::de::DeserializeOwned>(
 ) -> Result<T> {
     let status_code = resp.status();
     if status_code.is_success() {
-        return resp.json::<T>().await.context("レスポンスの解析に失敗しました");
+        return resp.json::<T>().await.context("failed to parse response");
     }
 
     let body: ErrorResponse = resp
@@ -633,10 +633,10 @@ async fn handle_error_response<T: serde::de::DeserializeOwned>(
         .unwrap_or_else(|| format!("HTTP {}", status_code));
 
     match status_code {
-        StatusCode::UNAUTHORIZED => bail!("認証エラー: {}", msg),
-        StatusCode::NOT_FOUND => bail!("エラー: {}", msg),
+        StatusCode::UNAUTHORIZED => bail!("authentication error: {}", msg),
+        StatusCode::NOT_FOUND => bail!("error: {}", msg),
         StatusCode::CONFLICT => bail!("{}", msg),
         StatusCode::TOO_MANY_REQUESTS => bail!("{}", msg),
-        _ => bail!("エラー ({}): {}", status_code, msg),
+        _ => bail!("error ({}): {}", status_code, msg),
     }
 }
