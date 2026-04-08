@@ -70,7 +70,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 | `cjobctl jobs stalled [--sort <field>] [--reverse]` | DISPATCHED のまま滞留しているジョブ | `jobs` |
 | `cjobctl jobs remaining [--sort <field>] [--reverse]` | RUNNING ジョブの残り時間 | `jobs` |
 | `cjobctl jobs cancel --namespace <ns> [--job-id <id> \| --status <s> \| --all]` | ジョブのキャンセル | `jobs` |
-| `cjobctl counters list` | namespace ごとの job_id カウンター | `user_job_counters` |
+| `cjobctl jobs counters` | namespace ごとの job_id カウンター | `user_job_counters` |
 
 #### ソートオプション
 
@@ -673,9 +673,8 @@ ctl/
         │   ├── show.rs        # config show (ConfigMap 表示)
         │   ├── set.rs         # config set (ConfigMap 更新)
         │   └── dump.rs        # config dump (ConfigMap YAML 出力)
-        ├── jobs.rs        # jobs list/stalled/remaining/summary
+        ├── jobs.rs        # jobs list/stalled/remaining/summary/counters
         ├── usage.rs       # usage list/reset + ClusterTotals
-        ├── counters.rs    # counters list
         ├── weight.rs      # weight list/set/reset/exclusive
         ├── cluster.rs     # cluster resources
         ├── db_migrate.rs  # db migrate

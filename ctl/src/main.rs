@@ -25,11 +25,6 @@ enum Commands {
         #[command(subcommand)]
         command: UsageCommands,
     },
-    /// Inspect job counters
-    Counters {
-        #[command(subcommand)]
-        command: CountersCommands,
-    },
     /// Manage CJob system components
     System {
         #[command(subcommand)]
@@ -116,6 +111,8 @@ enum JobsCommands {
     },
     /// Show job count by namespace and status
     Summary,
+    /// Show job_id counters per namespace
+    Counters,
     /// Cancel jobs in a namespace
     Cancel {
         /// Target namespace (required)
@@ -156,12 +153,6 @@ enum UsageCommands {
         #[arg(long)]
         namespace: Option<String>,
     },
-}
-
-#[derive(Subcommand)]
-enum CountersCommands {
-    /// List job counters per namespace
-    List,
 }
 
 #[derive(Subcommand)]
@@ -363,17 +354,11 @@ async fn main() -> Result<()> {
                 JobsCommands::Stalled { sort, reverse } => cmd::jobs::stalled(&conn.client, sort.as_deref(), reverse).await,
                 JobsCommands::Remaining { sort, reverse } => cmd::jobs::remaining(&conn.client, sort.as_deref(), reverse).await,
                 JobsCommands::Summary => cmd::jobs::summary(&conn.client).await,
+                JobsCommands::Counters => cmd::counters::list(&conn.client).await,
                 JobsCommands::Cancel { namespace, job_id, status, all } => {
                     let status_upper = status.map(|s| s.to_uppercase());
                     cmd::jobs::cancel(&conn.client, &namespace, job_id, status_upper.as_deref(), all).await
                 }
-            }
-        }
-        Commands::Counters { command } => {
-            let config = config::Config::load()?;
-            let conn = db::connect(&config.database, config.system_namespace()).await?;
-            match command {
-                CountersCommands::List => cmd::counters::list(&conn.client).await,
             }
         }
         Commands::Usage { command } => {
