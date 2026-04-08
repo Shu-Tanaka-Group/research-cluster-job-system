@@ -310,7 +310,8 @@ stateDiagram-v2
     DELETING --> [*] : DB record deleted after job deletion completes
 ```
 
-> [!NOTE] > `cjob delete` immediately deletes completed jobs.
+> [!NOTE]
+> `cjob delete` immediately deletes completed jobs.
 > `cjob reset` transitions all jobs to the DELETING state, safely removes cluster resources, and then deletes the jobs. The job ID counter is also reset to 1.
 
 | Status          | Description                                          |
