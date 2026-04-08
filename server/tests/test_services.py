@@ -19,6 +19,8 @@ from cjob.api.services import (
     release_bulk,
     release_single,
     reset,
+    set_bulk,
+    set_single,
     submit_job,
     submit_sweep,
 )
@@ -1182,3 +1184,179 @@ class TestMetrics:
         before = JOBS_COMPLETED_TOTAL.labels(status="cancelled")._value.get()
         cancel_single(db_session, NS, 101)
         assert JOBS_COMPLETED_TOTAL.labels(status="cancelled")._value.get() - before == 0
+
+
+# ── set_single / set_bulk ──
+
+
+class TestSetJob:
+    def test_set_cpu_on_queued(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED", cpu="1", memory="1Gi")
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        assert result["job_id"] == 1
+        assert result["status"] == "QUEUED"
+        assert "skipped" not in result
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.cpu == "4"
+
+    def test_set_memory_on_queued(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED")
+        result = set_single(db_session, NS, 1, cpu=None, memory="8Gi", gpu=None, flavor=None, time_limit_seconds=None)
+        assert result["status"] == "QUEUED"
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.memory == "8Gi"
+
+    def test_set_flavor_on_queued(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu")
+        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu", time_limit_seconds=None)
+        assert result["status"] == "QUEUED"
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.flavor == "gpu"
+
+    def test_set_time_limit_on_queued(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED", time_limit_seconds=86400)
+        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor=None, time_limit_seconds=3600)
+        assert result["status"] == "QUEUED"
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.time_limit_seconds == 3600
+
+    def test_set_gpu_on_queued(self, db_session):
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('gpu-node', 32000, 131072, 4, 'gpu')"
+            )
+        )
+        db_session.flush()
+        _insert_job(db_session, 1, status="QUEUED", flavor="gpu", gpu=0)
+        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=2, flavor=None, time_limit_seconds=None)
+        assert result["status"] == "QUEUED"
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.gpu == 2
+
+    def test_set_on_held(self, db_session):
+        _insert_job(db_session, 1, status="HELD", cpu="1")
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        assert result["status"] == "HELD"
+        assert "skipped" not in result
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.cpu == "4"
+
+    def test_set_on_running_skipped(self, db_session):
+        _insert_job(db_session, 1, status="RUNNING")
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        assert result["skipped"] is True
+        assert result["status"] == "RUNNING"
+
+    def test_set_on_succeeded_skipped(self, db_session):
+        _insert_job(db_session, 1, status="SUCCEEDED")
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        assert result["skipped"] is True
+
+    def test_set_on_cancelled_skipped(self, db_session):
+        _insert_job(db_session, 1, status="CANCELLED")
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        assert result["skipped"] is True
+
+    def test_set_not_found(self, db_session):
+        result = set_single(db_session, NS, 999, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        assert result["not_found"] is True
+
+    def test_set_unknown_flavor_rejected(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED")
+        with pytest.raises(HTTPException) as exc_info:
+            set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="nonexistent", time_limit_seconds=None)
+        assert exc_info.value.status_code == 400
+        assert "存在しません" in exc_info.value.detail
+
+    def test_set_gpu_on_cpu_flavor_rejected(self, db_session):
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('cpu-node', 32000, 131072, 0, 'cpu')"
+            )
+        )
+        db_session.flush()
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", gpu=0)
+        with pytest.raises(HTTPException) as exc_info:
+            set_single(db_session, NS, 1, cpu=None, memory=None, gpu=2, flavor=None, time_limit_seconds=None)
+        assert exc_info.value.status_code == 400
+        assert "GPU をサポートしていません" in exc_info.value.detail
+
+    def test_set_cpu_exceeds_max_node(self, db_session):
+        db_session.execute(
+            text(
+                "INSERT INTO node_resources (node_name, cpu_millicores, memory_mib, gpu, flavor) "
+                "VALUES ('node1', 8000, 16384, 0, 'cpu')"
+            )
+        )
+        db_session.flush()
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu")
+        with pytest.raises(HTTPException) as exc_info:
+            set_single(db_session, NS, 1, cpu="16", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        assert exc_info.value.status_code == 400
+        assert "CPU" in exc_info.value.detail
+
+    def test_set_time_limit_exceeds_max(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED")
+        with pytest.raises(HTTPException) as exc_info:
+            set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor=None, time_limit_seconds=999999)
+        assert exc_info.value.status_code == 400
+        assert "604800" in exc_info.value.detail
+
+    def test_set_multiple_fields(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED", cpu="1", memory="1Gi", flavor="cpu", time_limit_seconds=86400)
+        result = set_single(db_session, NS, 1, cpu="4", memory="16Gi", gpu=None, flavor=None, time_limit_seconds=3600)
+        assert result["status"] == "QUEUED"
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.cpu == "4"
+        assert job.memory == "16Gi"
+        assert job.time_limit_seconds == 3600
+        # Unspecified fields should not change
+        assert job.flavor == "cpu"
+        assert job.gpu == 0
+
+    def test_set_preserves_unspecified_fields(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED", cpu="2", memory="4Gi", gpu=0, flavor="cpu", time_limit_seconds=7200)
+        set_single(db_session, NS, 1, cpu="8", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.cpu == "8"
+        assert job.memory == "4Gi"
+        assert job.gpu == 0
+        assert job.flavor == "cpu"
+        assert job.time_limit_seconds == 7200
+
+    def test_set_cpu_millicores_updated(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED", cpu="1", memory="1Gi")
+        set_single(db_session, NS, 1, cpu="4", memory="8Gi", gpu=None, flavor=None, time_limit_seconds=None)
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.cpu_millicores == 4000
+        assert job.memory_mib == 8192
+
+    def test_set_validates_merged_resources(self, db_session):
+        """When changing only flavor to gpu, existing gpu=0 should pass validation."""
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", gpu=0)
+        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu", time_limit_seconds=None)
+        assert result["status"] == "QUEUED"
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.flavor == "gpu"
+        assert job.gpu == 0  # gpu=0 on gpu flavor is valid
+
+    def test_set_bulk_mixed(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED", cpu="1")
+        _insert_job(db_session, 2, status="QUEUED", cpu="1")
+        _insert_job(db_session, 3, status="RUNNING", cpu="1")
+        result = set_bulk(db_session, NS, [1, 2, 3, 999], cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        assert result.modified == [1, 2]
+        assert result.skipped == [3]
+        assert result.not_found == [999]

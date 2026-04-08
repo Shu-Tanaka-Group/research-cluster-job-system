@@ -27,9 +27,13 @@ from .schemas import (
     ReleaseResponse,
     ResetErrorResponse,
     ResetResponse,
+    SetParams,
+    SetRequest,
+    SetResponse,
     SingleCancelResponse,
     SingleHoldResponse,
     SingleReleaseResponse,
+    SingleSetResponse,
     SweepSubmitRequest,
     UsageResponse,
 )
@@ -46,6 +50,8 @@ from .services import (
     release_bulk,
     release_single,
     reset,
+    set_bulk,
+    set_single,
     submit_job,
     submit_sweep,
 )
@@ -227,6 +233,36 @@ def post_release_single(
     if result.get("not_found"):
         raise HTTPException(status_code=404, detail="Job not found")
     return SingleReleaseResponse(job_id=job_id, status=result["status"])
+
+
+@router.post("/jobs/{job_id}/set", response_model=SingleSetResponse)
+def post_set_single(
+    job_id: int,
+    req: SetParams,
+    namespace: str = Depends(get_namespace),
+    session: Session = Depends(get_session),
+):
+    if all(v is None for v in [req.cpu, req.memory, req.gpu, req.flavor, req.time_limit_seconds]):
+        raise HTTPException(status_code=400, detail="変更するパラメータを1つ以上指定してください")
+    result = set_single(
+        session, namespace, job_id, req.cpu, req.memory, req.gpu, req.flavor, req.time_limit_seconds,
+    )
+    if result.get("not_found"):
+        raise HTTPException(status_code=404, detail="Job not found")
+    return SingleSetResponse(job_id=job_id, status=result["status"])
+
+
+@router.post("/jobs/set", response_model=SetResponse)
+def post_set_bulk(
+    req: SetRequest,
+    namespace: str = Depends(get_namespace),
+    session: Session = Depends(get_session),
+):
+    if all(v is None for v in [req.cpu, req.memory, req.gpu, req.flavor, req.time_limit_seconds]):
+        raise HTTPException(status_code=400, detail="変更するパラメータを1つ以上指定してください")
+    return set_bulk(
+        session, namespace, req.job_ids, req.cpu, req.memory, req.gpu, req.flavor, req.time_limit_seconds,
+    )
 
 
 @router.post("/jobs/delete", response_model=DeleteResponse)
