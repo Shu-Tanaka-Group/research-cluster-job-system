@@ -366,6 +366,12 @@ spec:
 
 taint を使う場合、ConfigMap `JOB_NODE_TAINT`・ResourceFlavor の `nodeTaints`・ノードの taint の 3 箇所は同じ値に統一する必要がある。
 
+上記の YAML をファイルに保存し、適用する。
+
+```bash
+kubectl apply -f <flavor名>-resourceflavor.yaml
+```
+
 ### 8.3 ClusterQueue に flavor を追加する
 
 ```bash
