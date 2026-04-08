@@ -1,3 +1,5 @@
+🇬🇧 [English](README.en.md)
+
 <div style="text-align: center;" align="center">
 
 # `cjob`
