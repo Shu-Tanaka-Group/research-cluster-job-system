@@ -499,7 +499,97 @@ K8s Job 削除後、Watcher は DB の status が `CANCELLED` であることを
 
 `skipped` は対象ジョブが HELD 以外の状態の場合。
 
-## 11. POST /v1/jobs/delete
+## 11. POST /v1/jobs/{job_id}/set
+
+QUEUED / HELD ジョブのパラメータを変更する。指定されたフィールドのみ更新し、未指定のフィールドは現在値を維持する。
+
+| 状態 | API の処理 |
+|---|---|
+| `QUEUED` | 指定パラメータを更新する。Dispatcher が次回スキャン時に更新後の値で dispatch する |
+| `HELD` | 指定パラメータを更新する。release 後に更新後の値で dispatch される |
+| `DISPATCHING` / `DISPATCHED` / `RUNNING` | K8s Job が作成済みのため変更不可。`skipped` として返す |
+| `SUCCEEDED` / `FAILED` / `CANCELLED` | 完了済み。`skipped` として返す |
+| `DELETING` | reset 処理中。`skipped` として返す |
+
+### request
+
+```json
+{
+  "flavor": "cpu-sub",
+  "cpu": "4",
+  "memory": "16Gi",
+  "time_limit_seconds": 43200
+}
+```
+
+全フィールドは省略可能。ただし、1つ以上のフィールドを指定する必要がある。全フィールドが省略された場合は 400 を返す。
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `cpu` | `string \| null` | CPU リソース（例: `"2"`, `"500m"`） |
+| `memory` | `string \| null` | メモリリソース（例: `"4Gi"`, `"500Mi"`） |
+| `gpu` | `int \| null` | GPU 数 |
+| `flavor` | `string \| null` | ResourceFlavor 名 |
+| `time_limit_seconds` | `int \| null` | 実行時間上限（秒） |
+
+### response
+
+```json
+{
+  "job_id": 1,
+  "status": "QUEUED"
+}
+```
+
+`status` はジョブの現在のステータス。変更成功時は `QUEUED` または `HELD`、`skipped` 時は実際のステータスを返す。
+
+### バリデーション
+
+バリデーションは指定フィールドと未指定フィールドの現在値をマージした状態に対して行う。バリデーションルールは §2（POST /v1/jobs）と同じ（flavor 存在チェック、CPU/メモリ上限、GPU 互換性、time_limit 範囲）。
+
+```json
+{ "detail": "変更するパラメータを1つ以上指定してください" }
+```
+
+### エラーレスポンス
+
+存在しない job_id または他ユーザーの job_id の場合は 404 を返す。
+
+```json
+{ "detail": "Job not found" }
+```
+
+### Race condition 対策
+
+Dispatcher の CAS（`UPDATE ... WHERE status = 'QUEUED'`）との競合を防ぐため、パラメータ更新は `WHERE status IN ('QUEUED', 'HELD')` 条件付きの UPDATE で行う。status が変更されていた場合（rowcount = 0）は `skipped` として返す。
+
+## 12. POST /v1/jobs/set
+
+複数ジョブのパラメータを一括変更する。全ジョブに同じ変更を適用する。範囲指定・個別複数指定は CLI 側で展開してから送る。
+
+### request
+
+```json
+{
+  "job_ids": [1, 2, 3],
+  "flavor": "cpu-sub",
+  "cpu": "4"
+}
+```
+
+### response
+
+```json
+{
+  "modified":  [1, 2],
+  "skipped":   [3],
+  "not_found": []
+}
+```
+
+`skipped` は対象ジョブが QUEUED / HELD 以外の状態の場合。バリデーションエラーは各ジョブで独立して発生するため、一部のジョブが成功し一部が失敗する可能性がある。ただし、全ジョブに同じパラメータを適用するため、バリデーションエラーが発生する場合は通常すべてのジョブで発生する。
+
+## 13. POST /v1/jobs/delete
 
 完了済みジョブを削除する。範囲指定・個別複数指定は CLI 側で展開してから送る。
 
@@ -547,7 +637,7 @@ CLI は `reason` に基づいてメッセージを分岐する。QUEUED / DISPAT
 **§6（cancel）との設計上の違い：**
 §6 の `skipped` は「すでに終了済み・処理済み」という単一の意味しか持たないため job_id のフラットなリストで十分である。一方 §11 の `skipped` は「実行中（cancel を促すべき）」と「保留中（release か cancel を促すべき）」と「DELETING（何もできない）」で CLI が取るべきアクションが根本的に異なる。また、CLI が事前に `GET /v1/jobs/{job_id}` で状態を確認してから分岐する方式はレース条件を生じさせるため採用しない。`reason` をレスポンスに含めることで、スキップ判定と理由取得を原子的に行える。
 
-## 12. POST /v1/reset
+## 14. POST /v1/reset
 
 ユーザーの全ジョブ履歴をリセットし、job_id の採番を 1 に戻す。
 
@@ -589,7 +679,7 @@ job_id カウンターのリセット（`next_id = 1`）は Watcher が全 `DELE
 }
 ```
 
-## 13. GET /v1/usage
+## 15. GET /v1/usage
 
 自身の namespace の直近 `FAIR_SHARE_WINDOW_DAYS` 日分のリソース使用状況を取得する。`namespace_daily_usage` テーブルから日別の消費量を集計して返す。
 
@@ -659,7 +749,7 @@ ResourceQuota が存在しない場合:
 }
 ```
 
-## 14. GET /v1/flavors
+## 16. GET /v1/flavors
 
 利用可能な ResourceFlavor の一覧とリソース情報を返す。認証不要。
 
@@ -696,7 +786,7 @@ ResourceQuota が存在しない場合:
 
 `default_flavor` は ConfigMap `DEFAULT_FLAVOR` の値。
 
-## 15. GET /v1/cli/version
+## 17. GET /v1/cli/version
 
 PVC 上に配置された CLI バイナリの最新バージョンを返す。認証不要。
 
@@ -718,7 +808,7 @@ PVC に `latest` ファイルが存在しない場合（バイナリ未配置）
 { "detail": "CLI binary not found" }
 ```
 
-## 16. GET /v1/cli/versions
+## 18. GET /v1/cli/versions
 
 PVC 上に配置された CLI バイナリの全バージョン一覧を返す。認証不要。
 
@@ -741,7 +831,7 @@ PVC に `latest` ファイルが存在しない場合は 404 を返す。
 { "detail": "CLI binary not found" }
 ```
 
-## 17. GET /v1/cli/download
+## 19. GET /v1/cli/download
 
 PVC 上に配置された CLI バイナリを返す。認証不要。
 

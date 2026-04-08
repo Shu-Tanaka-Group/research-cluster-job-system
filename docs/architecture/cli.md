@@ -26,6 +26,7 @@ cjob release <start>-<end>        # 範囲指定（例: 1-10）
 cjob release <id>,<id>,...        # 個別複数指定（例: 1,3,5）
 cjob release <start>-<end>,<id>,.. # 組み合わせ（例: 1-5,8,10-12）
 cjob release --all                # HELD 状態のジョブを全て解除
+cjob set <job-ids> [--cpu <cpu>] [--memory <memory>] [--flavor <name>] [--gpu <N>] [--time-limit <duration>]
 cjob reset
 cjob logs <job-id>
 cjob logs --follow <job-id>
@@ -97,7 +98,36 @@ cjob status <job-id>
 cjob cancel <job-id>
 ```
 
-### 2.8 ログ取得
+### 2.8 パラメータ変更
+
+QUEUED / HELD ジョブのパラメータを変更する。指定したオプションのみ更新し、未指定の項目は現在値を維持する。
+
+```bash
+# flavor の変更
+cjob set <job-ids> --flavor cpu-sub
+
+# リソースの変更
+cjob set <job-ids> --cpu 4 --memory 16Gi
+
+# time-limit の変更
+cjob set <job-ids> --time-limit 12h
+
+# 複数パラメータを同時に変更
+cjob set <job-ids> --flavor cpu-sub --cpu 4 --memory 16Gi --time-limit 12h
+
+# カンマ区切り・範囲指定
+cjob set 10,11,12 --flavor cpu-sub
+cjob set 10-20,25,30 --cpu 8
+
+# cjob list --format ids との連携
+cjob set $(cjob list --status QUEUED --flavor cpu --format ids) --flavor cpu-sub
+```
+
+変更可能なステータスは QUEUED / HELD のみ。DISPATCHING 以降のジョブは K8s Job 作成済みのため変更不可（スキップ）。
+オプションを1つも指定しなかった場合はエラーとなる。
+バリデーションルールは `cjob add` と同じ（flavor 存在チェック、リソース上限、GPU 互換性、time-limit 範囲）。
+
+### 2.9 ログ取得
 
 ```bash
 # 完了後に確認
@@ -107,7 +137,7 @@ cjob logs <job-id>
 cjob logs --follow <job-id>
 ```
 
-### 2.9 完了済みジョブの削除
+### 2.10 完了済みジョブの削除
 
 ```bash
 # 単体指定
