@@ -135,6 +135,31 @@ enum Commands {
         #[arg(long)]
         all: bool,
     },
+    /// ジョブのパラメータを変更する
+    Set {
+        /// ジョブ ID（例: 1, 1-5, 1,3,5, 1-5,8,10-12）
+        job_ids: String,
+
+        /// CPU リソース（例: "2", "4"）
+        #[arg(long)]
+        cpu: Option<String>,
+
+        /// メモリリソース（例: "4Gi", "16Gi"）
+        #[arg(long)]
+        memory: Option<String>,
+
+        /// GPU 数（例: 1）
+        #[arg(long)]
+        gpu: Option<u32>,
+
+        /// ResourceFlavor 名（例: "cpu-sub", "gpu-a100"）
+        #[arg(long)]
+        flavor: Option<String>,
+
+        /// 実行時間の上限（例: 3600, 1h, 6h, 1d, 3d）
+        #[arg(long = "time-limit")]
+        time_limit: Option<String>,
+    },
     /// 完了済みジョブを削除する
     Delete {
         /// ジョブ ID（例: 1, 1-5, 1,3,5）
@@ -302,6 +327,9 @@ async fn main() -> Result<()> {
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
         Commands::Hold { job_ids, all } => cmd_hold(&api_client, job_ids, all).await,
         Commands::Release { job_ids, all } => cmd_release(&api_client, job_ids, all).await,
+        Commands::Set { job_ids, cpu, memory, gpu, flavor, time_limit } => {
+            cmd_set(&api_client, &job_ids, cpu, memory, gpu, flavor, time_limit).await
+        },
         Commands::Delete { job_ids, all } => cmd_delete(&api_client, job_ids, all).await,
         Commands::Usage => cmd_usage(&api_client).await,
         Commands::Reset => cmd_reset(&api_client).await,
@@ -659,6 +687,65 @@ async fn cmd_release(
     }
     if !resp.not_found.is_empty() {
         println!("見つかりませんでした: {:?}", resp.not_found);
+    }
+    Ok(())
+}
+
+async fn cmd_set(
+    client: &client::CjobClient,
+    job_ids_expr: &str,
+    cpu: Option<String>,
+    memory: Option<String>,
+    gpu: Option<u32>,
+    flavor: Option<String>,
+    time_limit: Option<String>,
+) -> Result<()> {
+    if cpu.is_none() && memory.is_none() && gpu.is_none() && flavor.is_none() && time_limit.is_none() {
+        anyhow::bail!(
+            "変更するパラメータを1つ以上指定してください（--cpu, --memory, --gpu, --flavor, --time-limit）"
+        );
+    }
+
+    let time_limit_seconds = match time_limit {
+        Some(ref s) => Some(parse_duration(s)?),
+        None => None,
+    };
+
+    let ids = job_ids::parse_job_ids(job_ids_expr)?;
+
+    if ids.len() == 1 {
+        let params = client::SetParams {
+            cpu,
+            memory,
+            gpu,
+            flavor,
+            time_limit_seconds,
+        };
+        let resp = client.set_single(ids[0], &params).await?;
+        let status = resp
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        println!("ジョブ {}: {}", ids[0], status);
+    } else {
+        let req = client::SetRequest {
+            job_ids: ids,
+            cpu,
+            memory,
+            gpu,
+            flavor,
+            time_limit_seconds,
+        };
+        let resp = client.set_bulk(&req).await?;
+        if !resp.modified.is_empty() {
+            println!("変更しました: {:?}", resp.modified);
+        }
+        if !resp.skipped.is_empty() {
+            println!("スキップしました（QUEUED / HELD 以外）: {:?}", resp.skipped);
+        }
+        if !resp.not_found.is_empty() {
+            println!("見つかりませんでした: {:?}", resp.not_found);
+        }
     }
     Ok(())
 }

@@ -132,6 +132,42 @@ pub struct ReleaseResponse {
 }
 
 #[derive(Debug, Serialize)]
+pub struct SetParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flavor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_limit_seconds: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetRequest {
+    pub job_ids: Vec<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flavor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_limit_seconds: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetResponse {
+    pub modified: Vec<u32>,
+    pub skipped: Vec<u32>,
+    pub not_found: Vec<u32>,
+}
+
+#[derive(Debug, Serialize)]
 pub struct DeleteRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub job_ids: Option<Vec<u32>>,
@@ -448,6 +484,32 @@ impl CjobClient {
             .post(format!("{}/v1/jobs/release", self.base_url))
             .header("Authorization", self.auth_header())
             .json(&req)
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn set_single(&self, job_id: u32, params: &SetParams) -> Result<serde_json::Value> {
+        let resp = self
+            .http
+            .post(format!("{}/v1/jobs/{}/set", self.base_url, job_id))
+            .header("Authorization", self.auth_header())
+            .json(params)
+            .send()
+            .await
+            .context("API への接続に失敗しました")?;
+
+        handle_error_response(&resp.status(), resp).await
+    }
+
+    pub async fn set_bulk(&self, req: &SetRequest) -> Result<SetResponse> {
+        let resp = self
+            .http
+            .post(format!("{}/v1/jobs/set", self.base_url))
+            .header("Authorization", self.auth_header())
+            .json(req)
             .send()
             .await
             .context("API への接続に失敗しました")?;
