@@ -251,7 +251,7 @@ kueue_cluster_queue_nominal_quota{cluster_queue="cjob-cluster-queue", flavor="cp
 SELECT
   namespace AS "ユーザー",
   job_id AS "Job ID",
-  CASE WHEN gpu > 0 THEN 'GPU' ELSE 'CPU' END AS "種別",
+  flavor AS "種別",
   cpu || ' CPU / ' || memory || ' / GPU ' || gpu AS "リソース",
   EXTRACT(EPOCH FROM (started_at - created_at))::int AS "待ち時間(秒)",
   started_at AS "開始時刻"

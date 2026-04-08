@@ -1880,7 +1880,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  namespace AS \"ユーザー\",\n  job_id AS \"Job ID\",\n  CASE WHEN gpu > 0 THEN 'GPU' ELSE 'CPU' END AS \"種別\",\n  cpu || ' CPU / ' || memory || ' / GPU ' || gpu AS \"リソース\",\n  EXTRACT(EPOCH FROM (started_at - created_at))::int AS \"待ち時間(秒)\",\n  started_at AS \"開始時刻\"\nFROM jobs\nWHERE status IN ('RUNNING', 'SUCCEEDED', 'FAILED')\n  AND started_at IS NOT NULL\n  AND created_at >= NOW() - INTERVAL '6 hours'\nORDER BY started_at DESC\nLIMIT 15;",
+          "rawSql": "SELECT\n  namespace AS \"ユーザー\",\n  job_id AS \"Job ID\",\n  flavor AS \"種別\",\n  cpu || ' CPU / ' || memory || ' / GPU ' || gpu AS \"リソース\",\n  EXTRACT(EPOCH FROM (started_at - created_at))::int AS \"待ち時間(秒)\",\n  started_at AS \"開始時刻\"\nFROM jobs\nWHERE status IN ('RUNNING', 'SUCCEEDED', 'FAILED')\n  AND started_at IS NOT NULL\n  AND created_at >= NOW() - INTERVAL '6 hours'\nORDER BY started_at DESC\nLIMIT 15;",
           "refId": "A"
         }
       ],
