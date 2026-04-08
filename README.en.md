@@ -70,7 +70,7 @@ $ cjob sweep -n 100 --parallel 10 -- python main.py --trial _INDEX_
 - Repeatedly executes the same command with different index values
 - `_INDEX_` is replaced with integers assigned sequentially starting from 0 for each task
 - Within script files, you can reference it via the `$CJOB_INDEX` environment variable
-- For details, see [Efficient Job Execution with sweep](./docs_en/user_guide.md#2-sweep-を使った効率的なジョブ実行) in the User Guide
+- For details, see [Efficient Job Execution with sweep](./docs_en/user_guide.md#2-efficient-job-execution-with-sweep) in the User Guide
 
 ### Executing Commands and Shell Scripts
 
@@ -112,8 +112,8 @@ $ cjob add --time-limit 1h -- python main.py
 - The time limit is **a type of resource**. Overuse will lower job execution priority, so please be aware
   - Once a job enters the RUNNING state, the time limit resource is consumed; it is not refunded even if the job is subsequently cancelled or fails
   - Even if actual computation time is shorter than the time limit, the full `--time-limit` value is consumed. Estimate your program's computation time and set an appropriate value
-- For details on job count limits, see [Job Count Limits](./docs_en/user_guide.md#1-ジョブ数の制限) in the User Guide
-- For details on resource specification, see [CPU Core Count Guide](./docs_en/user_guide.md#6-プログラムが使う-cpu-コア数と---cpu-の合わせ方) in the User Guide
+- For details on job count limits, see [Job Count Limits](./docs_en/user_guide.md#1-job-count-limits) in the User Guide
+- For details on resource specification, see [CPU Core Count Guide](./docs_en/user_guide.md#6-aligning-cpu-core-count-between-your-program-and---cpu) in the User Guide
 
 ### Specifying Compute Resource Type (Flavor)
 
@@ -125,7 +125,7 @@ $ cjob add --flavor gpu --gpu 1 -- python train.py
 - `--flavor` specifies the type of compute resource for the job. It allows you to use different types of nodes such as CPU nodes and GPU nodes
 - If `--flavor` is omitted, the default type is selected
 - Available types can be checked with `cjob flavor list`
-- For details, see [Specifying Compute Resource Type](./docs_en/user_guide.md#3-計算リソースの種類を指定する--flavor) in the User Guide
+- For details, see [Specifying Compute Resource Type](./docs_en/user_guide.md#3-specifying-compute-resource-type---flavor) in the User Guide
 
 ### Checking Resource Usage
 
@@ -135,7 +135,7 @@ $ cjob usage
 
 - Check current consumption and allocation limits for CPU, memory, GPU, and job count
 - Displays daily resource consumption for the past 7 days
-- For details, see [Checking Resource Usage](./docs_en/user_guide.md#7-リソース使用状況の確認cjob-usage) in the User Guide
+- For details, see [Checking Resource Usage](./docs_en/user_guide.md#7-checking-resource-usage-cjob-usage) in the User Guide
 
 ### Listing Jobs
 
@@ -198,7 +198,7 @@ $ cjob release <job-id>
 - Held jobs are not selected by the Dispatcher and will not start execution
 - Releasing a hold with `cjob release` allows the job to be executed like a normal queued job
 - Like cancel, you can use range specification (`1-5`), comma-separated (`1,3,5`), and `--all`
-- For details, see [Holding Job Execution](./docs_en/user_guide.md#4-ジョブの実行を保留するcjob-hold--cjob-release) in the User Guide
+- For details, see [Holding Job Execution](./docs_en/user_guide.md#4-holding-job-execution-cjob-hold--cjob-release) in the User Guide
 
 ### Modifying Parameters of Submitted Jobs
 
@@ -208,7 +208,7 @@ $ cjob set <job-ids> --flavor cpu-sub --cpu 4 --memory 16Gi --time-limit 12h
 ```
 
 - Only the specified options are updated; unspecified items retain their current values
-- For details, see [Modifying Parameters of Submitted Jobs](./docs_en/user_guide.md#5-投入済みジョブのパラメータを変更するcjob-set) in the User Guide
+- For details, see [Modifying Parameters of Submitted Jobs](./docs_en/user_guide.md#5-modifying-parameters-of-submitted-jobs-cjob-set) in the User Guide
 
 ### Deleting Completed Jobs
 
