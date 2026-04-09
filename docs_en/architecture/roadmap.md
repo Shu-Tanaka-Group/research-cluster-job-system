@@ -4,12 +4,5 @@
 
 The following features can be added in the future.
 
-- Orchestration integration to call the Submit API from Prefect
-- Web UI
-- Retry failed only
-- Execution history visualization
-- Queue priority
-- Using multiple ClusterQueues selectively
-- Artifact management
-- Log aggregation
+- Integration with workflow engines such as Prefect (controlling job execution order via the Submit API)
 - HA configuration via leader election for Dispatcher / Watcher (multiple replicas)
