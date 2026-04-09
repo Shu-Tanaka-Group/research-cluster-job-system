@@ -191,7 +191,7 @@ K8s の namespace ラベル（`cjob.io/user-namespace=true`）を元に、専有
 cjobctl weight exclusive user-alice
 
 # 専有を解除（全員の weight をデフォルトに戻す）
-cjobctl weight exclusive --release
+cjobctl weight reset --all
 ```
 
 専有中に新しい namespace が作成された場合は、専有コマンドを再実行して追加分を weight = 0 にする。

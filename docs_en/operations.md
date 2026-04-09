@@ -193,7 +193,7 @@ Based on K8s namespace labels (`cjob.io/user-namespace=true`), sets weight = 0 (
 cjobctl weight exclusive user-alice
 
 # Release exclusive access (reset all weights to default)
-cjobctl weight exclusive --release
+cjobctl weight reset --all
 ```
 
 If a new namespace is created during exclusive access, re-run the exclusive command to set weight = 0 for the additions.
