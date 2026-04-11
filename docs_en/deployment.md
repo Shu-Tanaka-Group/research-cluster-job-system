@@ -553,10 +553,24 @@ Verify enablement by searching for `kueue_cluster_queue_resource_usage` in Grafa
 
 ### 15.3 Creating Kueue Resources
 
+The ClusterQueue and ResourceFlavor YAML files are intentionally not shipped with this repository. Values such as `nominalQuota`, `nodeLabels`, `nodeTaints`, and flavor names depend on each cluster's node topology, and shipping defaults would risk operators applying them blindly and running with misconfigured quotas. Administrators are expected to author these manifests per environment.
+
+Refer to [architecture/kueue.md](architecture/kueue.md) for templates and worked examples:
+
+- §1 ResourceFlavor — naming rules, templates, and worked examples for CPU / GPU nodes
+- §2 ClusterQueue — template, how to set `nominalQuota` per flavor, and the design rationale for `queueingStrategy` / `preemption`
+
+LocalQueue is created per user namespace and is covered by the namespace setup script in §11 (not discussed here).
+
+Apply the manifests you wrote, ResourceFlavor first (ClusterQueue references it):
+
 ```bash
-kubectl apply -f kueue/resource-flavor.yaml
-kubectl apply -f kueue/cluster-queue.yaml
+# Replace with the paths to the files you authored
+kubectl apply -f <path-to-resource-flavor.yaml>
+kubectl apply -f <path-to-cluster-queue.yaml>
 ```
+
+After applying, run `cjobctl cluster show-quota` and confirm that the ClusterQueue nominalQuota matches your intent. See §16.3 for the procedure to add a flavor later.
 
 ---
 
