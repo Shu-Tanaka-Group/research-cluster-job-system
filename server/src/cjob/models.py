@@ -74,7 +74,7 @@ class NamespaceWeight(Base):
     __tablename__ = "namespace_weights"
 
     namespace: Mapped[str] = mapped_column(String, primary_key=True)
-    weight: Mapped[float] = mapped_column(Float, nullable=False, server_default="1")
+    weight: Mapped[float] = mapped_column(Float, nullable=False, server_default="1.0")
 
 
 class NamespaceDailyUsage(Base):
