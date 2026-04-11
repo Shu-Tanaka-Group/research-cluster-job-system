@@ -555,10 +555,24 @@ kubectl rollout restart deployment kueue-controller-manager -n kueue-system
 
 ### 15.3 Kueue リソースの作成
 
+ClusterQueue および ResourceFlavor の YAML はリポジトリに同梱していない。`nominalQuota`・`nodeLabels`・`nodeTaints`・flavor 名といった値は各クラスタのノード構成に依存し、デフォルト値をそのまま適用すると設定漏れや誤った quota での運用に繋がりかねないため、管理者が自環境に合わせて作成する運用としている。
+
+テンプレートと設定例は [architecture/kueue.md](architecture/kueue.md) を参照する:
+
+- §1 ResourceFlavor: 命名規則、テンプレート、CPU / GPU ノード用の設定例
+- §2 ClusterQueue: テンプレート、flavor ごとの `nominalQuota` の設定方法、`queueingStrategy` / `preemption` の設計判断
+
+LocalQueue は各 user namespace に作成するため、§11 の namespace 作成スクリプトで扱う（ここでは扱わない）。
+
+作成した YAML は順に適用する:
+
 ```bash
-kubectl apply -f kueue/resource-flavor.yaml
-kubectl apply -f kueue/cluster-queue.yaml
+# 管理者が作成したファイルのパスに読み替える
+kubectl apply -f <path-to-resource-flavor.yaml>
+kubectl apply -f <path-to-cluster-queue.yaml>
 ```
+
+ResourceFlavor を先に作成する必要がある（ClusterQueue が参照するため）。適用後は `cjobctl cluster show-quota` で ClusterQueue の nominalQuota が期待通り設定されていることを確認する。後から flavor を追加する手順は §16.3 を参照。
 
 ---
 
@@ -798,9 +812,11 @@ kubectl apply -k /path/to/my-overlay
 # PostgreSQL 初回起動時に自動実行される。
 # IF NOT EXISTS を使用しているため再デプロイ時も安全に再実行できる。
 
-# 5. Kueue リソースの作成（kueue.md 参照）
-kubectl apply -f kueue/resource-flavor.yaml
-kubectl apply -f kueue/cluster-queue.yaml
+# 5. Kueue リソースの作成
+#    ResourceFlavor / ClusterQueue の YAML は環境依存のため管理者が作成する。
+#    §15.3 および architecture/kueue.md のテンプレートを参照。
+kubectl apply -f <path-to-resource-flavor.yaml>
+kubectl apply -f <path-to-cluster-queue.yaml>
 
 # 6. Kyverno のインストールとイメージ制限ポリシーの適用
 helm repo add kyverno https://kyverno.github.io/kyverno/
