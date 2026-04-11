@@ -85,7 +85,7 @@ cjobctl cluster resources
 
 ### 1.8 ClusterQueue の nominalQuota 確認
 
-Kueue ClusterQueue に設定されている現在の nominalQuota を ResourceFlavor ごとに表示する。`lendingLimit` が設定されている場合はその値も併記される。
+Kueue ClusterQueue に設定されている現在の nominalQuota を ResourceFlavor ごとに表示する。
 
 ```bash
 cjobctl cluster show-quota
@@ -378,7 +378,7 @@ kubectl apply -f <flavor名>-resourceflavor.yaml
 kubectl edit clusterqueue cjob-cluster-queue
 ```
 
-`spec.resourceGroups[0].flavors` に新しい flavor のエントリを追加する。GPU リソースを持たない flavor は `nvidia.com/gpu` の nominalQuota を `"0"` に設定する。他の flavor のリソースを保護する場合は `lendingLimit: "0"` を設定する。
+`spec.resourceGroups[0].flavors` に新しい flavor のエントリを追加する。GPU リソースを持たない flavor は `nvidia.com/gpu` の nominalQuota を `"0"` に設定する。
 
 ### 8.4 ConfigMap `RESOURCE_FLAVORS` に定義を追加する
 
