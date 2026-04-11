@@ -425,6 +425,7 @@ CLI 側で以下のバリデーションを行う:
 | `TTL_SECONDS_AFTER_FINISHED` | int | dispatcher |
 | `JOB_NODE_TAINT` | string | dispatcher |
 | `WATCHER_METRICS_PORT` | int | watcher |
+| `DISPATCHER_METRICS_PORT` | int | dispatcher |
 | `LOG_LEVEL` | string | dispatcher, watcher, submit-api |
 
 **更新不可キー:**

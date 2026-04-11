@@ -48,6 +48,7 @@ const CONFIG_KEYS: &[ConfigKeyMeta] = &[
     ConfigKeyMeta { key: "RESOURCE_QUOTA_NAME", value_type: ValueType::String, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "RESOURCE_QUOTA_SYNC_INTERVAL_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "WATCHER_METRICS_PORT", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
+    ConfigKeyMeta { key: "DISPATCHER_METRICS_PORT", value_type: ValueType::Integer, components: &["dispatcher"], updatable: true },
     // Submit API
     ConfigKeyMeta { key: "MAX_QUEUED_JOBS_PER_NAMESPACE", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },
     ConfigKeyMeta { key: "MAX_SWEEP_COMPLETIONS", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },

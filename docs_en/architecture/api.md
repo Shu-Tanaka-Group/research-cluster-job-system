@@ -15,6 +15,7 @@ The following errors may occur across all endpoints.
 | 403 | The namespace has no CJob user configuration (`cjob.io/username` annotation) | `{ "detail": "Namespace is not configured as a CJob user namespace" }` |
 | 404 | Non-existent job_id, or another user's job_id | `{ "detail": "Job not found" }` |
 | 409 | Reset in progress (submitting to a namespace that has a `DELETING` job) | `{ "detail": "Cannot submit jobs while reset is in progress. Please wait and try again." }` |
+| 429 | The active job count in the namespace has reached `MAX_QUEUED_JOBS_PER_NAMESPACE` (POST /v1/jobs, POST /v1/sweep) | `{ "detail": "Job submission limit reached (<MAX_QUEUED_JOBS_PER_NAMESPACE> jobs)" }` |
 | 500 | Internal error such as namespace read failure | `{ "detail": "Internal server error" }` |
 | 503 | Temporary service unavailability such as DB write failure | `{ "detail": "Service temporarily unavailable" }` |
 
