@@ -108,11 +108,36 @@ async fn fetch_window_days(k8s_client: &kube::Client, system_ns: &str) -> i32 {
     }
 }
 
-pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, namespace: Option<&str>) -> Result<()> {
+pub async fn list(
+    client: &Client,
+    k8s_client: &kube::Client,
+    system_ns: &str,
+    namespace: Option<&str>,
+    flavor: Option<&str>,
+) -> Result<()> {
+    // Validate --flavor against flavor_quotas (same policy as set-drf-weight).
+    if let Some(f) = flavor {
+        let row = client
+            .query_one(
+                "SELECT COUNT(*)::BIGINT FROM flavor_quotas WHERE flavor = $1",
+                &[&f],
+            )
+            .await?;
+        let count: i64 = row.get(0);
+        if count == 0 {
+            bail!(
+                "Flavor '{}' not found in flavor_quotas. \
+                 Ensure the Watcher has synced the ClusterQueue.",
+                f,
+            );
+        }
+    }
+
     // 1. Daily raw data
     // namespace_daily_usage の主キーは (namespace, usage_date, flavor) の複合キーで、
     // 同じ (namespace, date) に対して flavor ごとに行が存在する。Daily Usage の
     // 表示では flavor をまたいで集計するため、namespace と usage_date で GROUP BY する。
+    // --flavor 指定時は AND flavor = $2 で対象 flavor のレコードのみに絞り込む。
     let daily_rows = client
         .query(
             "SELECT namespace, usage_date, \
@@ -121,18 +146,26 @@ pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, n
                     SUM(gpu_seconds)::BIGINT AS gpu_seconds \
              FROM namespace_daily_usage \
              WHERE ($1::TEXT IS NULL OR namespace = $1) \
+               AND ($2::TEXT IS NULL OR flavor = $2) \
              GROUP BY namespace, usage_date \
              ORDER BY usage_date ASC, namespace ASC",
-            &[&namespace],
+            &[&namespace, &flavor],
         )
         .await?;
 
     if daily_rows.is_empty() {
-        println!("No usage data found.");
+        if let Some(f) = flavor {
+            println!("No usage data found for flavor '{}'.", f);
+        } else {
+            println!("No usage data found.");
+        }
         return Ok(());
     }
 
-    println!("=== Daily Usage ===");
+    match flavor {
+        Some(f) => println!("=== Daily Usage (flavor: {}) ===", f),
+        None => println!("=== Daily Usage ==="),
+    }
     println!(
         "{:<20} {:<12} {:>14} {:>14} {:>10}",
         "NAMESPACE", "DATE", "CPU (core·h)", "Mem (GiB·h)", "GPU (h)"
@@ -157,7 +190,10 @@ pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, n
     let window_days = fetch_window_days(k8s_client, system_ns).await;
     let window_days_i32: i32 = window_days;
     println!();
-    println!("=== {}-Day Window Aggregate ===", window_days);
+    match flavor {
+        Some(f) => println!("=== {}-Day Window Aggregate (flavor: {}) ===", window_days, f),
+        None => println!("=== {}-Day Window Aggregate ===", window_days),
+    }
     let window_rows = client
         .query(
             "SELECT namespace, \
@@ -167,8 +203,9 @@ pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, n
              FROM namespace_daily_usage \
              WHERE usage_date > CURRENT_DATE - $2::INT \
                AND ($1::TEXT IS NULL OR namespace = $1) \
+               AND ($3::TEXT IS NULL OR flavor = $3) \
              GROUP BY namespace ORDER BY namespace",
-            &[&namespace, &window_days_i32],
+            &[&namespace, &window_days_i32, &flavor],
         )
         .await?;
 
@@ -191,7 +228,13 @@ pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, n
     }
 
     // 3. DRF dominant share (per-flavor method)
+    // DRF は定義上 flavor を跨いで重み付き合算するスコアのため、--flavor 指定時は
+    // 計算・出力を完全にスキップし、代わりに 1 行の注記を出す。
     println!();
+    if flavor.is_some() {
+        println!("DRF Dominant Share is computed across all flavors; pass no --flavor to see it.");
+        return Ok(());
+    }
     println!("=== DRF Dominant Share ===");
 
     let flavor_caps = fetch_flavor_caps(client).await;

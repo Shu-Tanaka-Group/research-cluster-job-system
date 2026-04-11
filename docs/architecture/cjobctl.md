@@ -107,15 +107,15 @@ namespace = "cjob-system"   # 省略時デフォルト
 
 | コマンド | 概要 | 対象テーブル |
 |---|---|---|
-| `cjobctl usage list [--namespace <ns>]` | 日別消費量・7日ウィンドウ集計・DRF dominant share | `namespace_daily_usage`, `namespace_weights` |
+| `cjobctl usage list [--namespace <ns>] [--flavor <name>]` | 日別消費量・7日ウィンドウ集計・DRF dominant share | `namespace_daily_usage`, `namespace_weights`, `flavor_quotas` |
 | `cjobctl usage reset [--namespace <ns> \| --all]` | 消費量データの削除 | `namespace_daily_usage` |
 | `cjobctl usage quota [--namespace <ns>]` | 全 namespace の ResourceQuota 使用状況 | `namespace_resource_quotas` + K8s namespace 一覧 |
 
-`usage list` の Daily Usage はデフォルトで日付昇順（古い日付が上）で表示する。`--namespace` オプションで特定 namespace のデータのみに絞り込める（Daily / 7-Day Window / DRF すべてのセクションに適用）。
+`usage list` の Daily Usage はデフォルトで日付昇順（古い日付が上）で表示する。`--namespace` オプションで特定 namespace のデータのみに絞り込める（Daily / 7-Day Window / DRF すべてのセクションに適用）。`--flavor` オプションで特定 ResourceFlavor のレコードのみに絞り込める（Daily / N-Day Window に適用、DRF セクションは非表示となる。詳細は後述）。`--namespace` と `--flavor` は併用可能で、両方指定した場合は AND 条件で絞り込む。
 
 #### `cjobctl usage list`
 
-`namespace_daily_usage` テーブルから各 namespace のリソース消費量を読み出し、3 つのセクションを順に出力する。出力は常にこの順序で、データが存在しない場合は `No usage data found.` を表示して終了する。
+`namespace_daily_usage` テーブルから各 namespace のリソース消費量を読み出し、3 つのセクションを順に出力する。出力は常にこの順序で、データが存在しない場合は `No usage data found.` を表示して終了する（`--flavor` 指定時は `No usage data found for flavor '<name>'.` を表示する）。
 
 各セクションのカラム構成と単位換算:
 
@@ -129,7 +129,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 | `Mem (GiB·h)` | `SUM(memory_mib_seconds) / 1024 / 3600` |
 | `GPU (h)` | `SUM(gpu_seconds) / 3600` |
 
-`namespace_daily_usage` の主キーは `(namespace, usage_date, flavor)` の複合キーで、同じ `(namespace, date)` に対して flavor ごとに行が存在する。Daily Usage では flavor をまたいで集計するため、`GROUP BY namespace, usage_date` で合算する（複数 flavor がある場合でも同一日付が 1 行に統合される）。並び順は `ORDER BY usage_date ASC, namespace ASC`。
+`namespace_daily_usage` の主キーは `(namespace, usage_date, flavor)` の複合キーで、同じ `(namespace, date)` に対して flavor ごとに行が存在する。Daily Usage では flavor をまたいで集計するため、`GROUP BY namespace, usage_date` で合算する（複数 flavor がある場合でも同一日付が 1 行に統合される）。並び順は `ORDER BY usage_date ASC, namespace ASC`。`--flavor <name>` 指定時は `WHERE` 句に `AND flavor = $flavor` を追加し、指定 flavor のレコードのみを集計する。この場合、セクションヘッダーは `=== Daily Usage (flavor: <name>) ===` となり、flavor 合算結果と区別できる。
 
 **N-Day Window Aggregate**
 
@@ -140,7 +140,7 @@ namespace = "cjob-system"   # 省略時デフォルト
 | `Mem (GiB·h)` | 同上 |
 | `GPU (h)` | 同上 |
 
-集計ウィンドウ日数 N は `cjob-system` namespace の ConfigMap `cjob-config` のキー `FAIR_SHARE_WINDOW_DAYS` から取得する（取得失敗時・キー未設定時は 7 日）。セクションヘッダーには実際に使用した日数が `=== N-Day Window Aggregate ===` として反映される。SQL 条件は `usage_date > CURRENT_DATE - N`。
+集計ウィンドウ日数 N は `cjob-system` namespace の ConfigMap `cjob-config` のキー `FAIR_SHARE_WINDOW_DAYS` から取得する（取得失敗時・キー未設定時は 7 日）。セクションヘッダーには実際に使用した日数が `=== N-Day Window Aggregate ===` として反映される。SQL 条件は `usage_date > CURRENT_DATE - N`。`--flavor <name>` 指定時は `WHERE` 句に `AND flavor = $flavor` を追加し、セクションヘッダーは `=== N-Day Window Aggregate (flavor: <name>) ===` となる。
 
 **DRF Dominant Share**
 
@@ -169,6 +169,8 @@ DOM_SHARE(ns)         = drf_score(ns) / namespace_weight(ns)
 
 行の並び順は `DOM_SHARE` 昇順（=消費の少ない namespace が上）。`WEIGHT = 0` の namespace は `DOM_SHARE` を `inf` 相当として末尾に配置する。
 
+`--flavor <name>` 指定時、DRF Dominant Share セクションは計算・出力を完全にスキップする。DRF は定義上 flavor をまたいで重み付き合算するスコアであり、単一 flavor のみを対象にすると DRF の目的（複数リソース次元を跨いだ公平性）が失われるためである（計算結果は単に 1 flavor の dominant share × `drf_weight` となり、誤解を招く）。DRF セクションの代わりに 1 行の注記 `DRF Dominant Share is computed across all flavors; pass no --flavor to see it.` を出力する。
+
 出力例（`FAIR_SHARE_WINDOW_DAYS=7`、cpu flavor のみの構成）:
 
 ```
@@ -189,7 +191,9 @@ user-bob                        4.0           16.0        0.0        1         0
 user-alice                     20.0           80.0        0.0        1         0.007440
 ```
 
-複数 flavor がある構成では、Daily Usage セクションは `(namespace, date)` 単位で 1 行に統合され、flavor ごとの内訳は表示されない。flavor 別の内訳を閲覧する CLI コマンドは現時点では存在せず、必要な場合は `namespace_daily_usage` を直接参照する必要がある。DRF Dominant Share は内部で flavor 単位に dominant share を計算し、`drf_weight` で重み付け合算するが、出力には flavor 列を含めず namespace 単位の集計値のみを表示する。
+複数 flavor がある構成では、`--flavor` オプション未指定時の Daily Usage セクションは `(namespace, date)` 単位で 1 行に統合され、flavor ごとの内訳は表示されない。flavor 別の内訳を確認したい場合は `cjobctl usage list --flavor <name>` を使用する（Daily Usage と N-Day Window Aggregate が指定 flavor のレコードのみで集計される）。DRF Dominant Share は内部で flavor 単位に dominant share を計算し、`drf_weight` で重み付け合算するが、出力には flavor 列を含めず namespace 単位の集計値のみを表示する。
+
+`--flavor` の引数に指定された名前は `flavor_quotas` テーブルで存在確認される。未登録の flavor 名が指定された場合は `Flavor '<name>' not found in flavor_quotas. Ensure the Watcher has synced the ClusterQueue.` を表示して異常終了する（`cjobctl cluster set-drf-weight` と同じ方針）。
 
 #### `cjobctl usage quota`
 
