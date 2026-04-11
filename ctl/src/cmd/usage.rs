@@ -110,11 +110,18 @@ async fn fetch_window_days(k8s_client: &kube::Client, system_ns: &str) -> i32 {
 
 pub async fn list(client: &Client, k8s_client: &kube::Client, system_ns: &str, namespace: Option<&str>) -> Result<()> {
     // 1. Daily raw data
+    // namespace_daily_usage の主キーは (namespace, usage_date, flavor) の複合キーで、
+    // 同じ (namespace, date) に対して flavor ごとに行が存在する。Daily Usage の
+    // 表示では flavor をまたいで集計するため、namespace と usage_date で GROUP BY する。
     let daily_rows = client
         .query(
-            "SELECT namespace, usage_date, cpu_millicores_seconds, memory_mib_seconds, gpu_seconds \
+            "SELECT namespace, usage_date, \
+                    SUM(cpu_millicores_seconds)::BIGINT AS cpu_millicores_seconds, \
+                    SUM(memory_mib_seconds)::BIGINT AS memory_mib_seconds, \
+                    SUM(gpu_seconds)::BIGINT AS gpu_seconds \
              FROM namespace_daily_usage \
              WHERE ($1::TEXT IS NULL OR namespace = $1) \
+             GROUP BY namespace, usage_date \
              ORDER BY usage_date ASC, namespace ASC",
             &[&namespace],
         )
