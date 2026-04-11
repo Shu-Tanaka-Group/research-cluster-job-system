@@ -215,7 +215,7 @@ gpu-a100        nvidia.com/gpu           2          4   50.0%
 
 #### `cjobctl cluster show-quota`
 
-ClusterQueue の各 ResourceFlavor について nominalQuota を表示する。`lendingLimit` が設定されているリソースはその値も併記する。
+ClusterQueue の各 ResourceFlavor について nominalQuota を表示する。
 
 出力例:
 
@@ -228,9 +228,9 @@ ClusterQueue の各 ResourceFlavor について nominalQuota を表示する。`
   GPU:    0
 
 [gpu-a100]
-  CPU:    64      (lendingLimit: 0)
-  Memory: 500Gi   (lendingLimit: 0)
-  GPU:    4        (lendingLimit: 0)
+  CPU:    64
+  Memory: 500Gi
+  GPU:    4
 ```
 
 #### `cjobctl cluster set-quota`

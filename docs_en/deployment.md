@@ -662,7 +662,7 @@ spec:
 kubectl edit clusterqueue cjob-cluster-queue
 ```
 
-Add a new flavor entry to `spec.resourceGroups[0].flavors`. For flavors without GPU resources, set the `nvidia.com/gpu` nominalQuota to `"0"`. To protect other flavors' resources, set `lendingLimit: "0"`.
+Add a new flavor entry to `spec.resourceGroups[0].flavors`. For flavors without GPU resources, set the `nvidia.com/gpu` nominalQuota to `"0"`.
 
 #### 4. Add Definition to ConfigMap `RESOURCE_FLAVORS`
 

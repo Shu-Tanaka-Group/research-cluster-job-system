@@ -147,7 +147,6 @@ fn cluster_queue_api(k8s_client: &kube::Client) -> Api<DynamicObject> {
 struct FlavorResourceQuota {
     name: String,
     nominal_quota: String,
-    lending_limit: Option<String>,
 }
 
 struct FlavorQuota {
@@ -172,13 +171,9 @@ fn extract_flavor_quotas(cq: &DynamicObject) -> Vec<FlavorQuota> {
                                 .as_str()
                                 .unwrap_or("(not set)")
                                 .to_string();
-                            let lending = res["lendingLimit"]
-                                .as_str()
-                                .map(|s| s.to_string());
                             resources.push(FlavorResourceQuota {
                                 name,
                                 nominal_quota: nominal,
-                                lending_limit: lending,
                             });
                         }
                     }
@@ -220,19 +215,11 @@ pub async fn show_quota(k8s_client: &kube::Client) -> Result<()> {
         println!("[{}]", flavor.name);
         for res in &flavor.resources {
             let label = resource_display_name(&res.name);
-            match &res.lending_limit {
-                Some(limit) => println!(
-                    "  {:<7} {:<8} (lendingLimit: {})",
-                    format!("{}:", label),
-                    res.nominal_quota,
-                    limit,
-                ),
-                None => println!(
-                    "  {:<7} {}",
-                    format!("{}:", label),
-                    res.nominal_quota,
-                ),
-            }
+            println!(
+                "  {:<7} {}",
+                format!("{}:", label),
+                res.nominal_quota,
+            );
         }
     }
 

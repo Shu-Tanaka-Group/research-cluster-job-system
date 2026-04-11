@@ -96,7 +96,6 @@ kind: ClusterQueue
 metadata:
   name: cjob-cluster-queue
 spec:
-  cohortName: cjob-cohort
   namespaceSelector: {}
   resourceGroups:
     - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
@@ -113,13 +112,10 @@ spec:
           resources:
             - name: cpu
               nominalQuota: "64"
-              lendingLimit: "0"
             - name: memory
               nominalQuota: "500Gi"
-              lendingLimit: "0"
             - name: nvidia.com/gpu
               nominalQuota: "4"
-              lendingLimit: "0"
   queueingStrategy: BestEffortFIFO
   preemption:
     withinClusterQueue: Never   # Prohibits forceful termination of running jobs
@@ -137,32 +133,29 @@ To add a new flavor, add a new entry to the `resourceGroups[0].flavors` list. Ea
   resources:
     - name: cpu
       nominalQuota: "128"
-      lendingLimit: "0"
     - name: memory
       nominalQuota: "1000Gi"
-      lendingLimit: "0"
     - name: nvidia.com/gpu
       nominalQuota: "8"
-      lendingLimit: "0"
 ```
 
 **For different GPU vendors:** If using GPUs with a different resource name such as AMD GPU (`amd.com/gpu`), that resource name must be added to `coveredResources`. In this case, all existing flavors must also have the `nominalQuota` (`"0"`) for that resource added.
 
-### Resource Protection via lendingLimit
+### Resource Isolation Between Flavors
 
-Set `lendingLimit: "0"` on all resources of GPU flavors. This prevents CPU jobs from borrowing cpu / memory from GPU flavor quotas under `BestEffortFIFO`, ensuring GPU jobs can always be admitted. Without `lendingLimit`, CPU jobs that exceed the CPU flavor's `nominalQuota` can consume GPU flavor quota, making it impossible for GPU jobs to be admitted.
+The Dispatcher always sets the `nodeSelector` on Job Pods to the `nodeLabels` of the user-specified flavor (`cjob.io/flavor: <flavor-name>`). Kueue matches the workload's `nodeSelector` against each ResourceFlavor's `nodeLabels` and excludes any flavor that does not match from admission candidates. As a result, a job submitted for one flavor can never consume the quota of another flavor.
 
-`lendingLimit` can only be used in ClusterQueues that belong to a cohort, so `cohortName: cjob-cohort` is set. Even if there are no other ClusterQueues in the cohort, `lendingLimit` functions effectively.
+Since a single ClusterQueue configuration has no borrowing or lending between cohorts, `cohortName` and `lendingLimit` are not set. If the configuration is later changed to host multiple ClusterQueues in a cohort to share resources, set `cohortName` and, as needed, `lendingLimit` at that point.
 
 ### Design Decisions
 
 The `nominalQuota` for each flavor is set to match the allocatable resources of nodes belonging to that flavor. It can be updated with `cjobctl cluster set-quota`.
 
-Reason for adopting `BestEffortFIFO`: When there are available resources, other users' idle quota can be utilized (one user can use all cores), and `StrictFIFO` could cause one user's large number of submissions to stall the entire system. Resource sharing between users within a single ClusterQueue is handled by this `queueingStrategy`. `cohortName` is set to enable `lendingLimit`; it is not intended for resource sharing within the cohort.
+Reason for adopting `BestEffortFIFO`: When there are available resources, other users' idle quota can be utilized (one user can use all cores), and `StrictFIFO` could cause one user's large number of submissions to stall the entire system. Resource sharing between users within a single ClusterQueue is handled by this `queueingStrategy`.
 
 Reason for prohibiting preemption: In research computing, forceful termination of jobs mid-run often results in lost results.
 
-With the above configuration: `BestEffortFIFO` allows other users to utilize idle resources. `preemption.withinClusterQueue: Never` prevents running jobs from being forcefully terminated. Jobs match the ResourceFlavor for the user-specified flavor, and Kueue automatically assigns nodes based on `nodeLabels`. GPU flavor `lendingLimit: "0"` reserves GPU node resources exclusively for GPU jobs.
+With the above configuration: `BestEffortFIFO` allows other users to utilize idle resources. `preemption.withinClusterQueue: Never` prevents running jobs from being forcefully terminated. The `nodeSelector` the Dispatcher sets on Job Pods constrains Kueue to consider only the corresponding flavor's ResourceFlavor for admission, and node assignment also follows the `nodeLabels`.
 
 ## 3. LocalQueue
 
