@@ -34,10 +34,6 @@
       "Bash(uv sync:*)",
       "Bash(pip3 install:*)",
       "Bash(cross --version)",
-      "Bash(find . -type f \\\\\\(-name *.py -o -name *.rs -o -name *.toml -o -name Dockerfile* -o -name *.yaml -o -name *.yml \\\\\\))",
-      "Bash(find . -type f \\\\\\(-name *.py -o -name *.rs -o -name Dockerfile* -o -name *.toml -o -name *.yaml -o -name *.yml \\\\\\) -not -path ./.git/*)",
-      "Bash(find . -type f \\\\\\(-name *.yaml -o -name *.yml \\\\\\))",
-      "Bash(find . -type f \\\\\\(-name *.sh -o -name *.bash -o -name *.json -o -name Makefile \\\\\\) ! -path */.venv/* ! -path */target/* ! -path */.git/*)",
       "Read(//tmp/**)"
     ]
   }
