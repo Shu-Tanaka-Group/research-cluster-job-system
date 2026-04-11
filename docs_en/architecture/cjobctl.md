@@ -115,13 +115,83 @@ Node name is obtained by the Watcher from the Pod's `spec.nodeName` during RUNNI
 
 The Daily Usage in `usage list` is displayed in ascending date order (oldest date first) by default. The `--namespace` option filters to data for a specific namespace only (applies to all sections: Daily / 7-Day Window / DRF).
 
-The DRF dominant share calculation in `usage list` uses the same formula as the Dispatcher (`server/src/cjob/dispatcher/scheduler.py`):
+#### `cjobctl usage list`
+
+Reads each namespace's resource consumption from the `namespace_daily_usage` table and prints three sections in order. The output order is always fixed; if no data exists, it prints `No usage data found.` and exits.
+
+Column schemas and unit conversions for each section:
+
+**Daily Usage**
+
+| Column | Description |
+|---|---|
+| `NAMESPACE` | User namespace |
+| `DATE` | `usage_date` (YYYY-MM-DD) |
+| `CPU (core·h)` | `SUM(cpu_millicores_seconds) / 1000 / 3600` |
+| `Mem (GiB·h)` | `SUM(memory_mib_seconds) / 1024 / 3600` |
+| `GPU (h)` | `SUM(gpu_seconds) / 3600` |
+
+The primary key of `namespace_daily_usage` is the composite key `(namespace, usage_date, flavor)`, so multiple rows exist for the same `(namespace, date)` — one per flavor. Daily Usage aggregates across flavors by using `GROUP BY namespace, usage_date`, so even with multiple flavors each date collapses to a single row. Order is `ORDER BY usage_date ASC, namespace ASC`.
+
+**N-Day Window Aggregate**
+
+| Column | Description |
+|---|---|
+| `NAMESPACE` | User namespace |
+| `CPU (core·h)` | Sum over the past N days (same unit conversion as Daily Usage) |
+| `Mem (GiB·h)` | Same |
+| `GPU (h)` | Same |
+
+The aggregation window size N is read from the key `FAIR_SHARE_WINDOW_DAYS` in the `cjob-config` ConfigMap in the `cjob-system` namespace (fallback is 7 days if retrieval fails or the key is absent). The section header reflects the actual value used, e.g., `=== N-Day Window Aggregate ===`. The SQL condition is `usage_date > CURRENT_DATE - N`.
+
+**DRF Dominant Share**
+
+| Column | Description |
+|---|---|
+| `NAMESPACE` | User namespace |
+| `CPU (core·h)` | Sum across flavors over the past N days (same as Window Aggregate) |
+| `Mem (GiB·h)` | Same |
+| `GPU (h)` | Same |
+| `WEIGHT` | `namespace_weights.weight` (defaults to 1.0 when the row is absent) |
+| `DOM_SHARE` | Weighted DRF score divided by the namespace weight |
+
+The formula is identical to the Dispatcher (`server/src/cjob/dispatcher/scheduler.py`): compute `dominant_share = GREATEST(cpu_share, mem_share, gpu_share)` per flavor, then weight each by `flavor_quotas.drf_weight` and sum within the namespace:
 
 ```
-dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
+window_seconds        = N × 86400
+cpu_share(f)          = cpu_millicores_seconds(ns,f) / (cap_cpu(f) × window_seconds)
+mem_share(f)          = memory_mib_seconds(ns,f)     / (cap_mem(f) × window_seconds)
+gpu_share(f)          = gpu_seconds(ns,f)            / (cap_gpu(f) × window_seconds)
+dominant_share(ns,f)  = MAX(cpu_share, mem_share, gpu_share)
+drf_score(ns)         = Σ_f dominant_share(ns,f) × drf_weight(f)
+DOM_SHARE(ns)         = drf_score(ns) / namespace_weight(ns)
 ```
 
-Cluster total resources are obtained via `SUM()` from the DB's `node_resources` table. If the table is empty, the dominant share column displays `N/A` (the Dispatcher disables DRF sorting and falls back to namespace name order, but cjobctl is a display tool so it explicitly indicates that calculation is not possible).
+The per-flavor capacity `cap_*` uses the `node_resources` allocatable total clamped by the `flavor_quotas` nominalQuota (`min(allocatable, nominalQuota)`). If `node_resources` is empty or the flavor is missing from `flavor_quotas`, allocatable is used as-is as a fallback. If `node_resources` is entirely empty, the DRF section is replaced with `No node_resources data. DRF disabled.` (the Dispatcher disables DRF sorting and falls back to namespace name order, but cjobctl is a display tool so it explicitly indicates that calculation is not possible).
+
+Rows are ordered by `DOM_SHARE` ascending (namespaces with lower consumption first). Namespaces with `WEIGHT = 0` are placed at the end by treating `DOM_SHARE` as effectively `inf`.
+
+Output example (`FAIR_SHARE_WINDOW_DAYS=7`, cpu-flavor-only cluster):
+
+```
+=== Daily Usage ===
+NAMESPACE            DATE             CPU (core·h)    Mem (GiB·h)    GPU (h)
+user-alice           2026-04-05               12.0           48.0        0.0
+user-bob             2026-04-05                4.0           16.0        0.0
+user-alice           2026-04-06                8.0           32.0        0.0
+
+=== 7-Day Window Aggregate ===
+NAMESPACE              CPU (core·h)    Mem (GiB·h)    GPU (h)
+user-alice                     20.0           80.0        0.0
+user-bob                        4.0           16.0        0.0
+
+=== DRF Dominant Share ===
+NAMESPACE              CPU (core·h)    Mem (GiB·h)    GPU (h)   WEIGHT        DOM_SHARE
+user-bob                        4.0           16.0        0.0        1         0.001488
+user-alice                     20.0           80.0        0.0        1         0.007440
+```
+
+In multi-flavor clusters, the Daily Usage section collapses to one row per `(namespace, date)` and does not show a per-flavor breakdown (use `cjob usage` if a per-flavor breakdown is needed). DRF Dominant Share computes dominant share per flavor and combines them using `drf_weight`.
 
 #### `cjobctl usage quota`
 
