@@ -233,6 +233,8 @@ def reconcile_cycle(session: Session, k8s_jobs: list[k8s_client.V1Job]):
                     db_job.node_name, new_names
                 )
             if new_status in ("SUCCEEDED", "FAILED"):
+                if db_job.started_at is None:
+                    _record_resource_usage(session, db_job)
                 db_job.finished_at = func.now()
                 JOBS_COMPLETED_TOTAL.labels(status=new_status.lower()).inc()
             if new_status == "FAILED" and reason == "DeadlineExceeded":

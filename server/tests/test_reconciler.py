@@ -483,6 +483,85 @@ class TestReconcileResourceUsage:
         # 3600 * 4096Mi * 10 = 147_456_000
         assert usage.memory_mib_seconds == 3600 * 4096 * 10
 
+    def test_usage_fallback_on_direct_succeeded(self, mock_delete, mock_fetch_nodes, db_session):
+        """Jobs that complete within 1 scan cycle (never observed RUNNING)
+        should still record usage on SUCCEEDED transition."""
+        _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
+                     gpu=0, time_limit_seconds=3600,
+                     cpu_millicores=2000, memory_mib=4096)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1",
+                                   conditions=[V1JobCondition(type="Complete", status="True")])]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "SUCCEEDED"
+        assert job.started_at is None
+
+        usage = self._get_usage(db_session)
+        assert usage is not None
+        assert usage.cpu_millicores_seconds == 3600 * 2000
+        assert usage.memory_mib_seconds == 3600 * 4096
+
+    def test_usage_fallback_on_direct_failed(self, mock_delete, mock_fetch_nodes, db_session):
+        """Jobs that fail within 1 scan cycle (never observed RUNNING)
+        should still record usage on FAILED transition."""
+        _insert_job(db_session, 1, status="DISPATCHED", cpu="1", memory="1Gi",
+                     gpu=0, time_limit_seconds=100,
+                     cpu_millicores=1000, memory_mib=1024)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1",
+                                   conditions=[V1JobCondition(type="Failed", status="True")])]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.started_at is None
+
+        usage = self._get_usage(db_session)
+        assert usage is not None
+        assert usage.cpu_millicores_seconds == 100 * 1000
+        assert usage.memory_mib_seconds == 100 * 1024
+
+    def test_usage_not_duplicated_when_running_observed(self, mock_delete, mock_fetch_nodes, db_session):
+        """When RUNNING was already observed, completion should not record usage again."""
+        from datetime import datetime, timezone
+        _insert_job(db_session, 1, status="RUNNING", cpu="2", memory="4Gi",
+                     time_limit_seconds=3600,
+                     cpu_millicores=2000, memory_mib=4096,
+                     started_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1",
+                                   conditions=[V1JobCondition(type="Complete", status="True")])]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "SUCCEEDED"
+
+        usage = self._get_usage(db_session)
+        assert usage is None
+
+    def test_usage_fallback_on_sweep_direct_failed(self, mock_delete, mock_fetch_nodes, db_session):
+        """Sweep jobs that complete within 1 scan cycle should use fallback with parallelism."""
+        _insert_job(db_session, 1, status="DISPATCHED", cpu="2", memory="4Gi",
+                     gpu=0, time_limit_seconds=3600,
+                     completions=100, parallelism=10,
+                     succeeded_count=0, failed_count=0,
+                     cpu_millicores=2000, memory_mib=4096)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1",
+                                   conditions=[V1JobCondition(type="Failed", status="True")])]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.started_at is None
+
+        usage = self._get_usage(db_session)
+        assert usage is not None
+        assert usage.cpu_millicores_seconds == 3600 * 2000 * 10
+        assert usage.memory_mib_seconds == 3600 * 4096 * 10
+
 
 # ── Sweep status tracking ──
 
