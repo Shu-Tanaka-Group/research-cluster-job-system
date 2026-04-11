@@ -1,6 +1,6 @@
 ---
 name: check-consistency
-description: Check consistency across design docs in docs/. Runs 7 checkpoint-level checks in parallel via Explore subagents and verifies findings before reporting. Report only; no auto-fix.
+description: Check consistency across design docs in docs/. Runs 9 checkpoint-level checks in parallel via Explore subagents and verifies findings before reporting. Report only; no auto-fix.
 ---
 
 # 設計書間 整合性チェック
@@ -72,6 +72,39 @@ $ARGUMENTS
 - 削除・非推奨化された機能への言及が残っていないか
 - `git log --since=...` または最近のコミットで変更された設計書を起点に、関連ドキュメントが追随しているかをチェック
 
+### H. 設定値の相互制約・階層整合性
+個別の値が一致しているか（B）ではなく、**値同士の関係・階層・依存** が文書間で破綻していないかをチェックする。値同士の不等式・大小関係・倍数関係が docs 間で意図通りに維持されているかが対象。
+
+- 同期間隔・タイムアウトの階層関係:
+  - 例: liveness probe の timeout（例 120s）が `DISPATCH_BUDGET_CHECK_INTERVAL_SEC`（10s）× 想定サイクル数 + 余裕、を満たしているか
+  - 例: `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` < `NODE_RESOURCE_SYNC_INTERVAL_SEC` のような同期周期の前後関係が docs 間で前提通りか
+- 上限値・容量の包含関係:
+  - 例: `MAX_QUEUED_JOBS_PER_NAMESPACE` ≥ `DISPATCH_BUDGET_PER_NAMESPACE`（dispatch 候補がキューサイズを超えないか）
+  - 例: ResourceQuota の `count/jobs.batch` ≥ ClusterQueue の admit 上限相当か
+- データ保持期間の階層:
+  - 例: `USAGE_RETENTION_DAYS` ≥ `FAIR_SHARE_WINDOW_DAYS`（DRF 計算で読むべき期間のデータが先に消されないか）
+- リトライ・ループ予算の整合:
+  - 例: `DISPATCH_MAX_RETRIES` × `DISPATCH_RETRY_INTERVAL_SEC` が想定する障害耐性時間と整合しているか
+- 単一ドキュメント内では検出できない矛盾（一方の値だけ見ても問題なく、組み合わせて初めて壊れるもの）に焦点を当てる
+
+### I. パス・マウント・PVC 整合性
+ファイルシステムパス・PVC マウントパス・ディレクトリ階層が複数ドキュメントで一致しているか。文字列の食い違いはサイレントに「ファイルが読めない／ジョブが起動しない」を引き起こす。
+
+- ConfigMap で定義されるパス系設定（`LOG_BASE_DIR`、`WORKSPACE_MOUNT_PATH` 等）が以下で一致しているか:
+  - `resources.md` の設定一覧
+  - 該当機能を扱う設計書（`cli.md`、`dispatcher.md`、`watcher.md` など）
+  - `deployment.md` の Volume / VolumeMount 定義
+  - `user_guide.md` のユーザー向け説明
+- PVC マウントパスの整合:
+  - 例: `cli-binary` PVC のマウントパス `/cli-binary` が `cjobctl.md` / `api.md` / `operations.md` / `deployment.md` で一致しているか
+  - 例: namespace PVC のマウントパス `/home/jovyan` が job 実行前提と一致しているか
+- Job Pod 実行時の cwd 前提とマウントパスの整合:
+  - 例: ユーザーが `cjob add` した時点の cwd が Job Pod 内で再現できるよう、PVC マウントパスとユーザー側の home が一致しているか
+- ログディレクトリ階層の整合:
+  - 例: `<LOG_BASE_DIR>/<job_id>/stdout.log` のパス構造が CLI 側読み出し・Dispatcher 側書き込みの両方の docs で一致しているか
+  - 例: sweep ジョブの `<LOG_BASE_DIR>/<job_id>/<index>/` 階層の表記が一貫しているか
+- 失敗モードの観点: パス文字列が 1 文字違うだけで、ジョブ起動不能・ログ消失・CLI 配信停止などの障害につながる
+
 ## 手順
 
 ### Step 1: スコープ決定
@@ -84,11 +117,11 @@ $ARGUMENTS
 
 ### Step 2: チェックポイントごとの並列委譲
 
-7 つのチェックポイント (A〜G) それぞれに対して `Agent` ツールで `Explore` サブエージェントを起動する。**7 つすべてを 1 つのメッセージ内で並列に呼ぶ**こと（複数 `Agent` tool use を単一メッセージに含める）。
+9 つのチェックポイント (A〜I) それぞれに対して `Agent` ツールで `Explore` サブエージェントを起動する。**9 つすべてを 1 つのメッセージ内で並列に呼ぶ**こと（複数 `Agent` tool use を単一メッセージに含める）。
 
 各サブエージェントに渡すプロンプトには以下を含める:
 
-1. チェックポイントの説明（上記 A〜G の該当項目を抜粋）
+1. チェックポイントの説明（上記 A〜I の該当項目を抜粋）
 2. 対象ファイルリスト
 3. 出力形式（下記「サブエージェントの出力形式」）
 4. thoroughness は `very thorough` を指定する
