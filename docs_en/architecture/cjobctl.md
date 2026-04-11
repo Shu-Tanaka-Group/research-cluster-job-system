@@ -425,7 +425,6 @@ After update, the restart command for affected components is displayed. The mapp
 | `DEFAULT_TIME_LIMIT_SECONDS` | int | submit-api |
 | `MAX_TIME_LIMIT_SECONDS` | int | submit-api |
 | `LOG_BASE_DIR` | string | submit-api |
-| `CLI_BINARY_DIR` | string | submit-api |
 | `KUEUE_LOCAL_QUEUE_NAME` | string | dispatcher |
 | `WORKSPACE_MOUNT_PATH` | string | dispatcher |
 | `TTL_SECONDS_AFTER_FINISHED` | int | dispatcher |

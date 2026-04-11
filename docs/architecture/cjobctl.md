@@ -423,7 +423,6 @@ CLI 側で以下のバリデーションを行う:
 | `DEFAULT_TIME_LIMIT_SECONDS` | int | submit-api |
 | `MAX_TIME_LIMIT_SECONDS` | int | submit-api |
 | `LOG_BASE_DIR` | string | submit-api |
-| `CLI_BINARY_DIR` | string | submit-api |
 | `KUEUE_LOCAL_QUEUE_NAME` | string | dispatcher |
 | `WORKSPACE_MOUNT_PATH` | string | dispatcher |
 | `TTL_SECONDS_AFTER_FINISHED` | int | dispatcher |
