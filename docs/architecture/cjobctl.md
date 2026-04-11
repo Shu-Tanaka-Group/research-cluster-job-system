@@ -189,7 +189,7 @@ user-bob                        4.0           16.0        0.0        1         0
 user-alice                     20.0           80.0        0.0        1         0.007440
 ```
 
-複数 flavor がある構成では、Daily Usage セクションは `(namespace, date)` 単位で 1 行に統合され、flavor ごとの内訳は表示されない（flavor 別の内訳が必要な場合は `cjob usage` を利用する）。DRF Dominant Share は flavor 単位で dominant share を計算し、`drf_weight` で重み付け合算する。
+複数 flavor がある構成では、Daily Usage セクションは `(namespace, date)` 単位で 1 行に統合され、flavor ごとの内訳は表示されない。flavor 別の内訳を閲覧する CLI コマンドは現時点では存在せず、必要な場合は `namespace_daily_usage` を直接参照する必要がある。DRF Dominant Share は内部で flavor 単位に dominant share を計算し、`drf_weight` で重み付け合算するが、出力には flavor 列を含めず namespace 単位の集計値のみを表示する。
 
 #### `cjobctl usage quota`
 

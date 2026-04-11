@@ -191,7 +191,7 @@ user-bob                        4.0           16.0        0.0        1         0
 user-alice                     20.0           80.0        0.0        1         0.007440
 ```
 
-In multi-flavor clusters, the Daily Usage section collapses to one row per `(namespace, date)` and does not show a per-flavor breakdown (use `cjob usage` if a per-flavor breakdown is needed). DRF Dominant Share computes dominant share per flavor and combines them using `drf_weight`.
+In multi-flavor clusters, the Daily Usage section collapses to one row per `(namespace, date)` and does not show a per-flavor breakdown. No CLI command currently exposes per-flavor daily usage; if a per-flavor breakdown is needed, query `namespace_daily_usage` directly. DRF Dominant Share internally computes dominant share per flavor and combines them using `drf_weight`, but the output does not include a flavor column and only shows per-namespace aggregated values.
 
 #### `cjobctl usage quota`
 
