@@ -1,0 +1,44 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(kubectl:*)"
+    ],
+    "allow": [
+      "Edit",
+      "Write",
+      "Skill(create-pr)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:kueue.sigs.k8s.io)",
+      "WebFetch(domain:volcano.sh)",
+      "WebFetch(domain:prometheus.io)",
+      "Bash(git -C:*)",
+      "Bash(git add:*)",
+      "Bash(git branch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git push:*)",
+      "Bash(git rebase:*)",
+      "Bash(git show:*)",
+      "Bash(git stash:*)",
+      "Bash(git status:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(uv run:*)",
+      "Bash(uv pip install:*)",
+      "Bash(uv sync:*)",
+      "Bash(pip3 install:*)",
+      "Bash(cross --version)",
+      "Bash(find . -type f \\\\\\(-name *.py -o -name *.rs -o -name *.toml -o -name Dockerfile* -o -name *.yaml -o -name *.yml \\\\\\))",
+      "Bash(find . -type f \\\\\\(-name *.py -o -name *.rs -o -name Dockerfile* -o -name *.toml -o -name *.yaml -o -name *.yml \\\\\\) -not -path ./.git/*)",
+      "Bash(find . -type f \\\\\\(-name *.yaml -o -name *.yml \\\\\\))",
+      "Bash(find . -type f \\\\\\(-name *.sh -o -name *.bash -o -name *.json -o -name Makefile \\\\\\) ! -path */.venv/* ! -path */target/* ! -path */.git/*)",
+      "Read(//tmp/**)"
+    ]
+  }
+}
