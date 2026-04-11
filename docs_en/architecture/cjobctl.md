@@ -109,15 +109,15 @@ Node name is obtained by the Watcher from the Pod's `spec.nodeName` during RUNNI
 
 | Command | Description | Target Table |
 |---|---|---|
-| `cjobctl usage list [--namespace <ns>]` | Daily consumption, 7-day window aggregation, DRF dominant share | `namespace_daily_usage`, `namespace_weights` |
+| `cjobctl usage list [--namespace <ns>] [--flavor <name>]` | Daily consumption, 7-day window aggregation, DRF dominant share | `namespace_daily_usage`, `namespace_weights`, `flavor_quotas` |
 | `cjobctl usage reset [--namespace <ns> \| --all]` | Delete consumption data | `namespace_daily_usage` |
 | `cjobctl usage quota [--namespace <ns>]` | ResourceQuota usage for all namespaces | `namespace_resource_quotas` + K8s namespace list |
 
-The Daily Usage in `usage list` is displayed in ascending date order (oldest date first) by default. The `--namespace` option filters to data for a specific namespace only (applies to all sections: Daily / 7-Day Window / DRF).
+The Daily Usage in `usage list` is displayed in ascending date order (oldest date first) by default. The `--namespace` option filters to data for a specific namespace only (applies to all sections: Daily / 7-Day Window / DRF). The `--flavor` option filters to records of a specific ResourceFlavor (applies to Daily / N-Day Window; the DRF section is suppressed — see below). `--namespace` and `--flavor` can be combined: when both are specified, they are applied as an AND condition.
 
 #### `cjobctl usage list`
 
-Reads each namespace's resource consumption from the `namespace_daily_usage` table and prints three sections in order. The output order is always fixed; if no data exists, it prints `No usage data found.` and exits.
+Reads each namespace's resource consumption from the `namespace_daily_usage` table and prints three sections in order. The output order is always fixed; if no data exists, it prints `No usage data found.` and exits (when `--flavor` is specified, the message is `No usage data found for flavor '<name>'.`).
 
 Column schemas and unit conversions for each section:
 
@@ -131,7 +131,7 @@ Column schemas and unit conversions for each section:
 | `Mem (GiB·h)` | `SUM(memory_mib_seconds) / 1024 / 3600` |
 | `GPU (h)` | `SUM(gpu_seconds) / 3600` |
 
-The primary key of `namespace_daily_usage` is the composite key `(namespace, usage_date, flavor)`, so multiple rows exist for the same `(namespace, date)` — one per flavor. Daily Usage aggregates across flavors by using `GROUP BY namespace, usage_date`, so even with multiple flavors each date collapses to a single row. Order is `ORDER BY usage_date ASC, namespace ASC`.
+The primary key of `namespace_daily_usage` is the composite key `(namespace, usage_date, flavor)`, so multiple rows exist for the same `(namespace, date)` — one per flavor. Daily Usage aggregates across flavors by using `GROUP BY namespace, usage_date`, so even with multiple flavors each date collapses to a single row. Order is `ORDER BY usage_date ASC, namespace ASC`. When `--flavor <name>` is specified, `AND flavor = $flavor` is added to the `WHERE` clause so that only records of the specified flavor are aggregated. In that case the section header becomes `=== Daily Usage (flavor: <name>) ===`, making it distinguishable from the flavor-merged result.
 
 **N-Day Window Aggregate**
 
@@ -142,7 +142,7 @@ The primary key of `namespace_daily_usage` is the composite key `(namespace, usa
 | `Mem (GiB·h)` | Same |
 | `GPU (h)` | Same |
 
-The aggregation window size N is read from the key `FAIR_SHARE_WINDOW_DAYS` in the `cjob-config` ConfigMap in the `cjob-system` namespace (fallback is 7 days if retrieval fails or the key is absent). The section header reflects the actual value used, e.g., `=== N-Day Window Aggregate ===`. The SQL condition is `usage_date > CURRENT_DATE - N`.
+The aggregation window size N is read from the key `FAIR_SHARE_WINDOW_DAYS` in the `cjob-config` ConfigMap in the `cjob-system` namespace (fallback is 7 days if retrieval fails or the key is absent). The section header reflects the actual value used, e.g., `=== N-Day Window Aggregate ===`. The SQL condition is `usage_date > CURRENT_DATE - N`. When `--flavor <name>` is specified, `AND flavor = $flavor` is added to the `WHERE` clause and the section header becomes `=== N-Day Window Aggregate (flavor: <name>) ===`.
 
 **DRF Dominant Share**
 
@@ -171,6 +171,8 @@ The per-flavor capacity `cap_*` uses the `node_resources` allocatable total clam
 
 Rows are ordered by `DOM_SHARE` ascending (namespaces with lower consumption first). Namespaces with `WEIGHT = 0` are placed at the end by treating `DOM_SHARE` as effectively `inf`.
 
+When `--flavor <name>` is specified, the DRF Dominant Share section is skipped entirely (both computation and output). DRF is by definition a score that combines weighted dominant shares across flavors, so restricting it to a single flavor defeats the point of DRF (the result would merely be the single flavor's dominant share × `drf_weight`, which is misleading). In place of the section, a single-line note `DRF Dominant Share is computed across all flavors; pass no --flavor to see it.` is printed.
+
 Output example (`FAIR_SHARE_WINDOW_DAYS=7`, cpu-flavor-only cluster):
 
 ```
@@ -191,7 +193,9 @@ user-bob                        4.0           16.0        0.0        1         0
 user-alice                     20.0           80.0        0.0        1         0.007440
 ```
 
-In multi-flavor clusters, the Daily Usage section collapses to one row per `(namespace, date)` and does not show a per-flavor breakdown. No CLI command currently exposes per-flavor daily usage; if a per-flavor breakdown is needed, query `namespace_daily_usage` directly. DRF Dominant Share internally computes dominant share per flavor and combines them using `drf_weight`, but the output does not include a flavor column and only shows per-namespace aggregated values.
+In multi-flavor clusters, when `--flavor` is not specified the Daily Usage section collapses to one row per `(namespace, date)` and does not show a per-flavor breakdown. To see a per-flavor breakdown, use `cjobctl usage list --flavor <name>` (Daily Usage and N-Day Window Aggregate will then aggregate only records of the specified flavor). DRF Dominant Share internally computes dominant share per flavor and combines them using `drf_weight`, but the output does not include a flavor column and only shows per-namespace aggregated values.
+
+The name passed to `--flavor` is validated against the `flavor_quotas` table. If an unregistered flavor name is specified, the command prints `Flavor '<name>' not found in flavor_quotas. Ensure the Watcher has synced the ClusterQueue.` and exits with an error (same policy as `cjobctl cluster set-drf-weight`).
 
 #### `cjobctl usage quota`
 
