@@ -62,11 +62,13 @@ In addition to job monitoring, the Watcher periodically executes the following K
 
 | Sync Target | Interval | K8s API Calls | Data Volume |
 |---|---|---|---|
-| Node resources (`node_resources`) | 300 seconds | `list_node()` × number of flavors | flavor count × node count (approx. 10–50 entries) |
+| Node resources (`node_resources`) | 300 seconds | `list_node()` × number of flavors + `list_pod_for_all_namespaces()` × 1 (for aggregating DaemonSet reservations) | flavor count × node count + full Pod list (hundreds of entries) |
 | nominalQuota (`flavor_quotas`) | 300 seconds | `get_cluster_custom_object()` × 1 | 1 ClusterQueue entry |
 | ResourceQuota (`namespace_resource_quotas`) | 10 seconds | `list_namespace()` + `list_resource_quota_for_all_namespaces()` | namespace count + ResourceQuota count (approx. 20 each) |
 
-Node resource and nominalQuota sync runs at 300-second intervals, so the load on the K8s API is nearly negligible. ResourceQuota sync runs at 10-second intervals (the same cycle as the Watcher's main loop) with 2 API calls, but response sizes are small (a list of tens of namespaces) and lightweight compared to the job monitoring `list_job_for_all_namespaces()`.
+Node resource and nominalQuota sync runs at 300-second intervals, so the load on the K8s API is nearly negligible. The `list_pod_for_all_namespaces()` call included in node resource sync retrieves the cluster-wide Pod list, so its response size is comparatively large, but the 300-second interval and its sole purpose of computing DaemonSet allocations keeps the impact small. ResourceQuota sync runs at 10-second intervals (the same cycle as the Watcher's main loop) with 2 API calls, but response sizes are small (a list of tens of namespaces) and lightweight compared to the job monitoring `list_job_for_all_namespaces()`.
+
+In addition to the periodic sync operations above, the Watcher invokes `list_namespaced_pod()` on demand triggered by job state transitions (on RUNNING transition, on terminal transitions, and on sweep index changes) to retrieve each Pod's `node_name` and reflect it in the DB. This cost is proportional to the number of active jobs and state transition frequency, so it is not negligible for high-frequency short-duration job workloads (§2.2) and is one of the Watcher's load factors.
 
 DB writes for all sync operations are UPSERTs (row count = node count, namespace count, or flavor count), around tens of rows, so load is negligible.
 
@@ -320,13 +322,13 @@ The `jobs` table holds thousands to tens of thousands of rows, and the `idx_jobs
 
 | Table | Estimated Row Count | Update Frequency |
 |---|---|---|
-| `namespace_daily_usage` | user count × window days (e.g., 200 × 7 = 1,400 rows) | On job RUNNING transition |
+| `namespace_daily_usage` | user count × flavor count × window days (e.g., 200 × 2 × 7 = 2,800 rows) | On job RUNNING transition. For short jobs that complete without being observed in RUNNING state, recorded as a fallback on SUCCEEDED/FAILED transitions |
 | `node_resources` | compute node count (10–50 rows) | Every 300 seconds |
 | `flavor_quotas` | flavor count (2–5 rows) | Every 300 seconds |
 | `namespace_resource_quotas` | user namespace count (20–200 rows) | Every 10 seconds |
 | `namespace_weights` | namespaces with weight set (0–20 rows) | Only on admin operations |
 
-All have extremely small row counts, and PostgreSQL is unlikely to become a bottleneck even at 200 users. The Dispatcher's DRF query (see [dispatcher.md](dispatcher.md) §1.2) includes a window aggregation of `namespace_daily_usage` and a SUM of `node_resources`, but the number of rows JOINed is on the order of namespace count (tens of rows), and the computational cost is negligible.
+All have extremely small row counts, and PostgreSQL is unlikely to become a bottleneck even at 200 users. The Dispatcher's DRF query (see [dispatcher.md](dispatcher.md) §1.2) includes a window aggregation of `namespace_daily_usage` (grouped by `(namespace, flavor)`) and a per-flavor SUM of `node_resources`, but the number of rows JOINed is on the order of `namespace count × flavor count` (tens to hundreds of rows), and the computational cost is negligible.
 
 #### Kueue controller (Single Leader)
 

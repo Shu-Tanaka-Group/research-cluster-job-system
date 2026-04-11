@@ -60,11 +60,13 @@ Watcher はジョブ監視に加えて以下の K8s API 呼び出しを定期実
 
 | 同期対象 | 間隔 | K8s API 呼び出し | データ量 |
 |---|---|---|---|
-| ノードリソース（`node_resources`） | 300 秒 | `list_node()` × flavor 数 | flavor 数 × ノード数（10〜50 件程度） |
+| ノードリソース（`node_resources`） | 300 秒 | `list_node()` × flavor 数 + `list_pod_for_all_namespaces()` × 1（DaemonSet 予約集計用） | flavor 数 × ノード数 + 全 Pod 一覧（数百件程度） |
 | nominalQuota（`flavor_quotas`） | 300 秒 | `get_cluster_custom_object()` × 1 | ClusterQueue 1 件 |
 | ResourceQuota（`namespace_resource_quotas`） | 10 秒 | `list_namespace()` + `list_resource_quota_for_all_namespaces()` | namespace 数 + ResourceQuota 数（各 20 件程度） |
 
-ノードリソースと nominalQuota の同期は 300 秒間隔であるため、K8s API への負荷はほぼ無視できる。ResourceQuota の同期は 10 秒間隔（Watcher のメインループと同サイクル）で 2 回の API 呼び出しを行うが、レスポンスサイズは小さく（数十 namespace のリスト）、ジョブ監視の `list_job_for_all_namespaces()` と比較して軽量である。
+ノードリソースと nominalQuota の同期は 300 秒間隔であるため、K8s API への負荷はほぼ無視できる。ノードリソース同期に含まれる `list_pod_for_all_namespaces()` は全クラスタの Pod 一覧を取得するためレスポンスサイズは相対的に大きいが、300 秒間隔かつ DaemonSet の割当計算のみに使用されるため影響は小さい。ResourceQuota の同期は 10 秒間隔（Watcher のメインループと同サイクル）で 2 回の API 呼び出しを行うが、レスポンスサイズは小さく（数十 namespace のリスト）、ジョブ監視の `list_job_for_all_namespaces()` と比較して軽量である。
+
+上記の定期同期に加えて、Watcher はジョブ状態遷移（RUNNING 遷移時・終了遷移時・sweep の index 変化時）の契機で `list_namespaced_pod()` をオンデマンドで呼び出し、Pod の `node_name` を取得して DB に反映する。このコストは active ジョブ数と状態遷移頻度に比例するため、高頻度短時間ジョブワークロード（§2.2）では無視できず、Watcher の負荷要因の一つになる。
 
 DB への書き込みはいずれも UPSERT（行数 = ノード数 or namespace 数 or flavor 数）であり、数十行程度のため負荷は無視できる。
 
@@ -318,13 +320,13 @@ Job/Pod の作成・状態更新は全て etcd への write であり、Raft 合
 
 | テーブル | 行数の見積もり | 更新頻度 |
 |---|---|---|
-| `namespace_daily_usage` | ユーザー数 × ウィンドウ日数（例: 200 × 7 = 1,400 行） | ジョブ RUNNING 遷移時 |
+| `namespace_daily_usage` | ユーザー数 × flavor 数 × ウィンドウ日数（例: 200 × 2 × 7 = 2,800 行） | ジョブ RUNNING 遷移時。RUNNING を観測せずに完了した短時間ジョブに対しては SUCCEEDED/FAILED 遷移時に fallback で記録 |
 | `node_resources` | 計算ノード数（10〜50 行） | 300 秒間隔 |
 | `flavor_quotas` | flavor 数（2〜5 行） | 300 秒間隔 |
 | `namespace_resource_quotas` | ユーザー namespace 数（20〜200 行） | 10 秒間隔 |
 | `namespace_weights` | weight を設定した namespace 数（0〜20 行） | 管理者操作時のみ |
 
-いずれも行数が極めて少なく、200 ユーザー規模でも PostgreSQL がボトルネックになる見込みはない。Dispatcher の DRF クエリ（[dispatcher.md](dispatcher.md) §1.2 参照）は `namespace_daily_usage` のウィンドウ集計と `node_resources` の SUM を含むが、JOINされる行数は namespace 数程度（数十行）であり、計算コストは無視できる。
+いずれも行数が極めて少なく、200 ユーザー規模でも PostgreSQL がボトルネックになる見込みはない。Dispatcher の DRF クエリ（[dispatcher.md](dispatcher.md) §1.2 参照）は `namespace_daily_usage` のウィンドウ集計（`(namespace, flavor)` 単位）と `node_resources` の flavor 単位 SUM を含むが、JOINされる行数は `namespace 数 × flavor 数` 程度（数十〜数百行）であり、計算コストは無視できる。
 
 #### Kueue controller（シングルリーダー）
 
