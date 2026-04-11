@@ -34,7 +34,7 @@ $ARGUMENTS
 | `cjobctl` | `docs/architecture/cjobctl.md` | `ctl/src/` |
 | `kueue` | `docs/architecture/kueue.md` | K8s マニフェスト、dispatcher の Kueue 連携 |
 | `resources` | `docs/architecture/resources.md` | `server/src/cjob/config.py`、`dispatcher/k8s_job.py`、`dispatcher/resource_utils.py` |
-| `monitoring` | `docs/architecture/monitoring.md` | `server/src/cjob/metrics.py`、deployment の Prometheus 関連 |
+| `monitoring` | `docs/architecture/monitoring.md` | `server/src/cjob/metrics.py`、`k8s/base/grafana/*.json`、`k8s/base/prometheus-operator/*.yaml`、deployment の Prometheus 関連 |
 | `system` | `docs/architecture/system_design.md` | システム全体（横断的に参照） |
 
 複数の設計書を参照するコンポーネントはすべての設計書と実装の一致をチェックする。
@@ -69,6 +69,12 @@ $ARGUMENTS
 5. **K8s リソース・ラベル** — ラベル名・値の生成ルール、リソース定義（requests/limits/tolerations/volume/env 等）が設計書と実装（`dispatcher/k8s_job.py` 等）で一致しているか
 6. **アルゴリズム・制御フロー** — 設計書で明記されたロジックと実装の一致（DRF 計算式、reconcile ステップ順序、状態遷移の条件、dispatch 順序、in-flight 計算 等）
 7. **定数値・リテラル** — 設計書記載のデフォルト値・制限値・タイムアウト値とコード内リテラル・定数定義の一致
+8. **観測性の利用側との整合（主に `monitoring` コンポーネント向け）** — 設計書で定義されたメトリクス名・ラベルキー・メトリクスタイプが、利用側（Grafana ダッシュボード JSON、Prometheus アラートルール YAML、ServiceMonitor / PodMonitor 等）で正しく参照されているか
+   - Grafana ダッシュボードの PromQL クエリ（例: `cjob_jobs_completed_total{status="failed"}`）が参照するメトリクス名・ラベル名・ラベル値が、`monitoring.md` および `metrics.py` の定義と一致しているか
+   - 設計書に定義されているが利用側でまったく参照されていない孤立メトリクスを検出する（提供しているのに誰も使っていない）
+   - 利用側で参照されているが設計書に定義がないメトリクスを検出する（ダッシュボードが壊れている）
+   - ServiceMonitor / PodMonitor のターゲットポート・パスが設計書記載の `WATCHER_METRICS_PORT` / `DISPATCHER_METRICS_PORT` 等と一致しているか
+   - 失敗モード: メトリクス名やラベルがリネームされたのにダッシュボード/アラート側が追従せず、サイレントに観測不能状態になる
 
 ### サブエージェントの出力形式
 
