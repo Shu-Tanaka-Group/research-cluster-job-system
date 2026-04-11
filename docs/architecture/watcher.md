@@ -68,6 +68,8 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    | `type: Failed, status: True` | `FAILED` | Pod の exit code 非0・起動失敗を含む |
    | 条件なし・Pod が Running 中 | `RUNNING` | 初回 RUNNING 遷移時に `started_at` を記録し、全 Pod の `spec.nodeName` から `node_name` を取得して記録し、`namespace_daily_usage` に累計消費量を加算する（[database.md](database.md) §5.2 参照） |
 
+   **完了フォールバック（使用量記録）:** 1 スキャンサイクル以内に完了したジョブは Watcher が RUNNING を観測できず、DISPATCHED から直接 SUCCEEDED / FAILED に遷移する。この場合 `started_at` は NULL のままなので、完了遷移時に `started_at` が NULL であれば `_record_resource_usage` を呼び出して `namespace_daily_usage` に使用量を加算する。`started_at` は NULL のまま維持する（実際に RUNNING を観測していないため）。sweep ジョブにも同じフォールバックが適用される。
+
 3. `cjob.io/job-id` ラベルと `cjob.io/namespace` ラベルから対応する `job_id` を特定する（`k8s_job_name` による照合は使用しない）
 4. DB 状態を更新する。ただし DB の status が `CANCELLED` または `DELETING` のジョブは上書きしない（K8s 側が完了・失敗していても DB の意図的な状態を維持する）。なお `HELD` ジョブは K8s Job が未作成のためこのステップの対象にならない
 5. DB の status が `CANCELLED` のジョブに対応する K8s Job が存在する場合は削除する（K8s Job 削除後も DB の status は `CANCELLED` のまま維持する）
@@ -136,7 +138,7 @@ K8s Job の `status.conditions` に従う（通常ジョブと同じロジック
 
 ### 4.4 リソース使用量の加算
 
-RUNNING 遷移時に `time_limit_seconds × リソース量 × parallelism` を加算する。同時に使用するリソースの最大量を反映し、DRF の公平性計算で sweep ジョブが適切に重く評価される。
+RUNNING 遷移時に `time_limit_seconds × リソース量 × parallelism` を加算する。同時に使用するリソースの最大量を反映し、DRF の公平性計算で sweep ジョブが適切に重く評価される。RUNNING を観測せず直接完了した場合は §3 の完了フォールバックにより同じ計算で使用量が加算される。
 
 ### 4.5 CANCELLED 時の処理
 
