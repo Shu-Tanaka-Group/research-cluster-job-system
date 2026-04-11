@@ -202,3 +202,10 @@ issue に `autonomous` ラベルが付いていても、以下のいずれかに
 
 - プッシュ前には毎回必ずユーザーの確認を取ること（自動化モードの場合を除く）
 - コミット・ブランチ作成・PR 作成時は [Git 運用規則](docs/git_conventions.md) に従うこと。
+- 別ディレクトリから git を実行する場合は `cd <path> && git ...` の複合コマンドを使わず、`git -C <path> ...` を使うこと。Claude Code の harness は bare repository attack 対策として `cd` + `git` の複合コマンドを承認待ちにするため、自動化モードでも中断される。
+
+## Claude Code ツールの使用
+
+- ドキュメントや指示内でシェルの `find` や `grep` に言及があっても、Claude Code の dedicated tool（Glob / Grep）を優先して使うこと。Grep は ripgrep ベースで gitignore をデフォルトで尊重するため、`.venv` / `target` / `.git` 等の除外が自動で効き、`find ... ! -path */.venv/*` のような複雑な除外指定は不要。
+- ファイル列挙は Glob、または Grep の `output_mode="files_with_matches"` を使う。
+- Bash 経由で `find` / `grep` を実行しない（シェル依存の特殊ケースを除く）。

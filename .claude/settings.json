@@ -1,0 +1,40 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(kubectl:*)"
+    ],
+    "allow": [
+      "Edit",
+      "Write",
+      "Skill(create-pr)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:kueue.sigs.k8s.io)",
+      "WebFetch(domain:volcano.sh)",
+      "WebFetch(domain:prometheus.io)",
+      "Bash(git -C:*)",
+      "Bash(git add:*)",
+      "Bash(git branch:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git push:*)",
+      "Bash(git rebase:*)",
+      "Bash(git show:*)",
+      "Bash(git stash:*)",
+      "Bash(git status:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr create:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue comment:*)",
+      "Bash(uv run:*)",
+      "Bash(uv pip install:*)",
+      "Bash(uv sync:*)",
+      "Bash(pip3 install:*)",
+      "Bash(cross --version)",
+      "Read(//tmp/**)"
+    ]
+  }
+}
