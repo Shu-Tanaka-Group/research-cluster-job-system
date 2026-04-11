@@ -137,6 +137,9 @@ enum UsageCommands {
         /// Filter by namespace
         #[arg(long)]
         namespace: Option<String>,
+        /// Filter by ResourceFlavor (suppresses DRF section)
+        #[arg(long)]
+        flavor: Option<String>,
     },
     /// Reset usage data
     Reset {
@@ -365,9 +368,16 @@ async fn main() -> Result<()> {
             let config = config::Config::load()?;
             let conn = db::connect(&config.database, config.system_namespace()).await?;
             match command {
-                UsageCommands::List { namespace } => {
+                UsageCommands::List { namespace, flavor } => {
                     let k8s_client = k8s::client().await?;
-                    cmd::usage::list(&conn.client, &k8s_client, config.system_namespace(), namespace.as_deref()).await
+                    cmd::usage::list(
+                        &conn.client,
+                        &k8s_client,
+                        config.system_namespace(),
+                        namespace.as_deref(),
+                        flavor.as_deref(),
+                    )
+                    .await
                 }
                 UsageCommands::Reset { namespace, all } => {
                     cmd::usage::reset(&conn.client, namespace.as_deref(), all).await
