@@ -674,7 +674,71 @@ cjob release 1,3,5
 cjob release --all
 ```
 
-## 13. `cjob reset` の動作
+## 13. `cjob set` の動作
+
+QUEUED または HELD 状態のジョブについて、Dispatcher に渡すリソース要求・flavor・time limit を事後的に上書きする。1 つ以上のフィールドが指定されていない場合はエラーで終了する。
+
+job_id の指定形式は `cjob cancel` と同じく単体・範囲・複数組み合わせに対応する。単体指定時は `POST /v1/jobs/{job_id}/set`、複数指定時は `POST /v1/jobs/set` を呼ぶ。
+
+### 変更可能なフィールド
+
+| オプション | 型 | 内容 |
+|---|---|---|
+| `--cpu <cpu>` | 文字列 | CPU 要求量（例: `4`, `2000m`） |
+| `--memory <memory>` | 文字列 | メモリ要求量（例: `16Gi`, `16384Mi`） |
+| `--gpu <N>` | 整数 | GPU 個数 |
+| `--flavor <name>` | 文字列 | ResourceFlavor 名 |
+| `--time-limit <duration>` | 文字列 | 実行時間上限（例: `12h`, `30m`）。API には秒に換算して送る |
+
+指定されなかったフィールドは元の値を保持する。値のパース（`parse_duration` など）は `cjob add` と同じユーティリティを共用する。
+
+### 対象ジョブの条件
+
+API 側で以下の状態チェックを行う。
+
+- `QUEUED` / `HELD` 以外の状態のジョブは `skipped` に分類される（RUNNING / DISPATCHING / DISPATCHED / SUCCEEDED / FAILED / CANCELLED / DELETING など、すでに K8s に引き渡されたまたは完了済みのジョブは変更不可）。
+- 存在しない job_id は `not_found` に分類される。
+
+### 動作
+
+```
+# ※ CLI の実装は Rust で行う。以下は概念説明のための擬似コードである。
+
+fn cmd_set(expr, cpu, memory, gpu, flavor, time_limit):
+    if すべてのパラメータが None:
+        エラー終了: "specify at least one parameter to modify (--cpu, --memory, --gpu, --flavor, --time-limit)"
+
+    time_limit_seconds = time_limit を秒に変換（指定時のみ）
+
+    job_ids = parse_job_ids(expr)   // cancel と同じパース処理を共用
+    if len(job_ids) == 1:
+        POST /v1/jobs/{job_id}/set にパラメータを送る
+        "Job {job_id}: {status}" を表示する
+    else:
+        POST /v1/jobs/set に job_ids とパラメータを送る
+        result を受け取り:
+            modified があれば "Modified: [job_ids]" を表示する
+            skipped があれば "Skipped (not QUEUED / HELD): [job_ids]" を表示する
+            not_found があれば "Not found: [job_ids]" を表示する
+```
+
+### 使用例
+
+```bash
+# 単体指定で flavor のみ変更
+cjob set 5 --flavor cpu-sub
+
+# 複数指定でリソース要求と time limit をまとめて変更
+cjob set 10,11,12 --cpu 4 --memory 16Gi --time-limit 12h
+
+# 範囲 + 個別指定
+cjob set 10-20,25,30 --cpu 8
+
+# cjob list からの ID 注入（QUEUED のまま flavor を切り替える）
+cjob set $(cjob list --status QUEUED --flavor cpu --format ids) --flavor cpu-sub
+```
+
+## 14. `cjob reset` の動作
 
 1. `GET /v1/jobs` でジョブ一覧を取得し、レスポンスの `log_base_dir` を保持した上で以下の順で確認する
    - `DELETING` のジョブが1件でも存在する場合は「前回のリセット処理がまだ完了していません。しばらく待ってから再試行してください。」を表示して中止する
@@ -700,7 +764,7 @@ $ cjob reset   # 全ジョブ完了後
 リセットを開始しました。バックグラウンドでクリーンアップが完了するまでお待ちください。
 ```
 
-## 14. `cjob usage` の動作
+## 15. `cjob usage` の動作
 
 `GET /v1/usage` を呼び出し、直近 `FAIR_SHARE_WINDOW_DAYS` 日分の日別リソース使用状況を表示する。
 
@@ -768,7 +832,7 @@ Resource Usage (past 7 days)
   Total                    44.5           89.0
 ```
 
-## 15. `cjob update` の動作
+## 16. `cjob update` の動作
 
 CLI バイナリのバージョン管理と更新を行う。バイナリは Submit API 経由で配布される。
 
@@ -846,7 +910,7 @@ $ cjob update --version 1.3.1-beta.1
 更新が完了しました。(1.3.1-beta.1)
 ```
 
-## 16. `cjob flavor` の動作
+## 17. `cjob flavor` の動作
 
 `GET /v1/flavors` を呼び出し、利用可能な ResourceFlavor の一覧とリソース上限を表示する。認証不要のエンドポイントを使用するため、ServiceAccount JWT がなくても実行できる。
 

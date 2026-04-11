@@ -113,13 +113,83 @@ namespace = "cjob-system"   # 省略時デフォルト
 
 `usage list` の Daily Usage はデフォルトで日付昇順（古い日付が上）で表示する。`--namespace` オプションで特定 namespace のデータのみに絞り込める（Daily / 7-Day Window / DRF すべてのセクションに適用）。
 
-`usage list` の DRF dominant share 計算は Dispatcher（`server/src/cjob/dispatcher/scheduler.py`）と同一の式を使用する:
+#### `cjobctl usage list`
+
+`namespace_daily_usage` テーブルから各 namespace のリソース消費量を読み出し、3 つのセクションを順に出力する。出力は常にこの順序で、データが存在しない場合は `No usage data found.` を表示して終了する。
+
+各セクションのカラム構成と単位換算:
+
+**Daily Usage**
+
+| カラム | 内容 |
+|---|---|
+| `NAMESPACE` | ユーザー namespace |
+| `DATE` | `usage_date`（YYYY-MM-DD） |
+| `CPU (core·h)` | `SUM(cpu_millicores_seconds) / 1000 / 3600` |
+| `Mem (GiB·h)` | `SUM(memory_mib_seconds) / 1024 / 3600` |
+| `GPU (h)` | `SUM(gpu_seconds) / 3600` |
+
+`namespace_daily_usage` の主キーは `(namespace, usage_date, flavor)` の複合キーで、同じ `(namespace, date)` に対して flavor ごとに行が存在する。Daily Usage では flavor をまたいで集計するため、`GROUP BY namespace, usage_date` で合算する（複数 flavor がある場合でも同一日付が 1 行に統合される）。並び順は `ORDER BY usage_date ASC, namespace ASC`。
+
+**N-Day Window Aggregate**
+
+| カラム | 内容 |
+|---|---|
+| `NAMESPACE` | ユーザー namespace |
+| `CPU (core·h)` | 過去 N 日間の合算（単位換算は Daily Usage と同じ） |
+| `Mem (GiB·h)` | 同上 |
+| `GPU (h)` | 同上 |
+
+集計ウィンドウ日数 N は `cjob-system` namespace の ConfigMap `cjob-config` のキー `FAIR_SHARE_WINDOW_DAYS` から取得する（取得失敗時・キー未設定時は 7 日）。セクションヘッダーには実際に使用した日数が `=== N-Day Window Aggregate ===` として反映される。SQL 条件は `usage_date > CURRENT_DATE - N`。
+
+**DRF Dominant Share**
+
+| カラム | 内容 |
+|---|---|
+| `NAMESPACE` | ユーザー namespace |
+| `CPU (core·h)` | 過去 N 日間の flavor 合算（Window Aggregate と同等） |
+| `Mem (GiB·h)` | 同上 |
+| `GPU (h)` | 同上 |
+| `WEIGHT` | `namespace_weights.weight`（行が無い場合は 1.0） |
+| `DOM_SHARE` | weight で割った重み付き DRF スコア |
+
+計算式は Dispatcher（`server/src/cjob/dispatcher/scheduler.py`）と同一で、flavor 単位で `dominant_share = GREATEST(cpu_share, mem_share, gpu_share)` を算出し、`flavor_quotas.drf_weight` で重み付けして namespace 内で合算する:
 
 ```
-dominant_share = GREATEST(cpu_share, mem_share, gpu_share) / weight
+window_seconds        = N × 86400
+cpu_share(f)          = cpu_millicores_seconds(ns,f) / (cap_cpu(f) × window_seconds)
+mem_share(f)          = memory_mib_seconds(ns,f)     / (cap_mem(f) × window_seconds)
+gpu_share(f)          = gpu_seconds(ns,f)            / (cap_gpu(f) × window_seconds)
+dominant_share(ns,f)  = MAX(cpu_share, mem_share, gpu_share)
+drf_score(ns)         = Σ_f dominant_share(ns,f) × drf_weight(f)
+DOM_SHARE(ns)         = drf_score(ns) / namespace_weight(ns)
 ```
 
-クラスタのリソース総量は DB の `node_resources` テーブルから `SUM()` で取得する。テーブルが空の場合は dominant share 列を `N/A` と表示する（Dispatcher は DRF ソートを無効化して namespace 名順にフォールバックするが、cjobctl は表示ツールのため計算不能であることを明示する）。
+各 flavor の容量 `cap_*` は `node_resources` の allocatable 合計を `flavor_quotas` の nominalQuota で上限クランプした値（`min(allocatable, nominalQuota)`）を使用する。`node_resources` が空、または `flavor_quotas` に該当 flavor が無い場合は fallback として allocatable をそのまま用いる。`node_resources` 自体が空の場合は DRF セクション全体を `No node_resources data. DRF disabled.` に置き換える（Dispatcher は DRF ソートを無効化して namespace 名順にフォールバックするが、cjobctl は計算不能であることを明示する）。
+
+行の並び順は `DOM_SHARE` 昇順（=消費の少ない namespace が上）。`WEIGHT = 0` の namespace は `DOM_SHARE` を `inf` 相当として末尾に配置する。
+
+出力例（`FAIR_SHARE_WINDOW_DAYS=7`、cpu flavor のみの構成）:
+
+```
+=== Daily Usage ===
+NAMESPACE            DATE             CPU (core·h)    Mem (GiB·h)    GPU (h)
+user-alice           2026-04-05               12.0           48.0        0.0
+user-bob             2026-04-05                4.0           16.0        0.0
+user-alice           2026-04-06                8.0           32.0        0.0
+
+=== 7-Day Window Aggregate ===
+NAMESPACE              CPU (core·h)    Mem (GiB·h)    GPU (h)
+user-alice                     20.0           80.0        0.0
+user-bob                        4.0           16.0        0.0
+
+=== DRF Dominant Share ===
+NAMESPACE              CPU (core·h)    Mem (GiB·h)    GPU (h)   WEIGHT        DOM_SHARE
+user-bob                        4.0           16.0        0.0        1         0.001488
+user-alice                     20.0           80.0        0.0        1         0.007440
+```
+
+複数 flavor がある構成では、Daily Usage セクションは `(namespace, date)` 単位で 1 行に統合され、flavor ごとの内訳は表示されない。flavor 別の内訳を閲覧する CLI コマンドは現時点では存在せず、必要な場合は `namespace_daily_usage` を直接参照する必要がある。DRF Dominant Share は内部で flavor 単位に dominant share を計算し、`drf_weight` で重み付け合算するが、出力には flavor 列を含めず namespace 単位の集計値のみを表示する。
 
 #### `cjobctl usage quota`
 

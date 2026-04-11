@@ -676,7 +676,71 @@ cjob release 1,3,5
 cjob release --all
 ```
 
-## 13. `cjob reset` Behavior
+## 13. `cjob set` Behavior
+
+For jobs in QUEUED or HELD state, overrides the resource request, flavor, and time limit that will be passed to the Dispatcher. Exits with an error if no field is specified.
+
+The job_id specification format is the same as `cjob cancel`, supporting single, range, and combined formats. Single-id invocations call `POST /v1/jobs/{job_id}/set`; multi-id invocations call `POST /v1/jobs/set`.
+
+### Modifiable Fields
+
+| Option | Type | Description |
+|---|---|---|
+| `--cpu <cpu>` | string | CPU request (e.g., `4`, `2000m`) |
+| `--memory <memory>` | string | Memory request (e.g., `16Gi`, `16384Mi`) |
+| `--gpu <N>` | integer | Number of GPUs |
+| `--flavor <name>` | string | ResourceFlavor name |
+| `--time-limit <duration>` | string | Execution time limit (e.g., `12h`, `30m`); converted to seconds before sending to the API |
+
+Fields not specified are left unchanged. Value parsing (e.g., `parse_duration`) reuses the same utilities as `cjob add`.
+
+### Target Job Conditions
+
+The API enforces the following state checks:
+
+- Jobs in any state other than `QUEUED` / `HELD` are placed in `skipped` (RUNNING / DISPATCHING / DISPATCHED / SUCCEEDED / FAILED / CANCELLED / DELETING — jobs that have already been handed off to K8s or completed are not modifiable).
+- Nonexistent job_ids are placed in `not_found`.
+
+### Behavior
+
+```
+# Note: The CLI is implemented in Rust. The following is pseudocode for conceptual explanation.
+
+fn cmd_set(expr, cpu, memory, gpu, flavor, time_limit):
+    if all parameters are None:
+        Error exit: "specify at least one parameter to modify (--cpu, --memory, --gpu, --flavor, --time-limit)"
+
+    time_limit_seconds = convert time_limit to seconds (when specified)
+
+    job_ids = parse_job_ids(expr)   // Shares the same parse logic as cancel
+    if len(job_ids) == 1:
+        Send parameters to POST /v1/jobs/{job_id}/set
+        Display "Job {job_id}: {status}"
+    else:
+        Send job_ids and parameters to POST /v1/jobs/set
+        Receive result:
+            If modified: Display "Modified: [job_ids]"
+            If skipped: Display "Skipped (not QUEUED / HELD): [job_ids]"
+            If not_found: Display "Not found: [job_ids]"
+```
+
+### Usage Examples
+
+```bash
+# Change only the flavor of a single job
+cjob set 5 --flavor cpu-sub
+
+# Change resource request and time limit for multiple jobs at once
+cjob set 10,11,12 --cpu 4 --memory 16Gi --time-limit 12h
+
+# Range + individual specification
+cjob set 10-20,25,30 --cpu 8
+
+# Feed IDs from cjob list (switch flavor while keeping jobs QUEUED)
+cjob set $(cjob list --status QUEUED --flavor cpu --format ids) --flavor cpu-sub
+```
+
+## 14. `cjob reset` Behavior
 
 1. Retrieves job list with `GET /v1/jobs`, retains `log_base_dir` from the response, and checks in the following order:
    - If any `DELETING` jobs exist: Displays "Previous reset process has not yet completed. Please wait a moment and try again." and aborts
@@ -702,7 +766,7 @@ Delete all 15 jobs and logs. Are you sure? [y/N] y
 Reset has started. Please wait for background cleanup to complete.
 ```
 
-## 14. `cjob usage` Behavior
+## 15. `cjob usage` Behavior
 
 Calls `GET /v1/usage` and displays daily resource usage for the past `FAIR_SHARE_WINDOW_DAYS` days.
 
@@ -770,7 +834,7 @@ Resource Usage (past 7 days)
   Total                    44.5           89.0
 ```
 
-## 15. `cjob update` Behavior
+## 16. `cjob update` Behavior
 
 Manages CLI binary versioning and updates. Binaries are distributed via the Submit API.
 
@@ -848,7 +912,7 @@ Update? 1.2.0 → 1.3.1-beta.1 [y/N] y
 Update complete. (1.3.1-beta.1)
 ```
 
-## 16. `cjob flavor` Behavior
+## 17. `cjob flavor` Behavior
 
 Calls `GET /v1/flavors` and displays the list of available ResourceFlavors and their resource limits. Uses an authentication-free endpoint, so it can be executed without a ServiceAccount JWT.
 
