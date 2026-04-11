@@ -427,6 +427,7 @@ After update, the restart command for affected components is displayed. The mapp
 | `TTL_SECONDS_AFTER_FINISHED` | int | dispatcher |
 | `JOB_NODE_TAINT` | string | dispatcher |
 | `WATCHER_METRICS_PORT` | int | watcher |
+| `DISPATCHER_METRICS_PORT` | int | dispatcher |
 | `LOG_LEVEL` | string | dispatcher, watcher, submit-api |
 
 **Non-updatable keys:**
