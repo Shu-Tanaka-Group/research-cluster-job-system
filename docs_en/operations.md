@@ -87,7 +87,7 @@ If the table is empty, it indicates the Watcher has not started or no target nod
 
 ### 1.8 Checking ClusterQueue nominalQuota
 
-Displays the current nominalQuota set on the Kueue ClusterQueue per ResourceFlavor. If `lendingLimit` is configured, its value is also shown.
+Displays the current nominalQuota set on the Kueue ClusterQueue per ResourceFlavor.
 
 ```bash
 cjobctl cluster show-quota
@@ -380,7 +380,7 @@ kubectl apply -f <flavor-name>-resourceflavor.yaml
 kubectl edit clusterqueue cjob-cluster-queue
 ```
 
-Add a new flavor entry to `spec.resourceGroups[0].flavors`. For flavors without GPU resources, set the `nvidia.com/gpu` nominalQuota to `"0"`. To protect other flavors' resources, set `lendingLimit: "0"`.
+Add a new flavor entry to `spec.resourceGroups[0].flavors`. For flavors without GPU resources, set the `nvidia.com/gpu` nominalQuota to `"0"`.
 
 ### 8.4 Add Definition to ConfigMap `RESOURCE_FLAVORS`
 

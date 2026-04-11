@@ -217,7 +217,7 @@ gpu-a100        nvidia.com/gpu           2          4   50.0%
 
 #### `cjobctl cluster show-quota`
 
-Displays the nominalQuota for each ResourceFlavor in the ClusterQueue. Resources with a `lendingLimit` set also display that value.
+Displays the nominalQuota for each ResourceFlavor in the ClusterQueue.
 
 Output example:
 
@@ -230,9 +230,9 @@ Output example:
   GPU:    0
 
 [gpu-a100]
-  CPU:    64      (lendingLimit: 0)
-  Memory: 500Gi   (lendingLimit: 0)
-  GPU:    4        (lendingLimit: 0)
+  CPU:    64
+  Memory: 500Gi
+  GPU:    4
 ```
 
 #### `cjobctl cluster set-quota`
