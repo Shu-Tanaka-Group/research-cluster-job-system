@@ -13,6 +13,7 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 | 403 | namespace に CJob ユーザー設定（`cjob.io/username` annotation）がない | `{ "detail": "Namespace is not configured as a CJob user namespace" }` |
 | 404 | 存在しない job_id、または他ユーザーの job_id | `{ "detail": "Job not found" }` |
 | 409 | リセット処理中（`DELETING` ジョブが存在する namespace への投入） | `{ "detail": "リセット処理中のためジョブを投入できません。しばらく待ってから再試行してください" }` |
+| 429 | namespace 内の active ジョブ数が `MAX_QUEUED_JOBS_PER_NAMESPACE` に到達（POST /v1/jobs, POST /v1/sweep） | `{ "detail": "投入可能なジョブ数の上限（<MAX_QUEUED_JOBS_PER_NAMESPACE>件）に達しています" }` |
 | 500 | namespace の読み取り失敗など内部エラー | `{ "detail": "Internal server error" }` |
 | 503 | DB 書き込み失敗など内部サービス一時不可 | `{ "detail": "Service temporarily unavailable" }` |
 
