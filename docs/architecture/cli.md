@@ -252,26 +252,26 @@ cjob add --time-limit 3d -- python main.py       # 3日
 
 ```
 $ cjob logs 3
-ジョブ 3 はまだ開始されていません。(QUEUED)
-`cjob logs --follow 3` でログの追跡ができます。
+Job 3 has not started yet. (QUEUED)
+Run `cjob logs --follow 3` to follow logs.
 ```
 
 `--follow` ありの場合、`GET /v1/jobs/{job_id}` を数秒ごとにポーリングし、状態と経過時間を表示する。5分経過してもジョブが開始しない場合はタイムアウトメッセージを表示して終了する。
 
 ```
 $ cjob logs --follow 3
-ジョブ 3 の開始を待機中... (QUEUED) [0:00:12]
-ジョブ 3 の開始を待機中... (DISPATCHING) [0:00:25]
-ジョブ 3 の開始を待機中... (DISPATCHED) [0:00:48]
-ジョブ 3 が開始しました。ログを追跡します。
-<ログ出力>
+Waiting for job 3 to start... (QUEUED) [0:00:12]
+Waiting for job 3 to start... (DISPATCHING) [0:00:25]
+Waiting for job 3 to start... (DISPATCHED) [0:00:48]
+Job 3 has started. Following logs.
+<log output>
 ```
 
 ```
 $ cjob logs --follow 3   # 5分経過しても開始しない場合
-ジョブ 3 の開始を待機中... (DISPATCHED) [5:00:00]
-タイムアウトしました。ジョブはまだ DISPATCHED 状態です。
-`cjob status 3` で状態を確認してください。
+Waiting for job 3 to start... (DISPATCHED) [5:00:00]
+Timed out. Job is still in DISPATCHED state.
+Run `cjob status 3` to check the status.
 ```
 
 ### `--follow` の終了条件
@@ -282,8 +282,8 @@ $ cjob logs --follow 3   # 5分経過しても開始しない場合
 
 ```
 $ cjob logs --follow 3
-<ログ出力中>
-^C      ← ユーザーが Ctrl-C で終了
+<log output streaming>
+^C      ← user interrupts with Ctrl-C
 ```
 
 ## 6. `cjob list` の動作
@@ -297,7 +297,7 @@ JOB_ID  TYPE   STATUS      FLAVOR      PROGRESS    COMMAND                      
 52      job    RUNNING     cpu         -           python main.py --alpha 0.2 --beta 16 2026-03-23 12:35     -
 53      sweep  RUNNING     gpu-a100    48/2/100    python main.py --trial $CJOB_INDEX   2026-03-23 12:35     -
 54      sweep  SUCCEEDED   gpu-a100    98/2/100    python main.py --trial $CJOB_INDEX   2026-03-23 12:36     2026-03-23 13:00
-（100件中最新の50件を表示。全件表示するには --all を使用してください）
+(Showing 50 of 100 jobs. Use --all to show all.)
 ```
 
 TYPE 列は通常ジョブが `job`、sweep ジョブが `sweep`。PROGRESS 列は sweep ジョブの場合に `成功数/失敗数/全体数` を表示し、通常ジョブは `-` を表示する。
@@ -347,7 +347,7 @@ flavor:       cpu
 cpu:          2
 memory:       4Gi
 gpu:          0
-time_limit:   24h (残り 23h 24m)
+time_limit:   24h (23h 24m remaining)
 created_at:   2026-03-23 12:35:00
 dispatched_at: 2026-03-23 12:35:05
 started_at:   2026-03-23 12:35:10
@@ -376,7 +376,7 @@ completions:    100
 parallelism:    10
 progress:       48/2/100 (succeeded/failed/total)
 failed_indexes: 12,37
-time_limit:     6h (残り 4h 32m)
+time_limit:     6h (4h 32m remaining)
 created_at:     2026-03-23 12:35:00
 dispatched_at:  2026-03-23 12:35:05
 started_at:     2026-03-23 12:35:10
@@ -416,7 +416,7 @@ last_error:    K8s API permanent error 403: admission webhook "validate-image.ky
 
 ```
 $ cjob status 999
-エラー: job_id 999 が見つかりません。
+Error: job_id 999 not found.
 ```
 
 ### sweep ジョブのログ
@@ -534,10 +534,10 @@ cjob config remove env exclude MY_SECRET
 
 ```
 $ cjob config set env exclude X
-エラー: env.exclude はリスト型です。add / remove を使用してください
+Error: env.exclude is a list setting. Use add / remove instead
 
 $ cjob config add unknown key value
-エラー: 不明な設定: unknown.key
+Error: unknown setting: unknown.key
 ```
 
 #### 環境変数の除外
@@ -564,13 +564,13 @@ fn cmd_cancel(expr):
     job_ids = parse_job_ids(expr)
     if len(job_ids) == 1:
         POST /v1/jobs/{job_id}/cancel を呼ぶ
-        "ジョブ {job_id}: {status}" を表示する
+        "Job {job_id}: {status}" を表示する
     else:
         POST /v1/jobs/cancel に job_ids を送る
         result を受け取り:
-            cancelled があれば "キャンセルしました" を表示する
-            skipped があれば "スキップしました（完了済みまたはキャンセル済み）" を表示する
-            not_found があれば "見つかりませんでした" を表示する
+            cancelled があれば "Cancelled: [job_ids]" を表示する
+            skipped があれば "Skipped (already completed or cancelled): [job_ids]" を表示する
+            not_found があれば "Not found: [job_ids]" を表示する
 ```
 
 ## 10. `cjob delete` の動作
@@ -590,13 +590,13 @@ fn cmd_delete(expr, all: bool):
 
     result を受け取り:
         result.log_dirs の各パスに対応するログディレクトリを削除する
-        deleted があれば "削除しました" を表示する
+        deleted があれば "Deleted: [job_ids]" を表示する
         skipped があれば:
-            reason が "running" のジョブ → "実行中のため削除できませんでした。先に cjob cancel を実行してください"
-            reason が "held" のジョブ → "保留中のため削除できませんでした。先に cjob cancel または cjob release を実行してください"
-            reason が "deleting" のジョブ → "リセット処理中のため削除できませんでした"
+            reason が "running" のジョブ → "Job {id}: cannot delete while running. Run cjob cancel first."
+            reason が "held" のジョブ → "Job {id}: cannot delete while held. Run cjob cancel or cjob release first."
+            reason が "deleting" のジョブ → "Job {id}: cannot delete during reset"
             （API レスポンスの skipped[].reason に基づいて分岐する）
-        not_found があれば "見つかりませんでした" を表示する
+        not_found があれば "Not found: [job_ids]" を表示する
 ```
 
 ## 11. `cjob hold` の動作
@@ -617,9 +617,9 @@ fn cmd_hold(expr, all: bool):
         POST /v1/jobs/hold に job_ids を送る
 
     result を受け取り:
-        held があれば "保留しました" を表示する
-        skipped があれば "スキップしました（QUEUED 以外）" を表示する
-        not_found があれば "見つかりませんでした" を表示する
+        held があれば "Held: [job_ids]" を表示する
+        skipped があれば "Skipped (not QUEUED): [job_ids]" を表示する
+        not_found があれば "Not found: [job_ids]" を表示する
 ```
 
 ### 使用例
@@ -655,9 +655,9 @@ fn cmd_release(expr, all: bool):
         POST /v1/jobs/release に job_ids を送る
 
     result を受け取り:
-        released があれば "キューに戻しました" を表示する
-        skipped があれば "スキップしました（HELD 以外）" を表示する
-        not_found があれば "見つかりませんでした" を表示する
+        released があれば "Released: [job_ids]" を表示する
+        skipped があれば "Skipped (not HELD): [job_ids]" を表示する
+        not_found があれば "Not found: [job_ids]" を表示する
 ```
 
 ### 使用例
@@ -756,12 +756,12 @@ cjob set $(cjob list --status QUEUED --flavor cpu --format ids) --flavor cpu-sub
 
 ```
 $ cjob reset
-完了していないジョブがあるためリセットできません。
-完了待ちのジョブ: 3, 7, 12
+Cannot reset: there are incomplete jobs.
+Pending jobs: 3, 7, 12
 
 $ cjob reset   # 全ジョブ完了後
-全 15 件のジョブとログを削除します。よろしいですか？ [y/N] y
-リセットを開始しました。バックグラウンドでクリーンアップが完了するまでお待ちください。
+Delete all 15 jobs and their logs. Are you sure? [y/N] y
+Reset started. Please wait for background cleanup to complete.
 ```
 
 ## 15. `cjob usage` の動作
