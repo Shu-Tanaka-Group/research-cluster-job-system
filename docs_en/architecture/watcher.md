@@ -70,6 +70,8 @@ Since the Dispatcher alone cannot detect K8s Job completion or failure, the Watc
    | `type: Failed, status: True` | `FAILED` | Includes non-zero Pod exit codes and startup failures |
    | No conditions / Pod is Running | `RUNNING` | On first RUNNING transition: record `started_at`, get `node_name` from `spec.nodeName` of all Pods, and add accumulated consumption to `namespace_daily_usage` (see [database.md](database.md) §5.2) |
 
+   **Completion fallback (usage recording):** Jobs that complete within a single scan cycle never have RUNNING observed by Watcher and transition directly from DISPATCHED to SUCCEEDED/FAILED. In this case `started_at` remains NULL, so on the completion transition, if `started_at` is NULL, call `_record_resource_usage` to add the consumption to `namespace_daily_usage`. `started_at` is kept as NULL (since RUNNING was never actually observed). The same fallback applies to sweep jobs.
+
 3. Identify the corresponding `job_id` from the `cjob.io/job-id` label and `cjob.io/namespace` label (matching by `k8s_job_name` is not used).
 4. Update the DB status. However, do not overwrite jobs whose DB status is `CANCELLED` or `DELETING` (maintain the intentional DB state even if K8s side has completed or failed). Note that `HELD` jobs are not subject to this step as their K8s Job has not been created yet.
 5. If a K8s Job exists for a job whose DB status is `CANCELLED`, delete it (the DB status remains `CANCELLED` after K8s Job deletion).
@@ -138,7 +140,7 @@ An append-only approach is used; once recorded, node names are not deleted. If a
 
 ### 4.4 Adding Resource Usage
 
-On RUNNING transition, add `time_limit_seconds × resource amount × parallelism`. This reflects the maximum amount of resources used simultaneously, so that sweep jobs are appropriately weighted in DRF fairness calculations.
+On RUNNING transition, add `time_limit_seconds × resource amount × parallelism`. This reflects the maximum amount of resources used simultaneously, so that sweep jobs are appropriately weighted in DRF fairness calculations. If a job completes without RUNNING being observed, the same calculation is used via the completion fallback described in §3.
 
 ### 4.5 Processing on CANCEL
 
