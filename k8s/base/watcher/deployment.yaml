@@ -102,7 +102,7 @@ spec:
               memory: "128Mi"
             limits:
               cpu: "300m"
-              memory: "256Mi"
+              memory: "1Gi"
           livenessProbe:
             exec:
               command: ["sh", "-c", "test $(( $(date +%s) - $(stat -c %Y /tmp/liveness) )) -lt 120"]
