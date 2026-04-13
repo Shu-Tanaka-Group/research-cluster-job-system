@@ -44,6 +44,7 @@ const CONFIG_KEYS: &[ConfigKeyMeta] = &[
     ConfigKeyMeta { key: "DEFAULT_FLAVOR", value_type: ValueType::String, components: &["submit-api"], updatable: true },
     ConfigKeyMeta { key: "NODE_RESOURCE_SYNC_INTERVAL_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
     // Watcher
+    ConfigKeyMeta { key: "WATCHER_K8S_LIST_PAGE_SIZE", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "CLUSTER_QUEUE_NAME", value_type: ValueType::String, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "RESOURCE_QUOTA_NAME", value_type: ValueType::String, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "RESOURCE_QUOTA_SYNC_INTERVAL_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },

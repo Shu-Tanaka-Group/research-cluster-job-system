@@ -16,3 +16,10 @@ kubectl rollout restart deployment watcher -n cjob-system
 ```
 
 If your custom overlay overrides the watcher `resources` block, update the overlay-side memory limit to an equivalent or higher value (1Gi recommended).
+
+## `WATCHER_K8S_LIST_PAGE_SIZE` added to `cjob-config`
+
+A new standard key `WATCHER_K8S_LIST_PAGE_SIZE` (default `"500"`) has been added to the `cjob-config` ConfigMap. After the base ConfigMap is applied with `kubectl apply -k overlays/<env>`, run one of the following:
+
+- Standard case: `cjobctl system restart watcher` (env is read from the ConfigMap)
+- If your custom overlay patches `cjob-config`: add `WATCHER_K8S_LIST_PAGE_SIZE: "500"` to the overlay-side ConfigMap patch and apply. Even if the value is not set explicitly, the Python-side default (500) still applies, but listing it in the ConfigMap is recommended so it appears in `cjobctl config show` output

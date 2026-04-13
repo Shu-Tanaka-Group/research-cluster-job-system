@@ -198,4 +198,4 @@ As a result, the number of API calls scales only with the number of namespaces, 
 |---|---|---|
 | `WATCHER_K8S_LIST_PAGE_SIZE` | 500 | Page size for `list_job_for_all_namespaces()` and `list_pod_for_all_namespaces()`. Larger values reduce the number of pages and API round-trip costs, but increase the response size per page |
 
-This setting is not included in the default Watcher ConfigMap; administrators add it to the overlay ConfigMap as needed (see [deployment.md](../deployment.md) §5).
+This setting is registered as a standard key in the `cjob-config` ConfigMap and can be updated via `cjobctl config set WATCHER_K8S_LIST_PAGE_SIZE <value>` (see [cjobctl.md](cjobctl.md) §`cjobctl config set`). After updating, apply the change with `cjobctl system restart watcher`.

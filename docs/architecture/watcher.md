@@ -196,4 +196,4 @@ reconcile 中の `node_name` 記録に使用する `CoreV1Api.list_namespaced_po
 |---|---|---|
 | `WATCHER_K8S_LIST_PAGE_SIZE` | 500 | `list_job_for_all_namespaces()` と `list_pod_for_all_namespaces()` のページサイズ。値を大きくするとページ数が減り API 往復コストが下がるが、1 ページのレスポンスサイズが増える |
 
-この設定は Watcher のデフォルト ConfigMap には含めず、必要に応じて管理者が overlay の ConfigMap に追加する運用とする（[deployment.md](../deployment.md) §5 参照）。
+この設定は `cjob-config` ConfigMap の標準キーとして登録されており、`cjobctl config set WATCHER_K8S_LIST_PAGE_SIZE <value>` で更新できる（[cjobctl.md](cjobctl.md) §`cjobctl config set` 参照）。更新後は `cjobctl system restart watcher` で反映する。
