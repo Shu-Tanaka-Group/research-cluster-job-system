@@ -432,6 +432,7 @@ Key design points:
 - Replica fixed at 1 (multiple replicas would cause duplicate DB updates)
 - Liveness probe uses file timestamp method: the main loop periodically touches `/tmp/liveness`, and if the last update was more than 120 seconds ago, the loop is considered stopped and a restart is triggered
 - Specifies `serviceAccountName: dispatcher-sa` to share the ServiceAccount with Dispatcher (see §9)
+- Resource settings: `requests.memory: 128Mi` / `limits.memory: 1Gi`. Pagination and lightweight dataclass conversion of K8s Job fetches (see [watcher.md](architecture/watcher.md) §5) keep steady-state memory usage under 256Mi, but the limit is set to 1Gi as a safety margin for bursts with thousands of concurrent Jobs
 
 ---
 

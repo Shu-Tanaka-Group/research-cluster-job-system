@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     DEFAULT_FLAVOR: str = "cpu"
     NODE_RESOURCE_SYNC_INTERVAL_SEC: int = 300     # 5 minutes
 
+    # Watcher - K8s API pagination (watcher.md §5.5)
+    WATCHER_K8S_LIST_PAGE_SIZE: int = 500
+
     # Submit API
     MAX_QUEUED_JOBS_PER_NAMESPACE: int = 500
     MAX_SWEEP_COMPLETIONS: int = 1000

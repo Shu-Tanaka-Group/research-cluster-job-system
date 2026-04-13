@@ -1,14 +1,32 @@
-from kubernetes.client import V1Job, V1JobCondition, V1JobStatus, V1ObjectMeta
+from kubernetes.client import V1JobCondition
 
-from cjob.watcher.reconciler import determine_status
+from cjob.watcher.reconciler import (
+    LightJobCondition,
+    LightK8sJob,
+    determine_status,
+)
+
+
+def _light_condition(cond: V1JobCondition) -> LightJobCondition:
+    return LightJobCondition(
+        type=cond.type or "",
+        status=cond.status or "",
+        reason=cond.reason,
+    )
 
 
 def _make_k8s_job(conditions=None, active=None):
-    """Helper to build a minimal V1Job for testing."""
-    status = V1JobStatus(conditions=conditions, active=active)
-    return V1Job(
-        metadata=V1ObjectMeta(name="test-job", namespace="user-test"),
-        status=status,
+    """Helper to build a minimal LightK8sJob for testing determine_status."""
+    return LightK8sJob(
+        namespace="user-test",
+        job_id=1,
+        name="test-job",
+        conditions=tuple(_light_condition(c) for c in (conditions or [])),
+        active=active,
+        succeeded=None,
+        failed=None,
+        completed_indexes=None,
+        failed_indexes=None,
     )
 
 
@@ -65,8 +83,16 @@ class TestDetermineStatus:
         assert determine_status(job) == ("SUCCEEDED", None)
 
     def test_empty_status(self):
-        job = V1Job(
-            metadata=V1ObjectMeta(name="test-job"),
-            status=None,
+        """LightK8sJob with empty conditions and no active Pods maps to (None, None)."""
+        job = LightK8sJob(
+            namespace="user-test",
+            job_id=1,
+            name="test-job",
+            conditions=(),
+            active=None,
+            succeeded=None,
+            failed=None,
+            completed_indexes=None,
+            failed_indexes=None,
         )
         assert determine_status(job) == (None, None)

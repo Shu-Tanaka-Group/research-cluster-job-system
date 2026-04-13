@@ -72,9 +72,11 @@ def _make_pod(node_name, owner_kind="DaemonSet", phase="Running",
     return pod
 
 
-def _pod_list(*pods):
+def _pod_list(*pods, continue_token=None):
+    """Build a mock V1PodList. Defaults to the final page (continue_token=None)."""
     resp = MagicMock()
     resp.items = list(pods)
+    resp.metadata._continue = continue_token
     return resp
 
 
@@ -100,6 +102,7 @@ class TestSyncNodeResources:
     def test_inserts_new_nodes(self, mock_k8s, db_session):
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
             _make_node("node-2", cpu="64", memory="256Gi"),
@@ -122,6 +125,7 @@ class TestSyncNodeResources:
     def test_updates_existing_nodes(self, mock_k8s, db_session):
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         # First sync
         mock_api.list_node.return_value.items = [
@@ -142,6 +146,7 @@ class TestSyncNodeResources:
     def test_deletes_removed_nodes(self, mock_k8s, db_session):
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         # First sync: two nodes
         mock_api.list_node.return_value.items = [
@@ -161,6 +166,7 @@ class TestSyncNodeResources:
     def test_deletes_all_when_no_nodes(self, mock_k8s, db_session):
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         # First sync: one node
         mock_api.list_node.return_value.items = [_make_node("node-1")]
@@ -178,6 +184,7 @@ class TestSyncNodeResources:
 
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         # First sync succeeds
         mock_api.list_node.return_value.items = [_make_node("node-1")]
@@ -194,6 +201,7 @@ class TestSyncNodeResources:
     def test_uses_flavor_label_selectors(self, mock_k8s, db_session):
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         cpu_response = MagicMock()
         cpu_response.items = []
@@ -212,6 +220,7 @@ class TestSyncNodeResources:
         """Multiple flavors fetch nodes with correct flavor tags."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         cpu_response = MagicMock()
         cpu_response.items = [_make_node("cpu-node", cpu="32", memory="128Gi")]
@@ -233,6 +242,7 @@ class TestSyncNodeResources:
         """Nodes matching both flavors appear only once (first flavor wins)."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         shared_node = _make_node("shared-node", cpu="32", memory="128Gi", gpu_resources={"nvidia.com/gpu": "2"})
         cpu_response = MagicMock()
@@ -252,6 +262,7 @@ class TestSyncNodeResources:
         """Single flavor settings should make only one list_node call."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [_make_node("node-1")]
 
         sync_node_resources(db_session, _make_settings())
@@ -264,6 +275,7 @@ class TestSyncNodeResources:
 
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         cpu_response = MagicMock()
         cpu_response.items = [_make_node("cpu-node", cpu="32", memory="128Gi")]
@@ -283,6 +295,7 @@ class TestSyncNodeResources:
 
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         # First sync: both flavors succeed
         cpu_response = MagicMock()
@@ -314,6 +327,7 @@ class TestSyncNodeResources:
 
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         # First sync: cpu has two nodes, gpu has one node
         cpu_response = MagicMock()
@@ -343,6 +357,7 @@ class TestSyncNodeResources:
         """GPU count is read from the flavor's gpu_resource_name."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         # Flavor with amd.com/gpu resource name
         settings = _make_settings(
@@ -365,6 +380,7 @@ class TestSyncNodeResources:
         """Flavor without gpu_resource_name records gpu=0 even if node has GPUs."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         # CPU flavor (no gpu_resource_name) on a node that has GPUs
         mock_api.list_node.return_value.items = [
@@ -380,6 +396,7 @@ class TestSyncNodeResources:
         """DaemonSet Pod CPU/memory requests are subtracted from allocatable."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
         ]
@@ -397,6 +414,7 @@ class TestSyncNodeResources:
         """Multiple DaemonSet Pods on the same node are summed together."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
         ]
@@ -416,6 +434,7 @@ class TestSyncNodeResources:
         """Sums requests across all containers in a single DaemonSet Pod."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
         ]
@@ -436,6 +455,7 @@ class TestSyncNodeResources:
         """Pods owned by non-DaemonSet controllers are not subtracted."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
         ]
@@ -458,6 +478,7 @@ class TestSyncNodeResources:
         """Pods without owner references are not subtracted (bare Pods)."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
         ]
@@ -476,6 +497,7 @@ class TestSyncNodeResources:
         """DaemonSet Pods in Succeeded/Failed/Unknown phase are not subtracted."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
         ]
@@ -498,6 +520,7 @@ class TestSyncNodeResources:
         """DaemonSet Pods in Pending phase are counted (already scheduled)."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
         ]
@@ -516,6 +539,7 @@ class TestSyncNodeResources:
         """Containers without requests set contribute 0 to the subtraction."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
         ]
@@ -536,6 +560,7 @@ class TestSyncNodeResources:
         """Subtraction never produces negative effective allocatable values."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="1", memory="100Mi"),
         ]
@@ -554,6 +579,7 @@ class TestSyncNodeResources:
         """Each node is adjusted independently based on its own DaemonSet Pods."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
         mock_api.list_node.return_value.items = [
             _make_node("node-1", cpu="32", memory="128Gi"),
             _make_node("node-2", cpu="64", memory="256Gi"),
@@ -580,6 +606,7 @@ class TestSyncNodeResources:
 
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         # First sync succeeds (no DaemonSet Pods)
         mock_api.list_node.return_value.items = [
@@ -604,6 +631,7 @@ class TestSyncNodeResources:
         """GPU count is not reduced even if a DaemonSet Pod requests GPU."""
         mock_api = MagicMock()
         mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
 
         settings = _make_settings(
             RESOURCE_FLAVORS=json.dumps([
@@ -628,3 +656,50 @@ class TestSyncNodeResources:
         assert n[0] == 32000 - 100
         assert n[1] == 131072 - 64
         assert n[2] == 4  # GPU not reduced
+
+    def test_daemonset_pod_list_is_paginated(self, mock_k8s, db_session):
+        """list_pod_for_all_namespaces is called repeatedly until _continue is empty."""
+        mock_api = MagicMock()
+        mock_k8s.CoreV1Api.return_value = mock_api
+        mock_api.list_pod_for_all_namespaces.return_value = _no_pods()
+        mock_api.list_node.return_value.items = [
+            _make_node("node-1", cpu="32", memory="128Gi"),
+        ]
+        mock_api.list_pod_for_all_namespaces.side_effect = [
+            _pod_list(
+                _make_pod(
+                    "node-1",
+                    container_requests=[{"cpu": "500m", "memory": "256Mi"}],
+                ),
+                continue_token="page-2",
+            ),
+            _pod_list(
+                _make_pod(
+                    "node-1",
+                    container_requests=[{"cpu": "300m", "memory": "128Mi"}],
+                ),
+                continue_token="page-3",
+            ),
+            _pod_list(
+                _make_pod(
+                    "node-1",
+                    container_requests=[{"cpu": "200m", "memory": "64Mi"}],
+                ),
+                continue_token=None,
+            ),
+        ]
+
+        sync_node_resources(db_session, _make_settings(WATCHER_K8S_LIST_PAGE_SIZE=1))
+
+        n = _get_node(db_session, "node-1")
+        assert n[0] == 32000 - (500 + 300 + 200)
+        assert n[1] == 131072 - (256 + 128 + 64)
+
+        calls = mock_api.list_pod_for_all_namespaces.call_args_list
+        assert len(calls) == 3
+        for call in calls:
+            assert call.kwargs["limit"] == 1
+            assert call.kwargs["watch"] is False
+        assert "_continue" not in calls[0].kwargs
+        assert calls[1].kwargs["_continue"] == "page-2"
+        assert calls[2].kwargs["_continue"] == "page-3"

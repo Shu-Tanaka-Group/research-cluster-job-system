@@ -72,6 +72,21 @@ DB への書き込みはいずれも UPSERT（行数 = ノード数 or namespace
 
 これらの同期処理がボトルネックになる可能性は、現在の規模（ユーザー数 10 名程度）はもちろん、数百ユーザー規模でも極めて低い。
 
+### 2.4 Watcher のメモリ消費
+
+Watcher は reconcile サイクルごとに K8s API のレスポンスと DB クエリ結果をメモリ上に保持する。特に `list_job_for_all_namespaces()` の結果（1 Job あたり数十 KB）と `list_pod_for_all_namespaces()` の結果（DaemonSet 予約集計用）は、クラスタ規模に比例して膨張する主要因である。数百件規模までは 256Mi の memory limit で十分だが、数千件を超える同時存在 Job に対しては OOMKilled を起こす。
+
+以下の対策で Watcher のメモリ常駐量を制御する（詳細は [watcher.md](watcher.md) §5 参照）。
+
+| 対策 | 対象ホットスポット | 効果 |
+|---|---|---|
+| K8s Job のページネーション + 軽量 dataclass 化 | `list_job_for_all_namespaces()` | 1 オブジェクトあたりのメモリを 1/10 程度に削減し、パース時のピークも抑制 |
+| DaemonSet Pod のページ単位集計 | `list_pod_for_all_namespaces()`（node_sync） | ページサイズ以上の Pod リストを同時にメモリ保持しない |
+| DB クエリの対象絞り込み | Step 2 / Step 8 の DB 読み込み | K8s Job に対応する Job のみ、または存在チェックに必要なカラムのみを読み込む |
+| `list_namespaced_pod()` の namespace 単位バッチ化 | reconcile 中の `node_name` 記録 | API 呼び出しが Job 数ではなく namespace 数に比例。同時保持する `V1PodList` は最大 1 件 |
+
+これらの対策により、Watcher のピークメモリ使用量は同時存在 Job 数 5,000 件程度まで 256Mi 以下に抑えられる見込みである（実運用では更なる安全マージンとして memory limit を 1Gi に設定する）。
+
 ## 3. Watch API と Informer パターン
 
 ### 3.1 現在の方式（ポーリング）

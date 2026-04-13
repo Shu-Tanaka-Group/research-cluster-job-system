@@ -414,6 +414,7 @@ CLI 側で以下のバリデーションを行う:
 | `RESOURCE_FLAVORS` | json | dispatcher, watcher, submit-api |
 | `DEFAULT_FLAVOR` | string | submit-api |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | int | watcher |
+| `WATCHER_K8S_LIST_PAGE_SIZE` | int | watcher |
 | `CLUSTER_QUEUE_NAME` | string | watcher |
 | `RESOURCE_QUOTA_NAME` | string | watcher |
 | `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` | int | watcher |

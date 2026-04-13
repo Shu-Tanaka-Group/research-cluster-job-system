@@ -1,13 +1,22 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from kubernetes.client import V1Job, V1JobCondition, V1JobStatus, V1ObjectMeta
+from kubernetes.client import (
+    V1Job,
+    V1JobCondition,
+    V1JobStatus,
+    V1ListMeta,
+    V1ObjectMeta,
+)
 from kubernetes.client.rest import ApiException
 
 from cjob.metrics import JOBS_COMPLETED_TOTAL
 from cjob.models import Job, NamespaceDailyUsage, UserJobCounter
 from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 from cjob.watcher.reconciler import (
+    LightJobCondition,
+    LightK8sJob,
+    NamespacePodNodeResolver,
     _merge_node_names,
     list_cjob_k8s_jobs,
     reconcile_cycle,
@@ -17,18 +26,26 @@ from cjob.watcher.reconciler import (
 NS = "alice"
 
 
+def _light_condition(cond: V1JobCondition) -> LightJobCondition:
+    return LightJobCondition(
+        type=cond.type or "",
+        status=cond.status or "",
+        reason=cond.reason,
+    )
+
+
 def _make_k8s_job(namespace, job_id, name, conditions=None, active=None):
-    """Build a minimal K8s V1Job with cjob labels."""
-    return V1Job(
-        metadata=V1ObjectMeta(
-            name=name,
-            namespace=namespace,
-            labels={
-                "cjob.io/namespace": namespace,
-                "cjob.io/job-id": str(job_id),
-            },
-        ),
-        status=V1JobStatus(conditions=conditions, active=active),
+    """Build a LightK8sJob with the fields reconcile_cycle uses."""
+    return LightK8sJob(
+        namespace=namespace,
+        job_id=job_id,
+        name=name,
+        conditions=tuple(_light_condition(c) for c in (conditions or [])),
+        active=active,
+        succeeded=None,
+        failed=None,
+        completed_indexes=None,
+        failed_indexes=None,
     )
 
 
@@ -63,7 +80,7 @@ def _insert_counter(session, namespace=NS, next_id=2):
     session.flush()
 
 
-@patch("cjob.watcher.reconciler._fetch_node_names", return_value=[])
+@patch.object(NamespacePodNodeResolver, "resolve", return_value=[])
 @patch("cjob.watcher.reconciler._delete_k8s_job")
 class TestReconcileStatusSync:
     """Test normal status synchronization from K8s to DB."""
@@ -346,7 +363,7 @@ class TestParseMemoryMib:
 # ── Resource usage recording ──
 
 
-@patch("cjob.watcher.reconciler._fetch_node_names", return_value=[])
+@patch.object(NamespacePodNodeResolver, "resolve", return_value=[])
 @patch("cjob.watcher.reconciler._delete_k8s_job")
 class TestReconcileResourceUsage:
     """Test that RUNNING transition records resource usage."""
@@ -569,28 +586,21 @@ class TestReconcileResourceUsage:
 def _make_sweep_k8s_job(namespace, job_id, name, conditions=None, active=None,
                          succeeded=None, failed=None,
                          completed_indexes=None, failed_indexes=None):
-    """Build a K8s V1Job with sweep-specific status fields."""
-    return V1Job(
-        metadata=V1ObjectMeta(
-            name=name,
-            namespace=namespace,
-            labels={
-                "cjob.io/namespace": namespace,
-                "cjob.io/job-id": str(job_id),
-            },
-        ),
-        status=V1JobStatus(
-            conditions=conditions,
-            active=active,
-            succeeded=succeeded,
-            failed=failed,
-            completed_indexes=completed_indexes,
-            failed_indexes=failed_indexes,
-        ),
+    """Build a LightK8sJob with sweep-specific status fields."""
+    return LightK8sJob(
+        namespace=namespace,
+        job_id=job_id,
+        name=name,
+        conditions=tuple(_light_condition(c) for c in (conditions or [])),
+        active=active,
+        succeeded=succeeded,
+        failed=failed,
+        completed_indexes=completed_indexes,
+        failed_indexes=failed_indexes,
     )
 
 
-@patch("cjob.watcher.reconciler._fetch_node_names", return_value=[])
+@patch.object(NamespacePodNodeResolver, "resolve", return_value=[])
 @patch("cjob.watcher.reconciler._delete_k8s_job")
 class TestReconcileSweep:
     """Test sweep-specific reconciliation behavior."""
@@ -709,7 +719,7 @@ class TestMergeNodeNames:
 # ── Sweep node_name accumulation ──
 
 
-@patch("cjob.watcher.reconciler._fetch_node_names")
+@patch.object(NamespacePodNodeResolver, "resolve")
 @patch("cjob.watcher.reconciler._delete_k8s_job")
 class TestSweepNodeNameAccumulation:
     """Test node_name accumulation for sweep jobs."""
@@ -858,8 +868,38 @@ class TestReconcileDisappearedJobs:
 # ── K8s API failure propagation ──
 
 
+def _raw_v1job(namespace, job_id, name, conditions=None, active=None,
+               succeeded=None, failed=None,
+               completed_indexes=None, failed_indexes=None):
+    """Build a raw V1Job (used to drive list_cjob_k8s_jobs via mocks)."""
+    return V1Job(
+        metadata=V1ObjectMeta(
+            name=name,
+            namespace=namespace,
+            labels={
+                "cjob.io/namespace": namespace,
+                "cjob.io/job-id": str(job_id),
+            },
+        ),
+        status=V1JobStatus(
+            conditions=conditions,
+            active=active,
+            succeeded=succeeded,
+            failed=failed,
+            completed_indexes=completed_indexes,
+            failed_indexes=failed_indexes,
+        ),
+    )
+
+
+class _FakeJobList:
+    def __init__(self, items, continue_token=None):
+        self.items = items
+        self.metadata = V1ListMeta(_continue=continue_token)
+
+
 class TestListCjobK8sJobs:
-    """Test that list_cjob_k8s_jobs propagates API errors."""
+    """Test that list_cjob_k8s_jobs pages results and propagates API errors."""
 
     @patch("cjob.watcher.reconciler.k8s_client.BatchV1Api")
     def test_api_failure_propagates(self, mock_batch_cls):
@@ -873,21 +913,194 @@ class TestListCjobK8sJobs:
             list_cjob_k8s_jobs()
 
     @patch("cjob.watcher.reconciler.k8s_client.BatchV1Api")
-    def test_success_returns_items(self, mock_batch_cls):
+    def test_success_returns_light_k8s_jobs(self, mock_batch_cls):
         mock_api = MagicMock()
-        mock_result = MagicMock()
-        mock_result.items = [MagicMock()]
-        mock_api.list_job_for_all_namespaces.return_value = mock_result
+        mock_api.list_job_for_all_namespaces.return_value = _FakeJobList(
+            items=[_raw_v1job("alice", 7, "cjob-alice-7", active=1)],
+        )
         mock_batch_cls.return_value = mock_api
 
         result = list_cjob_k8s_jobs()
+
         assert len(result) == 1
+        light = result[0]
+        assert isinstance(light, LightK8sJob)
+        assert light.namespace == "alice"
+        assert light.job_id == 7
+        assert light.name == "cjob-alice-7"
+        assert light.active == 1
+
+    @patch("cjob.watcher.reconciler.k8s_client.BatchV1Api")
+    def test_paginates_until_continue_is_empty(self, mock_batch_cls):
+        mock_api = MagicMock()
+        mock_api.list_job_for_all_namespaces.side_effect = [
+            _FakeJobList(
+                items=[_raw_v1job("alice", 1, "cjob-alice-1", active=1)],
+                continue_token="token-1",
+            ),
+            _FakeJobList(
+                items=[_raw_v1job("bob", 1, "cjob-bob-1", active=1)],
+                continue_token="token-2",
+            ),
+            _FakeJobList(
+                items=[_raw_v1job("carol", 1, "cjob-carol-1", active=1)],
+                continue_token=None,
+            ),
+        ]
+        mock_batch_cls.return_value = mock_api
+
+        result = list_cjob_k8s_jobs(page_size=1)
+
+        assert [(j.namespace, j.job_id) for j in result] == [
+            ("alice", 1),
+            ("bob", 1),
+            ("carol", 1),
+        ]
+        # Page 1: no continue token; pages 2 and 3: continue token passed through
+        calls = mock_api.list_job_for_all_namespaces.call_args_list
+        assert len(calls) == 3
+        assert "_continue" not in calls[0].kwargs
+        assert calls[1].kwargs["_continue"] == "token-1"
+        assert calls[2].kwargs["_continue"] == "token-2"
+        for call in calls:
+            assert call.kwargs["limit"] == 1
+            assert call.kwargs["label_selector"] == "cjob.io/job-id"
+
+    @patch("cjob.watcher.reconciler.k8s_client.BatchV1Api")
+    def test_skips_jobs_with_invalid_labels(self, mock_batch_cls):
+        no_labels = V1Job(metadata=V1ObjectMeta(name="cjob-unknown"), status=V1JobStatus())
+        bad_job_id = V1Job(
+            metadata=V1ObjectMeta(
+                name="cjob-alice-x",
+                labels={
+                    "cjob.io/namespace": "alice",
+                    "cjob.io/job-id": "not-a-number",
+                },
+            ),
+            status=V1JobStatus(),
+        )
+        ok = _raw_v1job("alice", 1, "cjob-alice-1", active=1)
+
+        mock_api = MagicMock()
+        mock_api.list_job_for_all_namespaces.return_value = _FakeJobList(
+            items=[no_labels, bad_job_id, ok],
+        )
+        mock_batch_cls.return_value = mock_api
+
+        result = list_cjob_k8s_jobs()
+
+        assert len(result) == 1
+        assert result[0].namespace == "alice"
+        assert result[0].job_id == 1
+
+
+class TestLightK8sJobFromV1Job:
+    """Test the V1Job → LightK8sJob extraction."""
+
+    def test_extracts_basic_fields(self):
+        v1 = _raw_v1job(
+            "alice", 5, "cjob-alice-5",
+            conditions=[V1JobCondition(type="Complete", status="True")],
+            active=0,
+            succeeded=1,
+            failed=0,
+            completed_indexes="0",
+            failed_indexes="",
+        )
+
+        light = LightK8sJob.from_v1job(v1)
+
+        assert light is not None
+        assert light.namespace == "alice"
+        assert light.job_id == 5
+        assert light.name == "cjob-alice-5"
+        assert light.conditions == (
+            LightJobCondition(type="Complete", status="True", reason=None),
+        )
+        assert light.active == 0
+        assert light.succeeded == 1
+        assert light.completed_indexes == "0"
+
+    def test_returns_none_on_missing_labels(self):
+        v1 = V1Job(metadata=V1ObjectMeta(name="x"), status=V1JobStatus())
+        assert LightK8sJob.from_v1job(v1) is None
+
+    def test_returns_none_on_invalid_job_id(self):
+        v1 = V1Job(
+            metadata=V1ObjectMeta(
+                name="x",
+                labels={
+                    "cjob.io/namespace": "alice",
+                    "cjob.io/job-id": "abc",
+                },
+            ),
+            status=V1JobStatus(),
+        )
+        assert LightK8sJob.from_v1job(v1) is None
+
+
+class TestNamespacePodNodeResolver:
+    """Test that the resolver caches Pods per namespace."""
+
+    @patch("cjob.watcher.reconciler.k8s_client.CoreV1Api")
+    def test_single_fetch_per_namespace(self, mock_core_cls):
+        pod_a = MagicMock()
+        pod_a.metadata = V1ObjectMeta(labels={"job-name": "cjob-alice-1"})
+        pod_a.spec = MagicMock(node_name="node-1")
+        pod_b = MagicMock()
+        pod_b.metadata = V1ObjectMeta(labels={"job-name": "cjob-alice-2"})
+        pod_b.spec = MagicMock(node_name="node-2")
+
+        mock_api = MagicMock()
+        mock_api.list_namespaced_pod.return_value = MagicMock(items=[pod_a, pod_b])
+        mock_core_cls.return_value = mock_api
+
+        resolver = NamespacePodNodeResolver()
+
+        assert resolver.resolve("alice", "cjob-alice-1") == ["node-1"]
+        assert resolver.resolve("alice", "cjob-alice-2") == ["node-2"]
+        # A second resolve for an already-cached namespace should not re-fetch
+        assert resolver.resolve("alice", "cjob-alice-1") == ["node-1"]
+
+        assert mock_api.list_namespaced_pod.call_count == 1
+        call = mock_api.list_namespaced_pod.call_args
+        assert call.kwargs == {
+            "namespace": "alice",
+            "label_selector": "job-name",
+        }
+
+    @patch("cjob.watcher.reconciler.k8s_client.CoreV1Api")
+    def test_api_failure_returns_empty(self, mock_core_cls):
+        mock_api = MagicMock()
+        mock_api.list_namespaced_pod.side_effect = ApiException(
+            status=500, reason="boom"
+        )
+        mock_core_cls.return_value = mock_api
+
+        resolver = NamespacePodNodeResolver()
+        assert resolver.resolve("alice", "cjob-alice-1") == []
+        # Cached negative result: a second lookup should not retry
+        assert resolver.resolve("alice", "cjob-alice-2") == []
+        assert mock_api.list_namespaced_pod.call_count == 1
+
+    @patch("cjob.watcher.reconciler.k8s_client.CoreV1Api")
+    def test_unknown_job_name_returns_empty(self, mock_core_cls):
+        pod = MagicMock()
+        pod.metadata = V1ObjectMeta(labels={"job-name": "cjob-alice-1"})
+        pod.spec = MagicMock(node_name="node-1")
+
+        mock_api = MagicMock()
+        mock_api.list_namespaced_pod.return_value = MagicMock(items=[pod])
+        mock_core_cls.return_value = mock_api
+
+        resolver = NamespacePodNodeResolver()
+        assert resolver.resolve("alice", "cjob-alice-999") == []
 
 
 # ── Prometheus metrics ──
 
 
-@patch("cjob.watcher.reconciler._fetch_node_names", return_value=[])
+@patch.object(NamespacePodNodeResolver, "resolve", return_value=[])
 @patch("cjob.watcher.reconciler._delete_k8s_job")
 class TestMetrics:
     def test_succeeded_increments_completed_counter(self, mock_delete, mock_fetch_nodes, db_session):

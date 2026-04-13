@@ -59,7 +59,9 @@ def run():
     while not _shutdown:
         session = create_session()
         try:
-            k8s_jobs = list_cjob_k8s_jobs()
+            k8s_jobs = list_cjob_k8s_jobs(
+                page_size=settings.WATCHER_K8S_LIST_PAGE_SIZE,
+            )
             reconcile_cycle(session, k8s_jobs)
             session.commit()
         except Exception:

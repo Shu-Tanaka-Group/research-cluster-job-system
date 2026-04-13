@@ -75,6 +75,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: NODE_RESOURCE_SYNC_INTERVAL_SEC
+            - name: WATCHER_K8S_LIST_PAGE_SIZE
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: WATCHER_K8S_LIST_PAGE_SIZE
             - name: RESOURCE_QUOTA_NAME
               valueFrom:
                 configMapKeyRef:
@@ -102,7 +107,7 @@ spec:
               memory: "128Mi"
             limits:
               cpu: "300m"
-              memory: "256Mi"
+              memory: "1Gi"
           livenessProbe:
             exec:
               command: ["sh", "-c", "test $(( $(date +%s) - $(stat -c %Y /tmp/liveness) )) -lt 120"]

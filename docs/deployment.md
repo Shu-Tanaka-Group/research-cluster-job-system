@@ -432,6 +432,7 @@ CJOB_IMAGE=my-registry/my-image:1.0
 - Replica 1 固定（複数にすると二重 DB 更新が発生するため）
 - Liveness probe はファイルタイムスタンプ方式: メインループが定期的に `/tmp/liveness` をタッチし、最終更新から 120 秒以上経過した場合はループ停止とみなして再起動する
 - `serviceAccountName: dispatcher-sa` を指定し、Dispatcher と ServiceAccount を共用する（§9 参照）
+- リソース設定: `requests.memory: 128Mi` / `limits.memory: 1Gi`。K8s Job 取得のページネーションと軽量 dataclass 化（[watcher.md](architecture/watcher.md) §5 参照）により平常時のメモリ使用量は 256Mi 以下に抑えられるが、同時存在 Job 数が数千件規模のバースト時の安全マージンとして limit を 1Gi に設定する
 
 ---
 
