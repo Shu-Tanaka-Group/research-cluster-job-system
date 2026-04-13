@@ -74,6 +74,21 @@ DB writes for all sync operations are UPSERTs (row count = node count, namespace
 
 The likelihood of these sync operations becoming a bottleneck is extremely low at the current scale (approximately 10 users), and even at hundreds of users.
 
+### 2.4 Watcher Memory Consumption
+
+On each reconcile cycle the Watcher retains K8s API responses and DB query results in memory. In particular, the results of `list_job_for_all_namespaces()` (tens of KB per Job) and `list_pod_for_all_namespaces()` (used for DaemonSet reservation aggregation) are the dominant factor that grows with cluster size. The 256Mi memory limit is sufficient up to a few hundred jobs, but becomes OOMKilled once the number of concurrent Jobs exceeds a few thousand.
+
+The following measures control the Watcher's resident memory (details in [watcher.md](watcher.md) §5).
+
+| Measure | Target hotspot | Effect |
+|---|---|---|
+| K8s Job pagination + lightweight dataclass | `list_job_for_all_namespaces()` | Reduces per-object memory by roughly 1/10 and suppresses parse-time peak |
+| Per-page aggregation of DaemonSet Pods | `list_pod_for_all_namespaces()` (node_sync) | Never holds more than one page of Pod objects in memory |
+| Narrowed DB queries | DB reads in Step 2 / Step 8 | Load only Jobs corresponding to K8s Jobs, or only the columns needed for existence checks |
+| Per-namespace batching of `list_namespaced_pod()` | `node_name` recording during reconcile | API calls scale with namespace count, not Job count. At most one `V1PodList` is held at a time |
+
+With these measures, the Watcher's peak memory usage is expected to stay under 256Mi up to roughly 5,000 concurrent Jobs (in practice the memory limit is set to 1Gi as an additional safety margin).
+
 ## 3. Watch API and Informer Pattern
 
 ### 3.1 Current Approach (Polling)
