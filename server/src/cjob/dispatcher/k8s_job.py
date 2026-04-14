@@ -13,6 +13,42 @@ logger = logging.getLogger(__name__)
 
 TEMPORARY_STATUS_CODES = {429, 500, 503}
 
+
+class TemporaryK8sError(Exception):
+    """Retryable K8s API error (429 / 500 / 503 etc.)."""
+
+
+class PermanentK8sError(Exception):
+    """Permanent K8s API error (RBAC, validation, etc.)."""
+
+
+class QuotaExceededError(Exception):
+    """K8s ResourceQuota admission rejection.
+
+    Raised when create_namespaced_job receives a 403 whose body message
+    contains "exceeded quota". Distinguished from PermanentK8sError so
+    dispatch_one can defer the job back to QUEUED without consuming the
+    retry budget (see docs/architecture/dispatcher.md §2.5).
+    """
+
+
+def _extract_k8s_error_message(e: ApiException) -> str:
+    """Extract the K8s API Status message from an ApiException body.
+
+    Falls back to ``e.reason`` if the body is missing or not valid JSON.
+    """
+    if e.body:
+        try:
+            parsed = json.loads(e.body)
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            message = parsed.get("message")
+            if message:
+                return message
+    return e.reason or ""
+
+
 VALID_TAINT_EFFECTS = {"NoSchedule", "PreferNoSchedule", "NoExecute"}
 
 
@@ -69,14 +105,6 @@ def _build_resource_requirements(job, settings: Settings) -> k8s_client.V1Resour
         requests[gpu_resource] = gpu_str
         limits[gpu_resource] = gpu_str
     return k8s_client.V1ResourceRequirements(requests=requests, limits=limits)
-
-
-class TemporaryK8sError(Exception):
-    pass
-
-
-class PermanentK8sError(Exception):
-    pass
 
 
 def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
@@ -204,6 +232,12 @@ def create_k8s_job(job_manifest: k8s_client.V1Job) -> str:
         logger.info("Created K8s Job %s in %s", name, namespace)
         return name
     except ApiException as e:
+        message = _extract_k8s_error_message(e)
+        detail = f"{e.status}: {message}" if message else f"{e.status}: {e.reason}"
+        if e.status == 403 and "exceeded quota" in message.lower():
+            raise QuotaExceededError(
+                f"ResourceQuota exceeded for K8s Job {name}: {message}"
+            )
         if e.status in TEMPORARY_STATUS_CODES:
-            raise TemporaryK8sError(f"K8s API temporary error {e.status}: {e.reason}")
-        raise PermanentK8sError(f"K8s API permanent error {e.status}: {e.reason}")
+            raise TemporaryK8sError(f"K8s API temporary error {detail}")
+        raise PermanentK8sError(f"K8s API permanent error {detail}")

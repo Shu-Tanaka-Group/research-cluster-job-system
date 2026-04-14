@@ -1,7 +1,19 @@
+import json
+from unittest.mock import MagicMock, patch
+
 import pytest
+from kubernetes.client.rest import ApiException
 
 from cjob.config import Settings
-from cjob.dispatcher.k8s_job import _parse_taint, build_k8s_job
+from cjob.dispatcher.k8s_job import (
+    PermanentK8sError,
+    QuotaExceededError,
+    TemporaryK8sError,
+    _extract_k8s_error_message,
+    _parse_taint,
+    build_k8s_job,
+    create_k8s_job,
+)
 from cjob.models import Job
 
 
@@ -334,3 +346,139 @@ class TestParseTaint:
     def test_invalid_empty_key(self):
         with pytest.raises(ValueError, match="key must not be empty"):
             _parse_taint("=computing:NoSchedule")
+
+
+# ── create_k8s_job error classification ──
+
+
+def _make_api_exception(status, message=None, reason="Forbidden"):
+    """Build an ApiException with a realistic K8s Status body."""
+    exc = ApiException(status=status, reason=reason)
+    if message is not None:
+        exc.body = json.dumps({
+            "kind": "Status",
+            "apiVersion": "v1",
+            "status": "Failure",
+            "message": message,
+            "reason": reason,
+            "code": status,
+        })
+    else:
+        exc.body = None
+    return exc
+
+
+def _make_manifest():
+    """Build a minimal V1Job manifest that create_k8s_job can pass to the API."""
+    job = _make_job()
+    settings = _make_settings()
+    return build_k8s_job(job, settings)
+
+
+class TestExtractK8sErrorMessage:
+    def test_body_with_message(self):
+        exc = _make_api_exception(403, message="boom")
+        assert _extract_k8s_error_message(exc) == "boom"
+
+    def test_body_missing_falls_back_to_reason(self):
+        exc = _make_api_exception(403, message=None, reason="Forbidden")
+        assert _extract_k8s_error_message(exc) == "Forbidden"
+
+    def test_invalid_json_falls_back_to_reason(self):
+        exc = ApiException(status=403, reason="Forbidden")
+        exc.body = "<html>not json</html>"
+        assert _extract_k8s_error_message(exc) == "Forbidden"
+
+    def test_body_dict_without_message(self):
+        exc = ApiException(status=403, reason="Forbidden")
+        exc.body = json.dumps({"code": 403})
+        assert _extract_k8s_error_message(exc) == "Forbidden"
+
+
+class TestCreateK8sJobErrorClassification:
+    """create_k8s_job must distinguish ResourceQuota 403 (recoverable)
+    from other 403s (permanent) and from transient 429/500/503."""
+
+    @patch("cjob.dispatcher.k8s_job.k8s_client.BatchV1Api")
+    def test_403_exceeded_quota_raises_quota_exceeded_error(self, mock_api_cls):
+        mock_api = MagicMock()
+        mock_api.create_namespaced_job.side_effect = _make_api_exception(
+            403,
+            message=(
+                'jobs.batch "cjob-alice-1" is forbidden: '
+                "exceeded quota: computing-quota, "
+                "requested: count/jobs.batch=1, used: count/jobs.batch=50, "
+                "limited: count/jobs.batch=50"
+            ),
+        )
+        mock_api_cls.return_value = mock_api
+
+        with pytest.raises(QuotaExceededError) as exc_info:
+            create_k8s_job(_make_manifest())
+        assert "exceeded quota" in str(exc_info.value)
+
+    @patch("cjob.dispatcher.k8s_job.k8s_client.BatchV1Api")
+    def test_403_rbac_raises_permanent_error(self, mock_api_cls):
+        mock_api = MagicMock()
+        mock_api.create_namespaced_job.side_effect = _make_api_exception(
+            403,
+            message=(
+                "jobs.batch is forbidden: User "
+                '"system:serviceaccount:cjob-system:dispatcher-sa" '
+                'cannot create resource "jobs" in API group "batch"'
+            ),
+        )
+        mock_api_cls.return_value = mock_api
+
+        with pytest.raises(PermanentK8sError) as exc_info:
+            create_k8s_job(_make_manifest())
+        # detailed message should be included for debugging
+        assert "cannot create resource" in str(exc_info.value)
+
+    @patch("cjob.dispatcher.k8s_job.k8s_client.BatchV1Api")
+    def test_429_raises_temporary_error(self, mock_api_cls):
+        mock_api = MagicMock()
+        mock_api.create_namespaced_job.side_effect = _make_api_exception(
+            429, message="Too Many Requests", reason="Too Many Requests",
+        )
+        mock_api_cls.return_value = mock_api
+
+        with pytest.raises(TemporaryK8sError):
+            create_k8s_job(_make_manifest())
+
+    @patch("cjob.dispatcher.k8s_job.k8s_client.BatchV1Api")
+    def test_503_raises_temporary_error(self, mock_api_cls):
+        mock_api = MagicMock()
+        mock_api.create_namespaced_job.side_effect = _make_api_exception(
+            503, message="Service Unavailable", reason="Service Unavailable",
+        )
+        mock_api_cls.return_value = mock_api
+
+        with pytest.raises(TemporaryK8sError):
+            create_k8s_job(_make_manifest())
+
+    @patch("cjob.dispatcher.k8s_job.k8s_client.BatchV1Api")
+    def test_403_without_body_falls_back_to_permanent(self, mock_api_cls):
+        mock_api = MagicMock()
+        exc = ApiException(status=403, reason="Forbidden")
+        exc.body = None
+        mock_api.create_namespaced_job.side_effect = exc
+        mock_api_cls.return_value = mock_api
+
+        # No "exceeded quota" string available -> cannot be classified as
+        # quota race, so it falls back to permanent.
+        with pytest.raises(PermanentK8sError) as exc_info:
+            create_k8s_job(_make_manifest())
+        assert "403" in str(exc_info.value)
+
+    @patch("cjob.dispatcher.k8s_job.k8s_client.BatchV1Api")
+    def test_422_raises_permanent_error(self, mock_api_cls):
+        mock_api = MagicMock()
+        mock_api.create_namespaced_job.side_effect = _make_api_exception(
+            422, message="invalid manifest", reason="Unprocessable Entity",
+        )
+        mock_api_cls.return_value = mock_api
+
+        with pytest.raises(PermanentK8sError) as exc_info:
+            create_k8s_job(_make_manifest())
+        assert "invalid manifest" in str(exc_info.value)

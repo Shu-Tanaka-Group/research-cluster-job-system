@@ -541,6 +541,16 @@ candidates = filter_by_resource_quota(session, candidates)  # added
 
 **Prerequisite:** ResourceQuota usage is periodically synchronized by the Watcher, so there is a delay of `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` (default 10 seconds). This check is best-effort; ResourceQuota usage may change between the check and Kueue's admission. However, this is a significant improvement compared to no check (DISPATCHED stalling → timeout FAILED).
 
+**Recovery from a ResourceQuota race:** Because the pre-check is best-effort, a stale cache can let a candidate through and the K8s API Server's ResourceQuota admission controller will reject it with 403. The dispatcher recovers as follows:
+
+1. When `create_k8s_job` receives a 403, it inspects the K8s API response body (JSON) for a `message` field containing `exceeded quota`. If found, it raises the dedicated `QuotaExceededError`.
+2. `dispatch_one` catches `QuotaExceededError` and reverts the job status from `DISPATCHING` back to `QUEUED` via the `defer_to_queue` helper.
+3. **`retry_count` is intentionally not incremented.** A ResourceQuota race is not the job's fault — it is a consequence of the pre-check cache lag — and should not consume the retry budget (`DISPATCH_MAX_RETRIES`).
+4. `retry_after = NOW() + RESOURCE_QUOTA_SYNC_INTERVAL_SEC` is set so the dispatcher waits until the next Watcher sync has had a chance to refresh the cache, preventing the same job from hitting the race again in the very next cycle.
+5. A `job_events` row with `event_type='DEFERRED'` is recorded for observability.
+
+Other 403s (RBAC denial, PodSecurityPolicy, etc. — true permanent errors) still raise `PermanentK8sError` and transition the job to FAILED. The distinction is made by checking whether the body `message` contains `exceeded quota`.
+
 **Relationship with per-flavor budget separation:** Separating budget per `(namespace, flavor)` theoretically increases the maximum active jobs per namespace to `DISPATCH_BUDGET_PER_NAMESPACE × flavor count`. The `count/jobs.batch` pre-check (step 5) allows the Dispatcher to suppress dispatch before receiving K8s API errors when the total flavor-aware budget exceeds `count/jobs.batch`. If CPU/memory/GPU ResourceQuota was sized assuming a single budget, it may become relatively tight and more jobs may be rejected by ResourceQuota. This is conservative (fewer dispatches) and does not result in over-dispatch.
 
 ### 2.6 Startup Initialization

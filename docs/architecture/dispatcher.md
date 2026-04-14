@@ -539,6 +539,16 @@ candidates = filter_by_resource_quota(session, candidates)  # 追加
 
 **前提:** ResourceQuota の使用状況は Watcher が定期同期するため、`RESOURCE_QUOTA_SYNC_INTERVAL_SEC`（デフォルト 10 秒）分の遅延がある。このチェックは best-effort であり、チェック通過後に Kueue が admit するまでの間に ResourceQuota の使用状況が変わる可能性がある。ただし、チェックなしの場合（DISPATCHED 滞留 → 時間切れ FAILED）と比較して大幅に改善される。
 
+**ResourceQuota race の回復:** プレチェックが best-effort である以上、キャッシュが古い状態で候補を通過させてしまい、K8s API Server の ResourceQuota admission controller に 403 で弾かれるケースが残る。この場合 dispatcher は以下の回復処理を行う。
+
+1. `create_k8s_job` が 403 を受け取ったとき、K8s API のレスポンス body（JSON）の `message` フィールドに `exceeded quota` が含まれていれば ResourceQuota 由来と判定し、専用の `QuotaExceededError` を raise する
+2. `dispatch_one` は `QuotaExceededError` を捕捉すると、ジョブの status を `DISPATCHING` から `QUEUED` に戻す（`defer_to_queue` ヘルパ）
+3. このとき `retry_count` は**増やさない**。ResourceQuota race はジョブ自身の失敗ではなく、プレチェックのキャッシュ遅延によるものであり、retry budget（`DISPATCH_MAX_RETRIES`）を消費すべきでない
+4. `retry_after = NOW() + RESOURCE_QUOTA_SYNC_INTERVAL_SEC` をセットし、次の Watcher キャッシュ同期が完了するまで待つことで、同じジョブが直後のサイクルで再度 race に巻き込まれるのを防ぐ
+5. `job_events` に `event_type='DEFERRED'` を記録する
+
+その他の 403（RBAC 拒否、PodSecurityPolicy 等の本当に permanent なエラー）は従来通り `PermanentK8sError` 扱いで FAILED 遷移させる。区別は body の `message` 文字列に `exceeded quota` が含まれるか否かで行う。
+
 **budget の flavor 分離との関係:** budget を `(namespace, flavor)` 単位に分離したことで、namespace あたりの最大 active ジョブ数が理論上 `DISPATCH_BUDGET_PER_NAMESPACE × flavor 数` に増加する。`count/jobs.batch` のプレチェック（ステップ 5）により、flavor-aware budget の合計が `count/jobs.batch` を超過する場合でも、Dispatcher が K8s API エラーを受ける前に dispatch を抑制できる。CPU/memory/GPU の ResourceQuota が単一 budget を前提にサイジングされている場合は、相対的に窮屈になり ResourceQuota で弾かれるジョブが増える可能性がある。これは保守的な方向（dispatch を控える）であり、過剰 dispatch にはならない。
 
 ### 2.6 起動時の初期化処理
