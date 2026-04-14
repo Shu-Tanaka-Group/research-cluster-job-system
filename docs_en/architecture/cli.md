@@ -792,7 +792,7 @@ cjob set $(cjob list --status QUEUED --flavor cpu --format ids) --flavor cpu-sub
 ## 14. `cjob reset` Behavior
 
 1. Retrieves job list with `GET /v1/jobs`, retains `log_base_dir` from the response, and checks in the following order:
-   - If any `DELETING` jobs exist: Displays "Previous reset process has not yet completed. Please wait a moment and try again." and aborts
+   - If any `DELETING` jobs exist: Displays `"Previous reset is still in progress. Please wait and try again."` and aborts
    - If any `QUEUED` / `DISPATCHING` / `DISPATCHED` / `RUNNING` / `HELD` jobs exist: Displays their job_ids and aborts
 2. If all jobs are completed, displays a confirmation prompt to the user
 3. Only if 'y' is entered, executes the following in order:
@@ -840,7 +840,7 @@ Resource Usage (past 7 days)
   Total                    44.5           89.0
 ```
 
-When there is no usage history, displays "No usage history available."
+When there is no usage history, displays `"No usage data."`.
 
 ### Resource Quota Display
 

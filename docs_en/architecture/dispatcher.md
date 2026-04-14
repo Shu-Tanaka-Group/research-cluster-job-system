@@ -248,7 +248,7 @@ except TemporaryK8sError:
     )
     if updated_rows == 0:
         return   # cancel API already updated to CANCELLED → skip
-    db.record_event(namespace, job_id, "RETRY", {"count": current_count + 1})
+    db.record_event(namespace, job_id, "RETRY")   # payload_json is {} (see database.md §3.1)
 ```
 
 Once `retry_after <= NOW()`, the job automatically becomes a re-dispatch candidate in the next scan.
