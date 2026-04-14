@@ -425,6 +425,42 @@ log_dir:       /home/jovyan/.cjob/logs/5
 last_error:    K8s API permanent error 403: admission webhook "validate-image.kyverno.io" denied the request
 ```
 
+### 履歴情報（retry_count / retry_after / events）
+
+`retry_count` は dispatcher の K8s API 一時障害 retry 回数、`retry_after` は次回 dispatch 解禁時刻である。両者とも初期値の場合（`retry_count == 0` かつ `retry_after` が `null`）は行自体を表示しない。どちらかが非初期値の場合は両行を表示し、`retry_after` が `null` のときは `-` と表示する。
+
+`events` は直近の job_events を時系列昇順で最大 10 件表示する（[api.md](api.md) §4 参照）。events が 1 件もない場合はセクションごと省略する。表示可能な最大件数を超える古い events が存在する場合は、先頭に `... N earlier events` マーカーを出力する。
+
+```
+$ cjob status 7
+job_id:        7
+type:          job
+status:        RUNNING
+command:       python train.py
+cwd:           /home/jovyan/project-b
+flavor:        cpu
+cpu:           2
+memory:        4Gi
+gpu:           0
+time_limit:    6h (4h 12m remaining)
+created_at:    2026-04-14 11:16:50
+dispatched_at: 2026-04-14 11:20:25
+started_at:    2026-04-14 11:20:30
+finished_at:   -
+k8s_job_name:  cjob-alice-7
+node_name:     worker07
+log_dir:       /home/jovyan/.cjob/logs/7
+retry_count:   0
+retry_after:   -
+events:
+  2026-04-14T11:17:00Z  DISPATCHED
+  2026-04-14T11:20:15Z  DEFERRED
+  2026-04-14T11:20:25Z  DISPATCHED
+  2026-04-14T11:20:30Z  RUNNING
+```
+
+将来 `--events <N>` / `--events all` オプションで表示件数を変更できる余地を残している（現在は未実装）。`--json` 出力（未実装）は API レスポンスの `events` / `retry_count` / `retry_after` / `earlier_events_count` をそのまま返す想定である。
+
 存在しない job_id を指定した場合はエラーメッセージを表示して終了する。
 
 ```

@@ -1,4 +1,4 @@
-use crate::client::{JobDetailResponse, JobSummary};
+use crate::client::{JobDetailResponse, JobEventItem, JobSummary};
 
 pub fn print_job_ids(jobs: &[JobSummary]) {
     if jobs.is_empty() {
@@ -80,6 +80,31 @@ fn format_time_limit(job: &JobDetailResponse) -> String {
     limit_str
 }
 
+pub fn format_retry_lines(retry_count: u32, retry_after: Option<&str>) -> Option<String> {
+    if retry_count == 0 && retry_after.is_none() {
+        return None;
+    }
+    let after = retry_after.unwrap_or("-");
+    Some(format!(
+        "retry_count:   {}\nretry_after:   {}",
+        retry_count, after
+    ))
+}
+
+pub fn format_events_section(events: &[JobEventItem], earlier_events_count: u32) -> Option<String> {
+    if events.is_empty() {
+        return None;
+    }
+    let mut out = String::from("events:");
+    if earlier_events_count > 0 {
+        out.push_str(&format!("\n  ... {} earlier events", earlier_events_count));
+    }
+    for ev in events {
+        out.push_str(&format!("\n  {}  {}", ev.created_at, ev.event_type));
+    }
+    Some(out)
+}
+
 pub fn print_job_detail(job: &JobDetailResponse) {
     let is_sweep = job.completions.is_some();
 
@@ -144,6 +169,12 @@ pub fn print_job_detail(job: &JobDetailResponse) {
     if let Some(ref err) = job.last_error {
         println!("last_error:    {}", err);
     }
+    if let Some(retry) = format_retry_lines(job.retry_count, job.retry_after.as_deref()) {
+        println!("{}", retry);
+    }
+    if let Some(events) = format_events_section(&job.events, job.earlier_events_count) {
+        println!("{}", events);
+    }
 }
 
 #[cfg(test)]
@@ -198,6 +229,10 @@ mod tests {
             completed_indexes: None,
             failed_indexes: None,
             node_name: None,
+            retry_count: 0,
+            retry_after: None,
+            events: Vec::new(),
+            earlier_events_count: 0,
         }
     }
 
@@ -272,6 +307,10 @@ mod tests {
             completed_indexes: Some("0-47".to_string()),
             failed_indexes: Some("12,37".to_string()),
             node_name: Some(vec!["worker07".to_string()]),
+            retry_count: 0,
+            retry_after: None,
+            events: Vec::new(),
+            earlier_events_count: 0,
         }
     }
 
@@ -281,5 +320,62 @@ mod tests {
         let result = format_time_limit(&job);
         assert!(result.contains("6h 0m"));
         assert!(result.contains("remaining"));
+    }
+
+    #[test]
+    fn test_format_retry_lines_defaults_omitted() {
+        assert!(format_retry_lines(0, None).is_none());
+    }
+
+    #[test]
+    fn test_format_retry_lines_count_only() {
+        let out = format_retry_lines(2, None).unwrap();
+        assert!(out.contains("retry_count:   2"));
+        assert!(out.contains("retry_after:   -"));
+    }
+
+    #[test]
+    fn test_format_retry_lines_after_only() {
+        let out = format_retry_lines(0, Some("2026-04-14T12:34:56Z")).unwrap();
+        assert!(out.contains("retry_count:   0"));
+        assert!(out.contains("retry_after:   2026-04-14T12:34:56Z"));
+    }
+
+    #[test]
+    fn test_format_events_section_empty() {
+        assert!(format_events_section(&[], 0).is_none());
+    }
+
+    #[test]
+    fn test_format_events_section_no_truncation() {
+        let events = vec![
+            JobEventItem {
+                event_type: "DISPATCHED".to_string(),
+                created_at: "2026-04-14T11:17:00Z".to_string(),
+            },
+            JobEventItem {
+                event_type: "RUNNING".to_string(),
+                created_at: "2026-04-14T11:20:30Z".to_string(),
+            },
+        ];
+        let out = format_events_section(&events, 0).unwrap();
+        assert!(out.starts_with("events:"));
+        assert!(out.contains("2026-04-14T11:17:00Z  DISPATCHED"));
+        assert!(out.contains("2026-04-14T11:20:30Z  RUNNING"));
+        assert!(!out.contains("earlier events"));
+    }
+
+    #[test]
+    fn test_format_events_section_with_earlier_marker() {
+        let events = vec![JobEventItem {
+            event_type: "RUNNING".to_string(),
+            created_at: "2026-04-14T11:20:30Z".to_string(),
+        }];
+        let out = format_events_section(&events, 3).unwrap();
+        assert!(out.contains("... 3 earlier events"));
+        // Marker appears before any event entry.
+        let marker_pos = out.find("... 3 earlier events").unwrap();
+        let first_event_pos = out.find("2026-04-14T11:20:30Z").unwrap();
+        assert!(marker_pos < first_event_pos);
     }
 }

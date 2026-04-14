@@ -66,6 +66,13 @@ pub struct JobSummary {
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
+pub struct JobEventItem {
+    pub event_type: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct JobDetailResponse {
     pub job_id: u32,
     pub status: String,
@@ -91,6 +98,14 @@ pub struct JobDetailResponse {
     pub completed_indexes: Option<String>,
     pub failed_indexes: Option<String>,
     pub node_name: Option<Vec<String>>,
+    #[serde(default)]
+    pub retry_count: u32,
+    #[serde(default)]
+    pub retry_after: Option<String>,
+    #[serde(default)]
+    pub events: Vec<JobEventItem>,
+    #[serde(default)]
+    pub earlier_events_count: u32,
 }
 
 #[derive(Debug, Serialize)]

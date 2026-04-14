@@ -55,6 +55,11 @@ class JobListResponse(BaseModel):
     log_base_dir: str
 
 
+class JobEventItem(BaseModel):
+    event_type: str
+    created_at: datetime
+
+
 class JobDetailResponse(BaseModel):
     job_id: int
     status: str
@@ -80,6 +85,10 @@ class JobDetailResponse(BaseModel):
     completed_indexes: str | None = None
     failed_indexes: str | None = None
     node_name: list[str] | None = None
+    retry_count: int = 0
+    retry_after: datetime | None = None
+    events: list[JobEventItem] = Field(default_factory=list)
+    earlier_events_count: int = 0
 
 
 class SingleCancelResponse(BaseModel):

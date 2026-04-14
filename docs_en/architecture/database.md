@@ -92,6 +92,26 @@ CREATE TABLE job_events (
 );
 ```
 
+### 3.1 Canonical `event_type` List
+
+The following values are treated as canonical for `event_type`. When adding a new kind, update this section and the implementation together.
+
+| event_type   | When recorded | Recorded by | Typical `payload_json` |
+|---|---|---|---|
+| `SUBMITTED`  | Immediately after Submit API creates the job | Submit API | `{}` |
+| `DISPATCHED` | Immediately after the Dispatcher creates the K8s Job and transitions `DISPATCHING` → `DISPATCHED` | Dispatcher | `{}` |
+| `RETRY`      | When the Dispatcher rolls `DISPATCHING` → `QUEUED` due to a transient K8s API error (`retry_count` is incremented) | Dispatcher | `{}` |
+| `DEFERRED`   | When the Dispatcher rolls `DISPATCHING` → `QUEUED` due to a ResourceQuota race (`retry_count` is left unchanged, see [dispatcher.md](dispatcher.md) §2.5) | Dispatcher | `{}` |
+| `RUNNING`    | When the Watcher detects a Pod RUNNING transition and updates the DB status to `RUNNING` | Watcher | `{}` |
+| `SUCCEEDED`  | When the Watcher detects K8s Job completion | Watcher | `{}` |
+| `FAILED`     | When the Watcher / Dispatcher transitions the job to FAILED (permanent error, retry limit exceeded, K8s Job disappeared, etc.) | Dispatcher / Watcher | `{"error": "..."}` (via Dispatcher's mark_failed) |
+| `CANCELLED`  | When the API accepts a cancel request, or when the Watcher finalizes a CANCELLED job | API / Watcher | `{}` |
+| `HELD`       | When the API accepts a hold operation | API | `{}` |
+| `RELEASED`   | When the API accepts a release operation | API | `{}` |
+| `SET`        | When the API changes parameters via a set operation | API | Change content (e.g., `{"cpu": "2"}`) |
+
+The `events` field of the `GET /v1/jobs/{job_id}` response returns these in chronological order, up to 10 entries (see [api.md](api.md) §4). Since the CLI displays the same strings as-is, new event types should use short uppercase tokens, and renaming existing event types must be avoided (it would break CLI backward compatibility).
+
 ## 4. `namespace_weights` Table
 
 Manages fair sharing weights per namespace. Namespaces with larger weights have smaller DRF dominant shares for the same cumulative consumption, resulting in higher dispatch priority.

@@ -146,6 +146,8 @@ pub async fn list(client: &Client, namespace: Option<&str>, status: Option<&str>
     Ok(())
 }
 
+const JOB_EVENT_DETAIL_LIMIT: i64 = 10;
+
 pub async fn status(client: &Client, namespace: &str, job_id: i32) -> Result<()> {
     let row = client
         .query_opt(
@@ -153,7 +155,8 @@ pub async fn status(client: &Client, namespace: &str, job_id: i32) -> Result<()>
                     time_limit_seconds, completions, parallelism, \
                     succeeded_count, failed_count, failed_indexes, \
                     created_at, dispatched_at, started_at, finished_at, \
-                    k8s_job_name, log_dir, last_error, node_name \
+                    k8s_job_name, log_dir, last_error, node_name, \
+                    retry_count, retry_after \
              FROM jobs \
              WHERE namespace = $1 AND job_id = $2",
             &[&namespace, &job_id],
@@ -190,6 +193,35 @@ pub async fn status(client: &Client, namespace: &str, job_id: i32) -> Result<()>
     let log_dir: Option<&str> = row.get(20);
     let last_error: Option<&str> = row.get(21);
     let node_name: Option<&str> = row.get(22);
+    let retry_count: i32 = row.get(23);
+    let retry_after: Option<chrono::DateTime<chrono::Utc>> = row.get(24);
+
+    // Fetch the most recent events (limit + 1 to detect overflow).
+    let event_rows = client
+        .query(
+            "SELECT event_type, created_at FROM job_events \
+             WHERE namespace = $1 AND job_id = $2 \
+             ORDER BY id DESC LIMIT $3",
+            &[&namespace, &job_id, &(JOB_EVENT_DETAIL_LIMIT + 1)],
+        )
+        .await?;
+    let (mut events, earlier_events_count) =
+        if event_rows.len() as i64 > JOB_EVENT_DETAIL_LIMIT {
+            let total: i64 = client
+                .query_one(
+                    "SELECT COUNT(*) FROM job_events \
+                     WHERE namespace = $1 AND job_id = $2",
+                    &[&namespace, &job_id],
+                )
+                .await?
+                .get(0);
+            let mut trimmed = event_rows;
+            trimmed.truncate(JOB_EVENT_DETAIL_LIMIT as usize);
+            (trimmed, (total - JOB_EVENT_DETAIL_LIMIT).max(0))
+        } else {
+            (event_rows, 0i64)
+        };
+    events.reverse(); // DESC -> ascending
 
     let is_sweep = completions.is_some();
     let fmt_ts = |t: Option<chrono::DateTime<chrono::Utc>>| -> String {
@@ -243,6 +275,25 @@ pub async fn status(client: &Client, namespace: &str, job_id: i32) -> Result<()>
     println!("log_dir:       {}", log_dir.unwrap_or("-"));
     if let Some(err) = last_error {
         println!("last_error:    {}", err);
+    }
+    if retry_count > 0 || retry_after.is_some() {
+        println!("retry_count:   {}", retry_count);
+        println!("retry_after:   {}", fmt_ts(retry_after));
+    }
+    if !events.is_empty() {
+        println!("events:");
+        if earlier_events_count > 0 {
+            println!("  ... {} earlier events", earlier_events_count);
+        }
+        for ev in &events {
+            let etype: &str = ev.get(0);
+            let ts: chrono::DateTime<chrono::Utc> = ev.get(1);
+            println!(
+                "  {}  {}",
+                ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                etype
+            );
+        }
     }
 
     Ok(())
