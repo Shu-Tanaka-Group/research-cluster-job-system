@@ -309,11 +309,26 @@ GET /v1/jobs?time_limit_ge=21600&time_limit_lt=43200
   "failed_count": null,
   "completed_indexes": null,
   "failed_indexes": null,
-  "node_name": ["worker07", "worker08"]
+  "node_name": ["worker07", "worker08"],
+  "retry_count": 0,
+  "retry_after": null,
+  "events": [
+    {"event_type": "SUBMITTED", "created_at": "2026-03-23T12:34:56Z"},
+    {"event_type": "DISPATCHED", "created_at": "2026-03-23T12:35:02Z"},
+    {"event_type": "RUNNING",    "created_at": "2026-03-23T12:35:10Z"},
+    {"event_type": "SUCCEEDED",  "created_at": "2026-03-23T12:37:10Z"}
+  ],
+  "earlier_events_count": 0
 }
 ```
 
 `node_name` はジョブの実行に使用されたノード名のリスト（`list[str] | null`）。Watcher が RUNNING 遷移時および sweep の進行状況変化時に累積記録する。QUEUED / DISPATCHED 等の未実行ジョブでは `null`。通常ジョブでは単一要素のリスト、sweep ジョブでは使用された全ノード名のリストとなる。
+
+`retry_count` は dispatcher の K8s API 一時障害 retry 回数（[dispatcher.md](dispatcher.md) §2.4）。`retry_after` は次回 dispatch 解禁時刻（`str | null`、RFC3339）。K8s 一時障害 retry / ResourceQuota DEFERRED のどちらでも設定されうる。
+
+`events` は直近の job_events を時系列昇順（古い → 新しい）で最大 10 件返す。各要素は `event_type` と `created_at` のみを含み、`payload_json` はレスポンスには含めない。`earlier_events_count` は「レスポンスに含まれない、より古い events の件数」であり、0 の場合は切り捨てが発生していないことを意味する。ジョブに events が 1 件もない場合は `events=[]` / `earlier_events_count=0` を返す。
+
+event の canonical な種類は [database.md](database.md) §3 を参照。
 
 ### エラーレスポンス
 

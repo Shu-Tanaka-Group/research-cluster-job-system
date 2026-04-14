@@ -90,6 +90,26 @@ CREATE TABLE job_events (
 );
 ```
 
+### 3.1 canonical `event_type` 一覧
+
+`event_type` は以下の値を canonical として扱う。新しい種別を追加する際は本節と実装を同時に更新すること。
+
+| event_type   | 記録タイミング | 記録者 | 典型的な `payload_json` |
+|---|---|---|---|
+| `SUBMITTED`  | Submit API がジョブを作成した直後 | Submit API | `{}` |
+| `DISPATCHED` | Dispatcher が K8s Job を作成し `DISPATCHING` → `DISPATCHED` に遷移した直後 | Dispatcher | `{}` |
+| `RETRY`      | Dispatcher が K8s API 一時障害で `DISPATCHING` → `QUEUED` に戻した（`retry_count` が増える） | Dispatcher | `{}` |
+| `DEFERRED`   | Dispatcher が ResourceQuota race で `DISPATCHING` → `QUEUED` に戻した（`retry_count` は増えない、[dispatcher.md](dispatcher.md) §2.5 参照） | Dispatcher | `{}` |
+| `RUNNING`    | Watcher が Pod の RUNNING 遷移を検知し DB status を `RUNNING` に更新した | Watcher | `{}` |
+| `SUCCEEDED`  | Watcher が K8s Job の complete を検知 | Watcher | `{}` |
+| `FAILED`     | Watcher / Dispatcher がジョブを FAILED に遷移させた（permanent error、retry 上限到達、K8s Job 消失など） | Dispatcher / Watcher | `{"error": "..."}`（Dispatcher の mark_failed 経由時） |
+| `CANCELLED`  | API がキャンセル要求を受理した時、または Watcher が CANCELLED ジョブを最終確定した時 | API / Watcher | `{}` |
+| `HELD`       | API が hold 操作を受理した時 | API | `{}` |
+| `RELEASED`   | API が release 操作を受理した時 | API | `{}` |
+| `SET`        | API が set 操作でパラメータを変更した時 | API | 変更内容（例: `{"cpu": "2"}`） |
+
+`GET /v1/jobs/{job_id}` レスポンスの `events` フィールドはこれらを時系列順に最大 10 件返す（[api.md](api.md) §4 参照）。CLI で表示する際も同じ文字列をそのまま表示する前提のため、新しい event_type は英大文字の短いトークンを使い、既存 event_type のリネームは避けること（CLI の後方互換を壊す）。
+
 ## 4. `namespace_weights` テーブル
 
 namespace ごとの fair sharing の重み（weight）を管理する。weight が大きい namespace ほど、同じ累計消費量でも DRF の dominant share が小さく評価され、dispatch 優先度が高くなる。
