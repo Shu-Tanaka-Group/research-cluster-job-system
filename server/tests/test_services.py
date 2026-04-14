@@ -522,6 +522,19 @@ class TestListJobs:
 # ── get_job ──
 
 
+def _insert_job_event(session, job_id, event_type, created_at, namespace=NS):
+    """Insert a job_events row bypassing the autouse fixture that filters
+    db_session.add(JobEvent). Used by TestGetJob for events-related tests."""
+    session.execute(
+        text(
+            "INSERT INTO job_events (namespace, job_id, event_type, payload_json, created_at) "
+            "VALUES (:ns, :jid, :etype, '{}', :ts)"
+        ),
+        {"ns": namespace, "jid": job_id, "etype": event_type, "ts": created_at},
+    )
+    session.flush()
+
+
 class TestGetJob:
     def test_found(self, db_session):
         _insert_job(db_session, 1, time_limit_seconds=3600)
@@ -549,6 +562,68 @@ class TestGetJob:
         _insert_job(db_session, 1, namespace="bob", user="bob")
         resp = get_job(db_session, NS, 1)
         assert resp is None
+
+    def test_retry_fields_default(self, db_session):
+        _insert_job(db_session, 1)
+        resp = get_job(db_session, NS, 1)
+        assert resp.retry_count == 0
+        assert resp.retry_after is None
+
+    def test_retry_fields_populated(self, db_session):
+        from datetime import datetime, timezone
+        ra = datetime(2026, 4, 14, 12, 34, 56, tzinfo=timezone.utc)
+        _insert_job(db_session, 1, retry_count=2, retry_after=ra)
+        resp = get_job(db_session, NS, 1)
+        assert resp.retry_count == 2
+        assert resp.retry_after is not None
+        assert resp.retry_after.year == 2026
+
+    def test_events_empty_by_default(self, db_session):
+        _insert_job(db_session, 1)
+        resp = get_job(db_session, NS, 1)
+        assert resp.events == []
+        assert resp.earlier_events_count == 0
+
+    def test_events_returned_ascending(self, db_session):
+        _insert_job(db_session, 1)
+        _insert_job_event(db_session, 1, "SUBMITTED", "2026-04-14 11:16:50")
+        _insert_job_event(db_session, 1, "DISPATCHED", "2026-04-14 11:17:00")
+        _insert_job_event(db_session, 1, "DEFERRED", "2026-04-14 11:20:15")
+        _insert_job_event(db_session, 1, "DISPATCHED", "2026-04-14 11:20:25")
+        _insert_job_event(db_session, 1, "RUNNING", "2026-04-14 11:20:30")
+        resp = get_job(db_session, NS, 1)
+        assert [e.event_type for e in resp.events] == [
+            "SUBMITTED",
+            "DISPATCHED",
+            "DEFERRED",
+            "DISPATCHED",
+            "RUNNING",
+        ]
+        assert resp.earlier_events_count == 0
+
+    def test_events_truncated_when_over_limit(self, db_session):
+        _insert_job(db_session, 1)
+        # Insert 13 events; only the most recent 10 should be returned,
+        # and earlier_events_count should be 3.
+        for i in range(13):
+            _insert_job_event(
+                db_session, 1, f"E{i:02d}", f"2026-04-14 11:{i:02d}:00"
+            )
+        resp = get_job(db_session, NS, 1)
+        assert len(resp.events) == 10
+        assert resp.earlier_events_count == 3
+        # Ascending and the oldest of the returned set is E03 (3 earlier
+        # rows E00/E01/E02 are dropped).
+        assert resp.events[0].event_type == "E03"
+        assert resp.events[-1].event_type == "E12"
+
+    def test_events_scoped_to_job(self, db_session):
+        _insert_job(db_session, 1)
+        _insert_job(db_session, 2)
+        _insert_job_event(db_session, 1, "DISPATCHED", "2026-04-14 11:17:00")
+        _insert_job_event(db_session, 2, "SUBMITTED", "2026-04-14 11:18:00")
+        resp = get_job(db_session, NS, 1)
+        assert [e.event_type for e in resp.events] == ["DISPATCHED"]
 
 
 # ── cancel_single / cancel_bulk ──

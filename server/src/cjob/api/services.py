@@ -18,6 +18,7 @@ from .schemas import (
     FlavorQuotaInfo,
     HoldResponse,
     JobDetailResponse,
+    JobEventItem,
     JobListResponse,
     JobSubmitRequest,
     JobSubmitResponse,
@@ -38,6 +39,8 @@ ACTIVE_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING", "HELD"}
 CANCELLABLE_STATUSES = {"QUEUED", "DISPATCHING", "DISPATCHED", "RUNNING", "HELD"}
 DELETABLE_STATUSES = {"SUCCEEDED", "FAILED", "CANCELLED"}
 HOLDABLE_STATUSES = {"QUEUED"}
+
+JOB_EVENT_DETAIL_LIMIT = 10
 RELEASABLE_STATUSES = {"HELD"}
 SETTABLE_STATUSES = {"QUEUED", "HELD"}
 # Statuses counted toward MAX_QUEUED_JOBS_PER_NAMESPACE
@@ -460,6 +463,35 @@ def get_job(
     if job is None:
         return None
 
+    # Fetch the most recent job_events (limit + 1 to detect overflow), then
+    # reverse so the response is ascending (old -> new) as documented in
+    # docs/architecture/api.md §4.
+    recent_rows = (
+        session.query(JobEvent)
+        .filter(JobEvent.namespace == namespace, JobEvent.job_id == job_id)
+        .order_by(JobEvent.id.desc())
+        .limit(JOB_EVENT_DETAIL_LIMIT + 1)
+        .all()
+    )
+    if len(recent_rows) > JOB_EVENT_DETAIL_LIMIT:
+        total_events = (
+            session.query(func.count(JobEvent.id))
+            .filter(
+                JobEvent.namespace == namespace,
+                JobEvent.job_id == job_id,
+            )
+            .scalar()
+            or 0
+        )
+        earlier_events_count = max(0, total_events - JOB_EVENT_DETAIL_LIMIT)
+        recent_rows = recent_rows[:JOB_EVENT_DETAIL_LIMIT]
+    else:
+        earlier_events_count = 0
+    events = [
+        JobEventItem(event_type=ev.event_type, created_at=ev.created_at)
+        for ev in reversed(recent_rows)
+    ]
+
     return JobDetailResponse(
         job_id=job.job_id,
         status=job.status,
@@ -485,6 +517,10 @@ def get_job(
         completed_indexes=job.completed_indexes,
         failed_indexes=job.failed_indexes,
         node_name=job.node_name.split(",") if job.node_name else None,
+        retry_count=job.retry_count,
+        retry_after=job.retry_after,
+        events=events,
+        earlier_events_count=earlier_events_count,
     )
 
 
