@@ -790,7 +790,7 @@ cjob set $(cjob list --status QUEUED --flavor cpu --format ids) --flavor cpu-sub
 ## 14. `cjob reset` の動作
 
 1. `GET /v1/jobs` でジョブ一覧を取得し、レスポンスの `log_base_dir` を保持した上で以下の順で確認する
-   - `DELETING` のジョブが1件でも存在する場合は「前回のリセット処理がまだ完了していません。しばらく待ってから再試行してください。」を表示して中止する
+   - `DELETING` のジョブが1件でも存在する場合は `"Previous reset is still in progress. Please wait and try again."` を表示して中止する
    - `QUEUED` / `DISPATCHING` / `DISPATCHED` / `RUNNING` / `HELD` のジョブが1件でも存在する場合は job_id を表示して中止する
 2. 全ジョブが完了済みの場合はユーザーに確認プロンプトを表示する
 3. y の場合のみ以下を順に実行する
@@ -838,7 +838,7 @@ Resource Usage (past 7 days)
   Total                    44.5           89.0
 ```
 
-使用実績がない場合は「使用実績がありません。」を表示する。
+使用実績がない場合は `"No usage data."` を表示する。
 
 ### Resource Quota の表示
 

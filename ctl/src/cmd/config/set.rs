@@ -45,6 +45,7 @@ const CONFIG_KEYS: &[ConfigKeyMeta] = &[
     ConfigKeyMeta { key: "NODE_RESOURCE_SYNC_INTERVAL_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
     // Watcher
     ConfigKeyMeta { key: "WATCHER_K8S_LIST_PAGE_SIZE", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
+    ConfigKeyMeta { key: "WATCHER_DISPATCH_GRACE_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "CLUSTER_QUEUE_NAME", value_type: ValueType::String, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "RESOURCE_QUOTA_NAME", value_type: ValueType::String, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "RESOURCE_QUOTA_SYNC_INTERVAL_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
@@ -55,7 +56,6 @@ const CONFIG_KEYS: &[ConfigKeyMeta] = &[
     ConfigKeyMeta { key: "MAX_SWEEP_COMPLETIONS", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },
     ConfigKeyMeta { key: "DEFAULT_TIME_LIMIT_SECONDS", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },
     ConfigKeyMeta { key: "MAX_TIME_LIMIT_SECONDS", value_type: ValueType::Integer, components: &["submit-api"], updatable: true },
-    ConfigKeyMeta { key: "CLI_BINARY_DIR", value_type: ValueType::String, components: &["submit-api"], updatable: true },
     // K8s / Kueue
     ConfigKeyMeta { key: "KUEUE_LOCAL_QUEUE_NAME", value_type: ValueType::String, components: &["dispatcher"], updatable: true },
     ConfigKeyMeta { key: "USER_NAMESPACE_LABEL", value_type: ValueType::String, components: &["watcher"], updatable: true },

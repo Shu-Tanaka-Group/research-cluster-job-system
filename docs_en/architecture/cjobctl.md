@@ -648,7 +648,7 @@ Safely stops the CJob system. Execute before maintenance or K8s cluster shutdown
 
 Shutdown sequence:
 
-1. Display active job count and show confirmation prompt (skippable with `--yes`)
+1. Display active job count and show confirmation prompt (skippable with `--yes`). Counts `QUEUED` / `DISPATCHING` / `DISPATCHED` / `RUNNING` / `HELD` individually; if at least one `HELD` job exists, also notes that it will remain held after restart
 2. Scale down Submit API to replicas=0 to block new job submissions
 3. Scale down Dispatcher to replicas=0 to prevent job re-dispatch
 4. Scale down Watcher to replicas=0 to prevent DB state overwrites
@@ -657,6 +657,7 @@ Shutdown sequence:
    - DISPATCHED → QUEUED
    - RUNNING → FAILED (`last_error = 'system shutdown'`, `finished_at = NOW()`)
    - QUEUED → No change
+   - HELD → No change (stays HELD after restart until the user runs `cjob release`)
 6. Delete all K8s Jobs (with `cjob.io/job-id` label) in all user namespaces with `propagationPolicy=Background`
 
 The namespace's `cjob.io/user-namespace` label is not changed. User access permissions are preserved across restarts.
@@ -665,13 +666,14 @@ Jobs reverted to QUEUED will be automatically re-dispatched by the Dispatcher af
 
 ```bash
 $ cjobctl system stop
-Active jobs: 15 (QUEUED: 8, DISPATCHING: 1, DISPATCHED: 2, RUNNING: 4)
+Active jobs: 16 (QUEUED: 8, DISPATCHING: 1, DISPATCHED: 2, RUNNING: 4, HELD: 1)
 This will:
   - Scale down submit-api, dispatcher, watcher to 0 replicas
-  - Revert 3 DISPATCHING/DISPATCHED jobs to QUEUED
-  - Fail 4 RUNNING jobs (last_error: system shutdown)
+  - Revert 3 DISPATCHING/DISPATCHED job(s) to QUEUED
+  - Fail 4 RUNNING job(s) (last_error: system shutdown)
   - Delete K8s Jobs in all user namespaces
-  - 8 QUEUED jobs will be re-dispatched on next start
+  - 11 QUEUED job(s) will be re-dispatched on next start
+  - 1 HELD job(s) will remain held (use cjob release to resume)
 Proceed? [y/N] y
 Scaled down submit-api to 0 replicas.
 Scaled down dispatcher to 0 replicas.

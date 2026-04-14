@@ -246,7 +246,7 @@ except TemporaryK8sError:
     )
     if updated_rows == 0:
         return   # cancel API が CANCELLED に更新済み → スキップ
-    db.record_event(namespace, job_id, "RETRY", {"count": current_count + 1})
+    db.record_event(namespace, job_id, "RETRY")   # payload_json は {}（database.md §3.1 参照）
 ```
 
 `retry_after <= NOW()` になった時点で次回スキャン時に自動的に再 dispatch 対象となる。
