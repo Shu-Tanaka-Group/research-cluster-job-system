@@ -15,12 +15,13 @@ from sqlalchemy import text
 
 from cjob.dispatcher.scheduler import (
     _cleanup_old_usage,
+    defer_to_queue,
     estimate_shortest_remaining,
     fetch_dispatchable_jobs,
     fetch_stalled_jobs,
     increment_retry,
 )
-from cjob.models import Job, NamespaceDailyUsage
+from cjob.models import Job, JobEvent, NamespaceDailyUsage
 
 pytestmark = pytest.mark.integration
 
@@ -195,6 +196,96 @@ class TestIncrementRetry:
         result = increment_retry(pg_session, NS_ALICE, 1, 60)
 
         assert result is False
+
+
+# ── defer_to_queue ──
+
+
+class TestDeferToQueue:
+    """ResourceQuota race recovery: DISPATCHING -> QUEUED without
+    consuming the retry budget. See dispatcher.md §2.5."""
+
+    def test_dispatching_to_queued(self, pg_session):
+        _insert_job(pg_session, 1, status="DISPATCHING")
+        pg_session.flush()
+
+        result = defer_to_queue(pg_session, NS_ALICE, 1, 10)
+
+        assert result is True
+        job = pg_session.get(Job, (NS_ALICE, 1))
+        assert job.status == "QUEUED"
+
+    def test_sets_retry_after_in_future(self, pg_session):
+        _insert_job(pg_session, 1, status="DISPATCHING")
+        pg_session.flush()
+
+        now_before = _pg_now(pg_session)
+        defer_to_queue(pg_session, NS_ALICE, 1, 10)
+        now_after = _pg_now(pg_session)
+
+        job = pg_session.get(Job, (NS_ALICE, 1))
+        assert job.retry_after >= now_before + timedelta(seconds=5)
+        assert job.retry_after <= now_after + timedelta(seconds=15)
+
+    def test_preserves_retry_count(self, pg_session):
+        _insert_job(pg_session, 1, status="DISPATCHING")
+        pg_session.execute(
+            text("UPDATE jobs SET retry_count = 3 "
+                 "WHERE namespace = :ns AND job_id = 1"),
+            {"ns": NS_ALICE},
+        )
+        pg_session.flush()
+
+        defer_to_queue(pg_session, NS_ALICE, 1, 10)
+
+        job = pg_session.get(Job, (NS_ALICE, 1))
+        assert job.retry_count == 3
+
+    def test_no_op_when_not_dispatching(self, pg_session):
+        _insert_job(pg_session, 1, status="QUEUED")
+        pg_session.flush()
+
+        result = defer_to_queue(pg_session, NS_ALICE, 1, 10)
+
+        assert result is False
+
+    def test_no_op_when_cancelled(self, pg_session):
+        _insert_job(pg_session, 1, status="CANCELLED")
+        pg_session.flush()
+
+        result = defer_to_queue(pg_session, NS_ALICE, 1, 10)
+
+        assert result is False
+        job = pg_session.get(Job, (NS_ALICE, 1))
+        assert job.status == "CANCELLED"
+
+    def test_records_deferred_event(self, pg_session):
+        _insert_job(pg_session, 1, status="DISPATCHING")
+        pg_session.flush()
+
+        defer_to_queue(pg_session, NS_ALICE, 1, 10)
+        pg_session.flush()
+
+        events = (
+            pg_session.query(JobEvent)
+            .filter_by(namespace=NS_ALICE, job_id=1, event_type="DEFERRED")
+            .all()
+        )
+        assert len(events) == 1
+
+    def test_no_event_when_no_update(self, pg_session):
+        _insert_job(pg_session, 1, status="QUEUED")
+        pg_session.flush()
+
+        defer_to_queue(pg_session, NS_ALICE, 1, 10)
+        pg_session.flush()
+
+        events = (
+            pg_session.query(JobEvent)
+            .filter_by(namespace=NS_ALICE, job_id=1, event_type="DEFERRED")
+            .all()
+        )
+        assert events == []
 
 
 # ── fetch_stalled_jobs ──

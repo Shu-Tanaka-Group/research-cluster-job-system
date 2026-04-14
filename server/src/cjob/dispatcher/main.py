@@ -10,10 +10,17 @@ from cjob.config import get_settings
 from cjob.db import create_session
 from cjob.models import Job
 
-from .k8s_job import PermanentK8sError, TemporaryK8sError, build_k8s_job, create_k8s_job
+from .k8s_job import (
+    PermanentK8sError,
+    QuotaExceededError,
+    TemporaryK8sError,
+    build_k8s_job,
+    create_k8s_job,
+)
 from .scheduler import (
     apply_gap_filling,
     cas_update_to_dispatching,
+    defer_to_queue,
     fetch_dispatchable_jobs,
     filter_by_resource_quota,
     increment_retry,
@@ -52,6 +59,16 @@ def dispatch_one(session, job, settings):
         k8s_job_name = create_k8s_job(build_k8s_job(job, settings))
         mark_dispatched(session, ns, jid, k8s_job_name)
         session.commit()
+    except QuotaExceededError as e:
+        session.rollback()
+        defer_to_queue(
+            session, ns, jid, settings.RESOURCE_QUOTA_SYNC_INTERVAL_SEC
+        )
+        session.commit()
+        logger.info(
+            "ResourceQuota race for %s/%d, deferring to QUEUED: %s",
+            ns, jid, e,
+        )
     except TemporaryK8sError as e:
         session.rollback()
         # Re-fetch in a clean state to get current retry_count

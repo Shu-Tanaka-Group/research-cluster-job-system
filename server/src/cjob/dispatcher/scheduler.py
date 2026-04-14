@@ -350,6 +350,36 @@ def increment_retry(
     return result.rowcount > 0
 
 
+def defer_to_queue(
+    session: Session, namespace: str, job_id: int, defer_sec: int
+) -> bool:
+    """Revert DISPATCHING -> QUEUED without consuming the retry budget.
+
+    Used when a dispatch attempt fails due to a transient race that is
+    not the job's fault (e.g. stale ResourceQuota cache causing K8s
+    admission to reject with 403 exceeded quota). ``retry_count`` is
+    intentionally left unchanged; only ``retry_after`` is set so the
+    dispatcher waits for the next cache sync before re-attempting.
+    See docs/architecture/dispatcher.md §2.5.
+    """
+    result = session.execute(
+        text(
+            "UPDATE jobs SET "
+            "retry_after = NOW() + MAKE_INTERVAL(secs => :interval), "
+            "status = 'QUEUED' "
+            "WHERE namespace = :namespace AND job_id = :job_id "
+            "AND status = 'DISPATCHING'"
+        ),
+        {"namespace": namespace, "job_id": job_id, "interval": defer_sec},
+    )
+    if result.rowcount > 0:
+        session.add(
+            JobEvent(namespace=namespace, job_id=job_id, event_type="DEFERRED")
+        )
+    session.flush()
+    return result.rowcount > 0
+
+
 def fetch_stalled_jobs(session: Session, threshold_sec: int) -> list[Job]:
     """Fetch DISPATCHED jobs that have been waiting longer than threshold_sec."""
     result = session.execute(
