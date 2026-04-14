@@ -43,6 +43,10 @@ class Settings(BaseSettings):
 
     # Watcher - K8s API pagination (watcher.md §5.5)
     WATCHER_K8S_LIST_PAGE_SIZE: int = 500
+    # Grace period before Step 8 marks a DISPATCHED job as FAILED for
+    # missing K8s Job. Must be >= 2x DISPATCH_BUDGET_CHECK_INTERVAL_SEC so
+    # that a Job created mid-cycle is always visible in the next list call.
+    WATCHER_DISPATCH_GRACE_SEC: int = 30
 
     # Submit API
     MAX_QUEUED_JOBS_PER_NAMESPACE: int = 500
