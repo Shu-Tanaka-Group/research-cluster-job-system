@@ -21,3 +21,10 @@ kubectl rollout restart deployment watcher -n cjob-system
 
 - 通常ケース: `cjobctl system restart watcher`（env は ConfigMap から読み込まれる）
 - 独自 overlay で `cjob-config` の内容をパッチしている場合: overlay 側の ConfigMap patch に `WATCHER_K8S_LIST_PAGE_SIZE: "500"` を追記してから apply する。値を明示しない場合でも Python 側のデフォルト（500）で動作するが、`cjobctl config show` の出力と一致させるため ConfigMap にも載せることを推奨する
+
+## `cjob-config` への `WATCHER_DISPATCH_GRACE_SEC` 追加
+
+`cjob-config` ConfigMap に新しい標準キー `WATCHER_DISPATCH_GRACE_SEC`（デフォルト `"30"`）が追加される。Watcher が DISPATCHED ジョブを「K8s Job 不在」と判定して FAILED に遷移させるまでの猶予秒数で、Dispatcher と Watcher のサイクル間 race によって投入直後のジョブが誤って FAILED になる問題を防ぐ。`kubectl apply -k overlays/<env>` で base の ConfigMap が反映された後、以下のいずれかを実行すること。
+
+- 通常ケース: `cjobctl system restart watcher`（env は ConfigMap から読み込まれる）
+- 独自 overlay で `cjob-config` の内容をパッチしている場合: overlay 側の ConfigMap patch に `WATCHER_DISPATCH_GRACE_SEC: "30"` を追記してから apply する。値を明示しない場合でも Python 側のデフォルト（30）で動作するが、`cjobctl config show` の出力と一致させるため ConfigMap にも載せることを推奨する

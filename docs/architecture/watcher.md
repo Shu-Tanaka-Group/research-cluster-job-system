@@ -91,9 +91,19 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 7. `cjob.io/job-id` ラベルに対応する DB レコードが存在しない K8s Job（orphan Job）は削除する
 8. DB 上で DISPATCHED / RUNNING だが、対応する K8s Job が K8s 上に存在しないジョブを FAILED に遷移させる（`last_error` に `"K8s Job not found (TTL expired or manually deleted)"` を設定し、`finished_at` を現在時刻に設定する）。これにより `ttlSecondsAfterFinished` による K8s Job の自動削除や、手動削除によって DB と K8s の状態が乖離した場合に自動修復される
 
+   **Dispatcher grace period:** DISPATCHED ジョブのうち `dispatched_at` が `NOW() - WATCHER_DISPATCH_GRACE_SEC` より新しいものは対象外とする。Dispatcher がジョブを投入した直後に Watcher が reconcile サイクルを回すと、そのサイクルの先頭で取得した K8s Job 一覧には新しく作成された Job がまだ含まれない race が発生し、この保護が無いと新規ジョブが即座に FAILED として誤記録される。RUNNING ジョブには grace period を適用しない（1 度でも K8s Job を観測できていれば次サイクルでも観測できるため、消失は実際の削除を意味する）
+
+**Grace period とスキャンサイクル間隔の関係:**
+
+`WATCHER_DISPATCH_GRACE_SEC` は Watcher のスキャンサイクル間隔（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`）の 2 倍以上に設定する必要がある。これにより、Dispatcher がサイクル中に K8s Job を作成した場合でも、次サイクルの先頭で取得する K8s Job 一覧に必ず含まれるようになる。現在の設定（grace 30 秒 vs サイクル間隔 10 秒）で 3 倍の余裕を確保している
+
 **`ttlSecondsAfterFinished` とスキャンサイクル間隔の関係:**
 
 `ttlSecondsAfterFinished` は Watcher のスキャンサイクル間隔（現在は `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` を共有）より十分に長く設定する必要がある。TTL が短すぎると、Watcher の一時的な停止（再起動・障害等）中に完了した K8s Job が TTL で削除され、ステップ 8 により正常完了したジョブが FAILED として記録される。現在の設定（TTL 300秒 vs サイクル間隔 10秒）では Watcher の再起動（通常 1〜2 分）に対しても十分な余裕がある。TTL またはサイクル間隔を変更する場合は、この関係を維持すること
+
+**Terminal 状態復帰ガード:**
+
+ステップ 4 の DB 状態更新では、DB の status がすでに `SUCCEEDED` または `FAILED` のジョブに対して `RUNNING` への上書きを行わない。通常のフローで terminal 状態から RUNNING に戻ることはないが、ステップ 8 の race 等で不整合が発生した場合に `finished_at` と `status` が矛盾する状態を防ぐための defense-in-depth である。ブロックした場合は warning ログを出力する
 
 ## 4. sweep ジョブの監視
 
@@ -195,5 +205,6 @@ reconcile 中の `node_name` 記録に使用する `CoreV1Api.list_namespaced_po
 | 設定項目 | デフォルト | 用途 |
 |---|---|---|
 | `WATCHER_K8S_LIST_PAGE_SIZE` | 500 | `list_job_for_all_namespaces()` と `list_pod_for_all_namespaces()` のページサイズ。値を大きくするとページ数が減り API 往復コストが下がるが、1 ページのレスポンスサイズが増える |
+| `WATCHER_DISPATCH_GRACE_SEC` | 30 | ステップ 8 で DISPATCHED ジョブを FAILED に遷移させるまでの猶予秒数。`dispatched_at` からこの時間が経過するまでは K8s Job 不在でも FAILED に遷移しない。Dispatcher と Watcher の reconcile サイクル間 race の保護用。`DISPATCH_BUDGET_CHECK_INTERVAL_SEC` の 2 倍以上を推奨 |
 
-この設定は `cjob-config` ConfigMap の標準キーとして登録されており、`cjobctl config set WATCHER_K8S_LIST_PAGE_SIZE <value>` で更新できる（[cjobctl.md](cjobctl.md) §`cjobctl config set` 参照）。更新後は `cjobctl system restart watcher` で反映する。
+これらの設定は `cjob-config` ConfigMap の標準キーとして登録されており、`cjobctl config set <key> <value>` で更新できる（[cjobctl.md](cjobctl.md) §`cjobctl config set` 参照）。更新後は `cjobctl system restart watcher` で反映する。
