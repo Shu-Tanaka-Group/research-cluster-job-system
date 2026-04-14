@@ -1,10 +1,11 @@
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from kubernetes import client as k8s_client
 from kubernetes.client.rest import ApiException
-from sqlalchemy import func, select, text, tuple_
+from sqlalchemy import and_, func, or_, select, text, tuple_
 from sqlalchemy.orm import Session
 
 from cjob.metrics import JOBS_COMPLETED_TOTAL
@@ -257,8 +258,22 @@ def _record_resource_usage(session: Session, job: Job):
     )
 
 
-def reconcile_cycle(session: Session, k8s_jobs: list[LightK8sJob]):
-    """Run one reconciliation cycle."""
+def reconcile_cycle(
+    session: Session,
+    k8s_jobs: list[LightK8sJob],
+    *,
+    dispatch_grace_sec: int = 30,
+):
+    """Run one reconciliation cycle.
+
+    ``dispatch_grace_sec`` is the grace period (seconds) applied to
+    Step 8's DISPATCHED-disappearance check. Jobs whose ``dispatched_at``
+    is newer than ``NOW() - dispatch_grace_sec`` are spared from the
+    FAILED transition to tolerate the reconcile-vs-dispatcher race
+    (watcher.md §3 Step 8). Production always passes the value from
+    ``Settings.WATCHER_DISPATCH_GRACE_SEC``; the default exists only to
+    keep test setup terse.
+    """
     # Build lookup: (namespace, job_id) -> lightweight K8s Job snapshot
     k8s_map: dict[tuple[str, int], LightK8sJob] = {
         (kj.namespace, kj.job_id): kj for kj in k8s_jobs
@@ -341,6 +356,19 @@ def reconcile_cycle(session: Session, k8s_jobs: list[LightK8sJob]):
             new_status = "FAILED"
 
         if new_status and new_status != db_job.status:
+            # Defense-in-depth: reject terminal -> RUNNING regressions.
+            # The grace period in Step 8 should prevent the race that
+            # triggers this, but if a stale FAILED/SUCCEEDED ever coexists
+            # with an active K8s Job, block the rollback instead of
+            # producing inconsistent (status=RUNNING, finished_at=...) rows.
+            if (db_job.status in ("SUCCEEDED", "FAILED")
+                    and new_status == "RUNNING"):
+                logger.warning(
+                    "Refused status regression %s/%d: %s -> %s "
+                    "(stale terminal state vs active K8s Job)",
+                    ns, jid, db_job.status, new_status,
+                )
+                continue
             old_status = db_job.status
             db_job.status = new_status
             if new_status == "RUNNING" and db_job.started_at is None:
@@ -372,9 +400,29 @@ def reconcile_cycle(session: Session, k8s_jobs: list[LightK8sJob]):
     # Step 8: Mark DISPATCHED/RUNNING jobs with no K8s Job as FAILED.
     # First collect only (namespace, job_id) to avoid loading full Job rows
     # for the common case where no jobs disappeared (watcher.md §5.3).
+    #
+    # DISPATCHED jobs within the grace period are excluded from the query:
+    # the Dispatcher may have created their K8s Job after list_cjob_k8s_jobs()
+    # snapshotted the cluster, so their absence from k8s_map is not evidence
+    # of disappearance (watcher.md §3 Step 8 dispatcher grace period).
+    # Cutoff is computed in Python so the comparison works under both
+    # PostgreSQL and SQLite (test fixture) without dialect-specific SQL.
+    grace_cutoff = datetime.now(timezone.utc) - timedelta(
+        seconds=dispatch_grace_sec
+    )
     active_keys = session.execute(
-        select(Job.namespace, Job.job_id)
-        .where(Job.status.in_(["DISPATCHED", "RUNNING"]))
+        select(Job.namespace, Job.job_id).where(
+            or_(
+                Job.status == "RUNNING",
+                and_(
+                    Job.status == "DISPATCHED",
+                    or_(
+                        Job.dispatched_at.is_(None),
+                        Job.dispatched_at <= grace_cutoff,
+                    ),
+                ),
+            )
+        )
     ).all()
     disappeared_keys = [
         (ns, jid) for ns, jid in active_keys if (ns, jid) not in k8s_map

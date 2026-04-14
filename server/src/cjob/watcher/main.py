@@ -62,7 +62,11 @@ def run():
             k8s_jobs = list_cjob_k8s_jobs(
                 page_size=settings.WATCHER_K8S_LIST_PAGE_SIZE,
             )
-            reconcile_cycle(session, k8s_jobs)
+            reconcile_cycle(
+                session,
+                k8s_jobs,
+                dispatch_grace_sec=settings.WATCHER_DISPATCH_GRACE_SEC,
+            )
             session.commit()
         except Exception:
             logger.exception("Error in reconcile cycle")
