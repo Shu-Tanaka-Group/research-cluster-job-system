@@ -93,9 +93,19 @@ The Dispatcher alone cannot detect K8s Job completion / failure, so the Watcher 
 7. Delete K8s Jobs whose `cjob.io/job-id` label has no corresponding DB record (orphan Jobs).
 8. Transition jobs that are DISPATCHED / RUNNING in the DB but whose corresponding K8s Job no longer exists to FAILED (set `last_error` to `"K8s Job not found (TTL expired or manually deleted)"` and `finished_at` to the current time). This provides automatic recovery when DB and K8s state diverge due to automatic K8s Job deletion via `ttlSecondsAfterFinished` or manual deletion.
 
+   **Dispatcher grace period:** DISPATCHED jobs whose `dispatched_at` is newer than `NOW() - WATCHER_DISPATCH_GRACE_SEC` are excluded from this check. When the Dispatcher creates a job immediately after the Watcher snapshots the K8s Job list at the start of a reconcile cycle, that cycle's list will not yet contain the newly-created Job; without this guard, freshly dispatched jobs would be incorrectly recorded as FAILED. The grace period is not applied to RUNNING jobs (once observed, their K8s Job will remain visible in subsequent cycles, so disappearance indicates a real deletion).
+
+**Relationship between the grace period and scan cycle interval:**
+
+`WATCHER_DISPATCH_GRACE_SEC` must be set to at least twice the Watcher's scan cycle interval (`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`). This ensures that a K8s Job created by the Dispatcher mid-cycle is guaranteed to appear in the next cycle's K8s Job list. The current settings (grace 30 seconds vs cycle interval 10 seconds) provide a 3x safety margin.
+
 **Relationship between `ttlSecondsAfterFinished` and scan cycle interval:**
 
 `ttlSecondsAfterFinished` must be set sufficiently longer than the Watcher's scan cycle interval (currently sharing `DISPATCH_BUDGET_CHECK_INTERVAL_SEC`). If the TTL is too short, K8s Jobs that complete during a temporary Watcher stoppage (restart, failure, etc.) may be deleted by the TTL, causing Step 8 to record successfully completed jobs as FAILED. The current settings (TTL 300 seconds vs cycle interval 10 seconds) provide sufficient headroom even for Watcher restarts (typically 1–2 minutes). When changing the TTL or cycle interval, maintain this relationship.
+
+**Terminal state regression guard:**
+
+In Step 4's DB state update, jobs whose DB status is already `SUCCEEDED` or `FAILED` are not overwritten with `RUNNING`. Terminal states should never roll back to RUNNING in the normal flow; this defense-in-depth prevents inconsistent `finished_at` / `status` pairs in case Step 8's race (or similar) produces such a condition. A warning is logged whenever the regression is blocked.
 
 ## 4. Sweep Job Monitoring
 
@@ -197,5 +207,6 @@ As a result, the number of API calls scales only with the number of namespaces, 
 | Setting | Default | Purpose |
 |---|---|---|
 | `WATCHER_K8S_LIST_PAGE_SIZE` | 500 | Page size for `list_job_for_all_namespaces()` and `list_pod_for_all_namespaces()`. Larger values reduce the number of pages and API round-trip costs, but increase the response size per page |
+| `WATCHER_DISPATCH_GRACE_SEC` | 30 | Grace period (seconds) before Step 8 marks a DISPATCHED job as FAILED due to a missing K8s Job. Until this much time has elapsed since `dispatched_at`, a missing K8s Job does not trigger the FAILED transition. Guards against the race between the Dispatcher and the Watcher's reconcile cycle. Recommended: at least 2x `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` |
 
-This setting is registered as a standard key in the `cjob-config` ConfigMap and can be updated via `cjobctl config set WATCHER_K8S_LIST_PAGE_SIZE <value>` (see [cjobctl.md](cjobctl.md) §`cjobctl config set`). After updating, apply the change with `cjobctl system restart watcher`.
+These settings are registered as standard keys in the `cjob-config` ConfigMap and can be updated via `cjobctl config set <key> <value>` (see [cjobctl.md](cjobctl.md) §`cjobctl config set`). After updating, apply the change with `cjobctl system restart watcher`.

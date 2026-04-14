@@ -417,6 +417,7 @@ After update, the restart command for affected components is displayed. The mapp
 | `DEFAULT_FLAVOR` | string | submit-api |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | int | watcher |
 | `WATCHER_K8S_LIST_PAGE_SIZE` | int | watcher |
+| `WATCHER_DISPATCH_GRACE_SEC` | int | watcher |
 | `CLUSTER_QUEUE_NAME` | string | watcher |
 | `RESOURCE_QUOTA_NAME` | string | watcher |
 | `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` | int | watcher |
