@@ -181,16 +181,29 @@ cjob delete --all
 - 0-origin (same as K8s `JOB_COMPLETION_INDEX`)
 - Value range: `0` to `completions - 1`
 
-Within script files, the `$CJOB_INDEX` environment variable can be referenced directly. Since the contents of script files are not subject to shell expansion by the user's shell, `$CJOB_INDEX` can be written directly without using the `_INDEX_` placeholder.
+Within script files executed as the job inside the Pod, the `$CJOB_INDEX` environment variable can be referenced directly. The contents of such script files are not subject to shell expansion by the user's shell, so `$CJOB_INDEX` can be written directly without using the `_INDEX_` placeholder.
 
 ```bash
-# run.sh
+# run.sh (executed inside the Pod)
 echo "index is $CJOB_INDEX"
 python main.py --trial $CJOB_INDEX
 ```
 
 ```bash
 cjob sweep -n 10 --parallel 5 -- bash run.sh
+```
+
+**Note: Wrapper scripts that invoke `cjob sweep`**
+
+The "script files" above refer to the script that runs inside the Job Pod (`run.sh`). In contrast, if the `cjob sweep` command itself is written in a shell script that is executed on the user's shell (e.g., `bash jobscript.sh`), the script's contents are subject to the user's shell expansion. In that case `$CJOB_INDEX` is undefined and expands to an empty string, causing the argument to be missing when `cjob sweep` receives it. Wrapper scripts must use `_INDEX_` (or suppress expansion with single quotes, e.g., `'$CJOB_INDEX'`).
+
+```bash
+# jobscript.sh - wrapper script run by the user's bash
+NUM_SEED=50
+cjob sweep -n ${NUM_SEED} -- python train.py --seed _INDEX_       # OK
+
+# WRONG: ${CJOB_INDEX} is expanded by the user's shell into an empty string
+# cjob sweep -n ${NUM_SEED} -- python train.py --seed ${CJOB_INDEX}
 ```
 
 ## 4. `cjob add` Behavior

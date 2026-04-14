@@ -179,16 +179,29 @@ cjob delete --all
 - 0-origin（K8s の `JOB_COMPLETION_INDEX` と同一）
 - 値の範囲: `0` 〜 `completions - 1`
 
-スクリプトファイル内では `$CJOB_INDEX` 環境変数を直接参照できる。スクリプトファイルの中身はユーザーのシェルによる展開を受けないため、`_INDEX_` プレースホルダーを使わずに `$CJOB_INDEX` をそのまま記述できる。
+ジョブとして Pod 内で実行されるスクリプトファイル内では `$CJOB_INDEX` 環境変数を直接参照できる。スクリプトファイルの中身はユーザーシェルによる展開を受けないため、`_INDEX_` プレースホルダーを使わずに `$CJOB_INDEX` をそのまま記述できる。
 
 ```bash
-# run.sh
+# run.sh（Pod の中で実行される）
 echo "index is $CJOB_INDEX"
 python main.py --trial $CJOB_INDEX
 ```
 
 ```bash
 cjob sweep -n 10 --parallel 5 -- bash run.sh
+```
+
+**注意: `cjob sweep` を呼び出すラッパースクリプトの場合**
+
+上記の「スクリプトファイル」は Job Pod 内で実行される側のスクリプト（`run.sh`）を指す。これに対して `cjob sweep` コマンド自体をシェルスクリプトに書いて `bash jobscript.sh` のようにユーザーシェルで実行する場合、スクリプトの中身はユーザーシェルの変数展開を受ける。このとき `$CJOB_INDEX` は未定義のため空文字列に展開され、`cjob sweep` に渡る引数が欠落する。ラッパースクリプトでは必ず `_INDEX_` を使うこと（または `'$CJOB_INDEX'` のようにシングルクォートで展開を抑止する）。
+
+```bash
+# jobscript.sh - 手元の bash で実行するラッパースクリプト
+NUM_SEED=50
+cjob sweep -n ${NUM_SEED} -- python train.py --seed _INDEX_       # OK
+
+# NG: ${CJOB_INDEX} はユーザーシェルで展開され空文字列になる
+# cjob sweep -n ${NUM_SEED} -- python train.py --seed ${CJOB_INDEX}
 ```
 
 ## 4. `cjob add` の動作

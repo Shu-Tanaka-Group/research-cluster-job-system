@@ -61,16 +61,31 @@ cjob sweep -n 100 --parallel 10 -- python main.py --trial _INDEX_
 cjob sweep -n 50 --parallel 5 -- python train.py --seed _INDEX_
 ```
 
-Within script files, you can reference the number directly using the variable `$CJOB_INDEX`.
+Within job script files (scripts executed inside the Job Pod), you can reference the number directly using the variable `$CJOB_INDEX`.
 
 ```bash
-# Example content of run.sh
+# Example content of run.sh (executed inside the Pod)
 python train.py --config configs/config_${CJOB_INDEX}.yaml
 ```
 
 ```bash
 cjob sweep -n 10 --parallel 5 -- bash run.sh
 ```
+
+**Note: Wrapper scripts that invoke `cjob sweep`**
+
+If you write the `cjob sweep` command itself inside a shell script and run it locally (e.g., `bash myscript.sh`), you must use `_INDEX_`. The user's shell expanding the script will try to resolve `$CJOB_INDEX` and substitute it with an empty string, leaving `cjob sweep` with a blank argument.
+
+```bash
+# jobscript.sh - wrapper script run by your local bash
+NUM_SEED=50
+cjob sweep -n ${NUM_SEED} -- python train.py --seed _INDEX_       # OK
+
+# WRONG: ${CJOB_INDEX} is expanded by the user's shell into an empty string
+# cjob sweep -n ${NUM_SEED} -- python train.py --seed ${CJOB_INDEX}
+```
+
+If you really need to pass the literal string `$CJOB_INDEX` through, use single quotes to suppress expansion (`--seed '$CJOB_INDEX'`).
 
 ### 2.3 Choosing the Parallelism Level
 

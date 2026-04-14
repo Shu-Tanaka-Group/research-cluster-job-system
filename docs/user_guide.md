@@ -59,16 +59,31 @@ cjob sweep -n 100 --parallel 10 -- python main.py --trial _INDEX_
 cjob sweep -n 50 --parallel 5 -- python train.py --seed _INDEX_
 ```
 
-スクリプトファイルの中では `$CJOB_INDEX` という変数名で番号を直接参照できます。
+ジョブとして実行されるスクリプトファイル（Job Pod の中で動くスクリプト）では `$CJOB_INDEX` という変数名で番号を直接参照できます。
 
 ```bash
-# run.sh の中身の例
+# run.sh の中身の例（Pod の中で実行される）
 python train.py --config configs/config_${CJOB_INDEX}.yaml
 ```
 
 ```bash
 cjob sweep -n 10 --parallel 5 -- bash run.sh
 ```
+
+**注意: `cjob sweep` を呼び出すラッパースクリプトの場合**
+
+`cjob sweep` コマンド自体をシェルスクリプトに記述して `bash myscript.sh` のように手元で実行する場合は、必ず `_INDEX_` を使ってください。スクリプトを実行するユーザーシェルが `$CJOB_INDEX` を展開しようとして空文字列に置き換えてしまい、`cjob sweep` に空の引数が渡ってしまいます。
+
+```bash
+# jobscript.sh - 手元の bash で実行するラッパースクリプト
+NUM_SEED=50
+cjob sweep -n ${NUM_SEED} -- python train.py --seed _INDEX_       # OK
+
+# NG: ${CJOB_INDEX} はユーザーシェルで展開され空文字列になる
+# cjob sweep -n ${NUM_SEED} -- python train.py --seed ${CJOB_INDEX}
+```
+
+どうしても `$CJOB_INDEX` の文字列そのものを渡したい場合は、シングルクォートで展開を抑止できます（`--seed '$CJOB_INDEX'`）。
 
 ### 2.3 並列数の選び方
 
