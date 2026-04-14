@@ -59,10 +59,10 @@ cjob sweep -n 100 --parallel 10 -- python main.py --trial _INDEX_
 cjob sweep -n 50 --parallel 5 -- python train.py --seed _INDEX_
 ```
 
-ジョブとして実行されるスクリプトファイル（Job Pod の中で動くスクリプト）では `$CJOB_INDEX` という変数名で番号を直接参照できます。
+ジョブの本体として実行されるスクリプトの中では、`$CJOB_INDEX` という変数名で番号を直接参照できます。
 
 ```bash
-# run.sh の中身の例（Pod の中で実行される）
+# run.sh の中身の例（クラスタ側でジョブとして実行される）
 python train.py --config configs/config_${CJOB_INDEX}.yaml
 ```
 
@@ -70,20 +70,20 @@ python train.py --config configs/config_${CJOB_INDEX}.yaml
 cjob sweep -n 10 --parallel 5 -- bash run.sh
 ```
 
-**注意: `cjob sweep` を呼び出すラッパースクリプトの場合**
+**注意: `cjob sweep` を呼び出すシェルスクリプトの場合**
 
-`cjob sweep` コマンド自体をシェルスクリプトに記述して `bash myscript.sh` のように手元で実行する場合は、必ず `_INDEX_` を使ってください。スクリプトを実行するユーザーシェルが `$CJOB_INDEX` を展開しようとして空文字列に置き換えてしまい、`cjob sweep` に空の引数が渡ってしまいます。
+上の例の `run.sh` は「cjob がジョブとして動かすスクリプト」ですが、これと混同しやすいのが「`cjob sweep` コマンドそのものを書いておいて、手元の bash で実行するためのスクリプト」です。このようなスクリプトを `bash jobscript.sh` のように実行する場合は、必ず `_INDEX_` を使ってください。手元のシェルが `$CJOB_INDEX` を先に解釈して空文字列に置き換えてしまい、`cjob sweep` に空の引数が渡ってしまいます。
 
 ```bash
 # jobscript.sh - 手元の bash で実行するラッパースクリプト
 NUM_SEED=50
 cjob sweep -n ${NUM_SEED} -- python train.py --seed _INDEX_       # OK
 
-# NG: ${CJOB_INDEX} はユーザーシェルで展開され空文字列になる
+# NG: ${CJOB_INDEX} は手元のシェルで展開され空文字列になる
 # cjob sweep -n ${NUM_SEED} -- python train.py --seed ${CJOB_INDEX}
 ```
 
-どうしても `$CJOB_INDEX` の文字列そのものを渡したい場合は、シングルクォートで展開を抑止できます（`--seed '$CJOB_INDEX'`）。
+どうしても `$CJOB_INDEX` という文字列そのものを渡したい場合は、シングルクォートで囲むと展開されません（`--seed '$CJOB_INDEX'`）。
 
 ### 2.3 並列数の選び方
 
