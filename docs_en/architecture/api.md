@@ -311,11 +311,26 @@ Retrieve the details of an individual job.
   "failed_count": null,
   "completed_indexes": null,
   "failed_indexes": null,
-  "node_name": ["worker07", "worker08"]
+  "node_name": ["worker07", "worker08"],
+  "retry_count": 0,
+  "retry_after": null,
+  "events": [
+    {"event_type": "SUBMITTED", "created_at": "2026-03-23T12:34:56Z"},
+    {"event_type": "DISPATCHED", "created_at": "2026-03-23T12:35:02Z"},
+    {"event_type": "RUNNING",    "created_at": "2026-03-23T12:35:10Z"},
+    {"event_type": "SUCCEEDED",  "created_at": "2026-03-23T12:37:10Z"}
+  ],
+  "earlier_events_count": 0
 }
 ```
 
 `node_name` is a list of node names used for job execution (`list[str] | null`). The Watcher cumulatively records these when transitioning to RUNNING and when sweep progress changes. For unstarted jobs such as QUEUED / DISPATCHED, this is `null`. For normal jobs, it is a single-element list; for sweep jobs, it is a list of all nodes used.
+
+`retry_count` is the dispatcher's transient K8s API retry count ([dispatcher.md](dispatcher.md) §2.4). `retry_after` is the timestamp when the next dispatch attempt becomes eligible (`str | null`, RFC3339). Either a K8s transient error retry or a ResourceQuota DEFERRED event may set it.
+
+`events` returns the most recent job_events in chronological ascending order (old → new), up to 10 entries. Each element contains only `event_type` and `created_at`; `payload_json` is not included in the response. `earlier_events_count` is "the number of older events not included in the response"; a value of 0 means no truncation has occurred. If the job has no events at all, `events=[]` and `earlier_events_count=0` are returned.
+
+See [database.md](database.md) §3 for the canonical event types.
 
 ### Error Response
 
