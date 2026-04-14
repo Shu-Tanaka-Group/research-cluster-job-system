@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -863,6 +864,123 @@ class TestReconcileDisappearedJobs:
 
         job = db_session.get(Job, (NS, 1))
         assert job.status == "DISPATCHED"
+
+    def test_dispatched_within_grace_period_spared(self, mock_delete, db_session):
+        """A DISPATCHED job whose dispatched_at is still within the grace
+        period must NOT be marked FAILED even when its K8s Job is absent.
+        This is the race-window protection against Dispatcher/Watcher
+        ordering (watcher.md §3 Step 8 dispatcher grace period)."""
+        recent = datetime.now(timezone.utc) - timedelta(seconds=5)
+        _insert_job(db_session, 1, status="DISPATCHED", dispatched_at=recent)
+
+        reconcile_cycle(db_session, [], dispatch_grace_sec=30)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "DISPATCHED"
+        assert job.finished_at is None
+        assert job.last_error is None
+
+    def test_dispatched_past_grace_period_marked_failed(self, mock_delete, db_session):
+        """A DISPATCHED job that has been dispatched longer ago than the
+        grace period is still subject to the disappearance check."""
+        old = datetime.now(timezone.utc) - timedelta(seconds=120)
+        _insert_job(db_session, 1, status="DISPATCHED", dispatched_at=old)
+
+        reconcile_cycle(db_session, [], dispatch_grace_sec=30)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.finished_at is not None
+
+    def test_dispatched_null_dispatched_at_still_marked_failed(
+        self, mock_delete, db_session
+    ):
+        """Legacy/fixture rows with NULL dispatched_at retain the original
+        Step 8 behaviour (no grace period protection)."""
+        _insert_job(db_session, 1, status="DISPATCHED", dispatched_at=None)
+
+        reconcile_cycle(db_session, [], dispatch_grace_sec=30)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+
+    def test_running_job_not_subject_to_grace_period(self, mock_delete, db_session):
+        """Grace period applies only to DISPATCHED. A RUNNING job whose
+        K8s Job is missing must be marked FAILED regardless of timestamps."""
+        recent = datetime.now(timezone.utc) - timedelta(seconds=5)
+        _insert_job(
+            db_session,
+            1,
+            status="RUNNING",
+            dispatched_at=recent,
+            started_at=recent,
+        )
+
+        reconcile_cycle(db_session, [], dispatch_grace_sec=30)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+
+
+# ── Terminal state regression guard ──
+
+
+@patch.object(NamespacePodNodeResolver, "resolve", return_value=[])
+@patch("cjob.watcher.reconciler._delete_k8s_job")
+class TestTerminalStateRegressionGuard:
+    """Defense-in-depth: SUCCEEDED/FAILED must never roll back to RUNNING
+    via the normal status sync, even if the K8s Job temporarily looks
+    active again (watcher.md §3 Terminal 状態復帰ガード)."""
+
+    def test_failed_job_does_not_regress_to_running(
+        self, mock_delete, mock_fetch_nodes, db_session
+    ):
+        finished = datetime.now(timezone.utc) - timedelta(seconds=60)
+        _insert_job(
+            db_session,
+            1,
+            status="FAILED",
+            finished_at=finished,
+            last_error="K8s Job not found (TTL expired or manually deleted)",
+        )
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.finished_at is not None
+        # last_error preserved
+        assert job.last_error is not None
+
+    def test_succeeded_job_does_not_regress_to_running(
+        self, mock_delete, mock_fetch_nodes, db_session
+    ):
+        finished = datetime.now(timezone.utc) - timedelta(seconds=60)
+        _insert_job(
+            db_session,
+            1,
+            status="SUCCEEDED",
+            finished_at=finished,
+        )
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "SUCCEEDED"
+
+    def test_dispatched_to_running_still_allowed(
+        self, mock_delete, mock_fetch_nodes, db_session
+    ):
+        """The regression guard must not block the normal forward path."""
+        _insert_job(db_session, 1, status="DISPATCHED")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
 
 
 # ── K8s API failure propagation ──

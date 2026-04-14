@@ -80,6 +80,11 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: WATCHER_K8S_LIST_PAGE_SIZE
+            - name: WATCHER_DISPATCH_GRACE_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: WATCHER_DISPATCH_GRACE_SEC
             - name: RESOURCE_QUOTA_NAME
               valueFrom:
                 configMapKeyRef:

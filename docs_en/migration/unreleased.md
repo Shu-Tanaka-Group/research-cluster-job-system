@@ -23,3 +23,10 @@ A new standard key `WATCHER_K8S_LIST_PAGE_SIZE` (default `"500"`) has been added
 
 - Standard case: `cjobctl system restart watcher` (env is read from the ConfigMap)
 - If your custom overlay patches `cjob-config`: add `WATCHER_K8S_LIST_PAGE_SIZE: "500"` to the overlay-side ConfigMap patch and apply. Even if the value is not set explicitly, the Python-side default (500) still applies, but listing it in the ConfigMap is recommended so it appears in `cjobctl config show` output
+
+## `WATCHER_DISPATCH_GRACE_SEC` added to `cjob-config`
+
+A new standard key `WATCHER_DISPATCH_GRACE_SEC` (default `"30"`) has been added to the `cjob-config` ConfigMap. This is the grace period (seconds) before the Watcher transitions a DISPATCHED job to FAILED because its K8s Job appears to be missing; it prevents freshly dispatched jobs from being incorrectly marked FAILED due to the race between the Dispatcher and the Watcher's reconcile cycle. After the base ConfigMap is applied with `kubectl apply -k overlays/<env>`, run one of the following:
+
+- Standard case: `cjobctl system restart watcher` (env is read from the ConfigMap)
+- If your custom overlay patches `cjob-config`: add `WATCHER_DISPATCH_GRACE_SEC: "30"` to the overlay-side ConfigMap patch and apply. Even if the value is not set explicitly, the Python-side default (30) still applies, but listing it in the ConfigMap is recommended so it appears in `cjobctl config show` output
