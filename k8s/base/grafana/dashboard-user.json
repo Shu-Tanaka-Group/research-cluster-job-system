@@ -297,7 +297,7 @@
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_CJOB_DB}"
       },
-      "description": "DB 上で待機中のジョブ数（QUEUED + DISPATCHING + DISPATCHED）。0 なら投入したジョブはすぐ実行開始されます。",
+      "description": "DB 上で待機中のジョブ数（QUEUED + DISPATCHING + DISPATCHED）。予約枠に空きができ次第、実行されます。",
       "fieldConfig": {
         "defaults": {
           "color": {
