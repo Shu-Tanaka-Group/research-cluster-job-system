@@ -690,7 +690,7 @@
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_CJOB_DB}"
       },
-      "description": "Flavor ごとの実行中・リソース割当待ち（DISPATCHED）ジョブ数。",
+      "description": "Flavor ごとのキュー状態の内訳（実行中・リソース割当待ち・投入済み・保留中）。",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -754,7 +754,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT flavor AS \"Flavor\", COUNT(*) FILTER (WHERE status = 'RUNNING') AS \"実行中\", COUNT(*) FILTER (WHERE status = 'DISPATCHED') AS \"リソース割当待ち\", COUNT(*) FILTER (WHERE status = 'HELD') AS \"保留中\" FROM jobs WHERE status IN ('RUNNING', 'DISPATCHED', 'HELD') GROUP BY flavor ORDER BY flavor;",
+          "rawSql": "SELECT flavor AS \"Flavor\", COUNT(*) FILTER (WHERE status = 'RUNNING') AS \"実行中\", COUNT(*) FILTER (WHERE status = 'DISPATCHED') AS \"リソース割当待ち\", COUNT(*) FILTER (WHERE status = 'QUEUED') AS \"投入済み\", COUNT(*) FILTER (WHERE status = 'HELD') AS \"保留中\" FROM jobs WHERE status IN ('RUNNING', 'DISPATCHED', 'QUEUED', 'HELD') GROUP BY flavor ORDER BY flavor;",
           "refId": "A"
         }
       ],
