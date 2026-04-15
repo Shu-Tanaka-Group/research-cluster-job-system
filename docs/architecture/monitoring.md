@@ -109,14 +109,14 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | CPU 予約率 | Gauge | Prometheus | cpu の CPU 予約率（ジョブ要求合計 / クォータ上限） | green < 60%, yellow < 85%, red >= 85% |
 | CPU Sub 予約率 | Gauge | Prometheus | cpu-sub の CPU 予約率（ジョブ要求合計 / クォータ上限） | green < 60%, yellow < 85%, red >= 85% |
 | GPU 予約率 | Gauge | Prometheus | gpu の GPU 予約率（ジョブ要求合計 / クォータ上限） | green < 50%, yellow < 75%, red >= 75% |
-| 待機中ジョブ数 | Stat | PostgreSQL | DB 上の待機中ジョブ数（QUEUED + DISPATCHING + DISPATCHED） | green < 5, yellow < 20, red >= 20 |
-| リソース割当て待ち (P50) | Stat | Prometheus | Kueue の admission wait time の中央値（直近 1 時間） | green < 60s, yellow < 300s, red >= 300s |
+| リソース割当待ちジョブ数 | Stat | PostgreSQL | DB 上でリソース割当を待っているジョブ数（DISPATCHED） | green < 5, yellow < 20, red >= 20 |
+| リソース割当待ち (P50) | Stat | Prometheus | Kueue の admission wait time の中央値（直近 1 時間） | green < 60s, yellow < 300s, red >= 300s |
 
 #### Row 2: 現在のジョブ状況
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
-| ジョブ状態の内訳 | Pie chart | PostgreSQL | 直近 24 時間のジョブ状態内訳 |
+| ジョブ状態の内訳 | Pie chart | PostgreSQL | 直近 24 時間のジョブ状態内訳（DISPATCHING を除く） |
 | 実行中ジョブ数 | Stat | PostgreSQL | 全ユーザー合計の実行中ジョブ数 |
 | 成功率（直近 24 時間） | Stat | Prometheus | SUCCEEDED / (SUCCEEDED + FAILED) |
 | アクティブユーザー数 | Stat | PostgreSQL | RUNNING ジョブを持つユーザー（namespace）数 |
@@ -126,8 +126,8 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
-| Flavor 別キュー使用状況 | Table | PostgreSQL | flavor ごとの実行中・待機中・保留中ジョブ数 |
-| キュー内ジョブ数の推移 | Time series | Prometheus | 実行中（admitted_active）と待機中（pending）の推移 |
+| Flavor 別キュー使用状況 | Table | PostgreSQL | flavor ごとの実行中・リソース割当待ち・保留中ジョブ数 |
+| キュー内ジョブ数の推移 | Time series | Prometheus | 実行中（admitted_active）とリソース割当待ち（pending）の推移 |
 | ジョブ投入・完了の推移 | Time series (line) | Prometheus | 時間帯別の投入数と完了数 |
 
 #### Row 4: CPU Flavor の詳細
@@ -156,7 +156,7 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
-| リソース割当て待ち時間の推移 (P50 / P95) | Time series | Prometheus | Kueue の admission wait time のパーセンタイル推移 |
+| リソース割当待ち時間の推移 (P50 / P95) | Time series | Prometheus | Kueue の admission wait time のパーセンタイル推移 |
 | 最近のジョブ待ち時間 | Table | PostgreSQL | 直近 6 時間のジョブの実績待ち時間（started_at - created_at） |
 
 #### Row 8: 時間帯別の傾向
@@ -176,6 +176,31 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 Kueue v0.16.4 では `resource.Quantity.AsApproximateFloat64()` で変換されるため、メモリはバイト単位で報告される（例: `nominalQuota: "1000Gi"` → `1073741824000`）。
 
 使用率ゲージ（Row 1）は usage / quota の比率のため、分子・分母が同単位で相殺されるため変換不要。
+
+### 3.4 ジョブ状態の表示ポリシー
+
+ダッシュボードはユーザー向けのため、`jobs.status` の内部値をそのまま表示せず、以下の方針で変換する。
+
+| 内部状態 | UI 表記 | 備考 |
+|---|---|---|
+| QUEUED | 投入済み | cjob に投入済みで Dispatcher の処理を待っている状態。ジョブ状態の内訳 piechart のみで表示される |
+| DISPATCHING | （表示しない） | 通常 1 秒未満の過渡状態。滞留はユーザー向けの指標ではなく、管理者向け Prometheus アラートで検知する |
+| DISPATCHED | リソース割当待ち（piechart では「割当待ち」と短縮） | K8s/Kueue に登録済みで admission を待っている状態。ClusterQueue の nominalQuota に空きができ次第実行される |
+| RUNNING | 実行中 | |
+| HELD | 保留中 | |
+| SUCCEEDED / FAILED / CANCELLED / DELETING | 成功 / 失敗 / キャンセル / 削除中 | |
+
+**DISPATCHED のみをカウント対象とするパネル**:
+
+- 「リソース割当待ちジョブ数」（Row 1）
+- 「Flavor 別キュー使用状況」の「リソース割当待ち」列（Row 3）
+- 「キュー内ジョブ数の推移」の「リソース割当待ち」系列（Row 3、`kueue_pending_workloads` が DISPATCHED に対応）
+
+これらはクラスタの共有リソース（ClusterQueue の nominalQuota）に対する競合状況を示す指標である。QUEUED ジョブは Dispatcher により namespace 別に処理されるため、他ユーザーの QUEUED は自ユーザーの実行開始を直接ブロックしない。そのため cluster-wide な混雑指標からは QUEUED を除外する。
+
+**piechart のみで表示する状態**:
+
+「ジョブ状態の内訳」piechart は直近 24 時間のジョブ内訳を示す俯瞰指標のため、投入済み（QUEUED）・割当待ち（DISPATCHED）の両方を表示する。ただし DISPATCHING は上記の通り表示しない。
 
 ## 4. 主要クエリ
 
@@ -231,7 +256,7 @@ histogram_quantile(0.95, rate(kueue_admission_wait_time_seconds_bucket{cluster_q
 # 実行中ワークロード数
 kueue_admitted_active_workloads{cluster_queue="cjob-cluster-queue"}
 
-# 待機中ワークロード数
+# リソース割当待ちワークロード数（Kueue に登録済みで admission 待ち）
 sum(kueue_pending_workloads{cluster_queue="cjob-cluster-queue"})
 
 # CPU 使用量（コア）
@@ -262,12 +287,11 @@ WHERE status IN ('RUNNING', 'SUCCEEDED', 'FAILED')
 ORDER BY started_at DESC
 LIMIT 15;
 
--- ジョブ状態の内訳（直近 24 時間）
+-- ジョブ状態の内訳（直近 24 時間、DISPATCHING は除外）
 SELECT
   CASE status
-    WHEN 'QUEUED' THEN '待機中'
-    WHEN 'DISPATCHING' THEN '投入中'
-    WHEN 'DISPATCHED' THEN '実行待ち'
+    WHEN 'QUEUED' THEN '投入済み'
+    WHEN 'DISPATCHED' THEN '割当待ち'
     WHEN 'RUNNING' THEN '実行中'
     WHEN 'HELD' THEN '保留中'
     WHEN 'SUCCEEDED' THEN '成功'
@@ -279,18 +303,18 @@ SELECT
   COUNT(*) AS "件数"
 FROM jobs
 WHERE created_at >= NOW() - INTERVAL '24 hours'
+  AND status != 'DISPATCHING'
 GROUP BY status
 ORDER BY
   CASE status
     WHEN 'RUNNING' THEN 1
     WHEN 'QUEUED' THEN 2
     WHEN 'HELD' THEN 3
-    WHEN 'DISPATCHING' THEN 4
-    WHEN 'DISPATCHED' THEN 5
-    WHEN 'SUCCEEDED' THEN 6
-    WHEN 'FAILED' THEN 7
-    WHEN 'CANCELLED' THEN 8
-    WHEN 'DELETING' THEN 9
+    WHEN 'DISPATCHED' THEN 4
+    WHEN 'SUCCEEDED' THEN 5
+    WHEN 'FAILED' THEN 6
+    WHEN 'CANCELLED' THEN 7
+    WHEN 'DELETING' THEN 8
   END;
 
 -- 実行中ジョブ数
@@ -303,10 +327,10 @@ SELECT COUNT(DISTINCT namespace) AS "ユーザー数" FROM jobs WHERE status = '
 SELECT
   flavor AS "Flavor",
   COUNT(*) FILTER (WHERE status = 'RUNNING') AS "実行中",
-  COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED')) AS "待機中",
+  COUNT(*) FILTER (WHERE status = 'DISPATCHED') AS "リソース割当待ち",
   COUNT(*) FILTER (WHERE status = 'HELD') AS "保留中"
 FROM jobs
-WHERE status IN ('RUNNING', 'QUEUED', 'DISPATCHING', 'DISPATCHED', 'HELD')
+WHERE status IN ('RUNNING', 'DISPATCHED', 'HELD')
 GROUP BY flavor
 ORDER BY flavor;
 
