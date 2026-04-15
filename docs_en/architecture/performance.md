@@ -259,7 +259,7 @@ The current configuration (2 nodes, approximately 10 users) provides sufficient 
 | Large jobs stall in Kueue (starvation) | Gap-filling feature handles this automatically (implemented, see [dispatcher.md](dispatcher.md) §2.4). Adjust detection threshold with `GAP_FILLING_STALL_THRESHOLD_SEC` |
 | Jobs remain stuck as DISPATCHED due to insufficient ResourceQuota | ResourceQuota pre-check handles this automatically (implemented, see [dispatcher.md](dispatcher.md) §2.5). Adjust sync interval with `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` |
 | K8s API load becomes an issue | Consider adopting the Informer pattern (§3.3) |
-| Want to understand cluster utilization | Grafana monitoring dashboard (see [monitoring.md](monitoring.md), already implemented). Visualizes CPU/GPU reservation rates, waiting job counts, and estimated wait times |
+| Want to understand cluster utilization | Grafana monitoring dashboard (see [monitoring.md](monitoring.md), already implemented). Visualizes CPU/GPU reservation rates, jobs awaiting resource allocation, and estimated wait times |
 
 ## 6. Scaling Estimates
 

@@ -111,14 +111,14 @@ A summary row placed at the top of the dashboard. Allows understanding cluster s
 | CPU Reservation Rate | Gauge | Prometheus | CPU reservation rate for cpu flavor (total job requests / quota limit) | green < 60%, yellow < 85%, red >= 85% |
 | CPU Sub Reservation Rate | Gauge | Prometheus | CPU reservation rate for cpu-sub flavor (total job requests / quota limit) | green < 60%, yellow < 85%, red >= 85% |
 | GPU Reservation Rate | Gauge | Prometheus | GPU reservation rate for gpu flavor (total job requests / quota limit) | green < 50%, yellow < 75%, red >= 75% |
-| Waiting Jobs | Stat | PostgreSQL | Number of waiting jobs in DB (QUEUED + DISPATCHING + DISPATCHED) | green < 5, yellow < 20, red >= 20 |
+| Jobs Awaiting Resource Allocation | Stat | PostgreSQL | Number of jobs in DB waiting for resource allocation (DISPATCHED) | green < 5, yellow < 20, red >= 20 |
 | Resource Allocation Wait (P50) | Stat | Prometheus | Median Kueue admission wait time (last 1 hour) | green < 60s, yellow < 300s, red >= 300s |
 
 #### Row 2: Current Job Status
 
 | Panel | Type | DataSource | Content |
 |---|---|---|---|
-| Job Status Breakdown | Pie chart | PostgreSQL | Job status breakdown for the last 24 hours |
+| Job Status Breakdown | Pie chart | PostgreSQL | Job status breakdown for the last 24 hours (excluding DISPATCHING) |
 | Running Jobs | Stat | PostgreSQL | Total number of running jobs across all users |
 | Success Rate (Last 24 hours) | Stat | Prometheus | SUCCEEDED / (SUCCEEDED + FAILED) |
 | Active Users | Stat | PostgreSQL | Number of users (namespaces) with RUNNING jobs |
@@ -128,8 +128,8 @@ A summary row placed at the top of the dashboard. Allows understanding cluster s
 
 | Panel | Type | DataSource | Content |
 |---|---|---|---|
-| Queue Usage by Flavor | Table | PostgreSQL | Number of running, waiting, and held jobs per flavor |
-| Queue Job Count Over Time | Time series | Prometheus | Trend of running (admitted_active) and waiting (pending) jobs |
+| Queue Usage by Flavor | Table | PostgreSQL | Number of running, awaiting resource allocation, submitted, and held jobs per flavor |
+| Queue Job Count Over Time | Time series | Prometheus | Trend of running (admitted_active) and awaiting-resource-allocation (pending) jobs |
 | Job Submission and Completion Over Time | Time series (line) | Prometheus | Submission and completion counts by time period |
 
 #### Row 4: CPU Flavor Details
@@ -178,6 +178,36 @@ A summary row placed at the top of the dashboard. Allows understanding cluster s
 In Kueue v0.16.4, values are converted using `resource.Quantity.AsApproximateFloat64()`, so memory is reported in bytes (e.g., `nominalQuota: "1000Gi"` → `1073741824000`).
 
 Utilization gauges (Row 1) are ratios of usage / quota, so the numerator and denominator are in the same units and cancel out — no conversion needed.
+
+### 3.4 Job Status Display Policy
+
+Because the dashboard is user-facing, raw `jobs.status` values are not displayed directly. Instead they are translated as follows.
+
+| Internal status | UI label | Notes |
+|---|---|---|
+| QUEUED | Submitted | The job has been submitted to cjob and is waiting for Dispatcher processing |
+| DISPATCHING | (not displayed) | A transient state that usually lasts less than a second. Stalls in this state are not a user-facing indicator; they are detected by administrator-facing Prometheus alerts |
+| DISPATCHED | Awaiting Resource Allocation (abbreviated as "Allocation Wait" in the pie chart) | Registered with K8s/Kueue and waiting for admission. Runs as soon as capacity becomes available in the ClusterQueue's nominalQuota |
+| RUNNING | Running | |
+| HELD | Held | A QUEUED job that has been paused by the user with `cjob hold` |
+| SUCCEEDED / FAILED / CANCELLED / DELETING | Succeeded / Failed / Cancelled / Deleting | |
+
+Statuses counted by each panel:
+
+| Panel | Counted statuses | Purpose |
+|---|---|---|
+| Jobs Awaiting Resource Allocation (Row 1) | DISPATCHED only | Immediate indicator of resource contention |
+| Job Status Breakdown pie chart (Row 2) | QUEUED / DISPATCHED / RUNNING / HELD / terminal states | 24-hour overview (only DISPATCHING is excluded) |
+| Queue Usage by Flavor (Row 3) | QUEUED / DISPATCHED / RUNNING / HELD | Breakdown of queue state per flavor |
+| Queue Job Count Over Time (Row 3) | `kueue_admitted_active_workloads` and `kueue_pending_workloads` (≒ DISPATCHED) | Trend of resource contention |
+
+**Reason for excluding QUEUED from resource-contention indicators (Row 1 / Row 3 time series)**:
+
+"Jobs Awaiting Resource Allocation" and "Queue Job Count Over Time" represent contention against the ClusterQueue's nominalQuota, so they count DISPATCHED only. QUEUED jobs are processed per namespace by the Dispatcher, and another user's QUEUED jobs do not directly block the current user's execution, so they are not included in the cluster-wide congestion indicators.
+
+**Reason for including QUEUED / HELD in diagnostic views (Queue Usage by Flavor / Job Status Breakdown pie chart)**:
+
+These panels are not resource-contention indicators but diagnostic breakdown views showing how jobs are distributed across states. Queue Usage by Flavor is a table that provides a per-flavor overview of queue usage; if HELD is displayed then QUEUED must also be displayed to stay consistent with the job lifecycle. The Job Status Breakdown pie chart is an overview indicator of the distribution of all jobs in the last 24 hours. Both exclude only DISPATCHING (because it is a transient state).
 
 ## 4. Key Queries
 
@@ -233,7 +263,7 @@ histogram_quantile(0.95, rate(kueue_admission_wait_time_seconds_bucket{cluster_q
 # Number of running workloads
 kueue_admitted_active_workloads{cluster_queue="cjob-cluster-queue"}
 
-# Number of waiting workloads
+# Number of workloads awaiting resource allocation (registered with Kueue, waiting for admission)
 sum(kueue_pending_workloads{cluster_queue="cjob-cluster-queue"})
 
 # CPU usage (cores)
@@ -264,12 +294,11 @@ WHERE status IN ('RUNNING', 'SUCCEEDED', 'FAILED')
 ORDER BY started_at DESC
 LIMIT 15;
 
--- Job status breakdown (last 24 hours)
+-- Job status breakdown (last 24 hours, DISPATCHING excluded)
 SELECT
   CASE status
-    WHEN 'QUEUED' THEN 'Waiting'
-    WHEN 'DISPATCHING' THEN 'Dispatching'
-    WHEN 'DISPATCHED' THEN 'Pending execution'
+    WHEN 'QUEUED' THEN 'Submitted'
+    WHEN 'DISPATCHED' THEN 'Allocation Wait'
     WHEN 'RUNNING' THEN 'Running'
     WHEN 'HELD' THEN 'Held'
     WHEN 'SUCCEEDED' THEN 'Succeeded'
@@ -281,18 +310,18 @@ SELECT
   COUNT(*) AS "Count"
 FROM jobs
 WHERE created_at >= NOW() - INTERVAL '24 hours'
+  AND status != 'DISPATCHING'
 GROUP BY status
 ORDER BY
   CASE status
     WHEN 'RUNNING' THEN 1
     WHEN 'QUEUED' THEN 2
     WHEN 'HELD' THEN 3
-    WHEN 'DISPATCHING' THEN 4
-    WHEN 'DISPATCHED' THEN 5
-    WHEN 'SUCCEEDED' THEN 6
-    WHEN 'FAILED' THEN 7
-    WHEN 'CANCELLED' THEN 8
-    WHEN 'DELETING' THEN 9
+    WHEN 'DISPATCHED' THEN 4
+    WHEN 'SUCCEEDED' THEN 5
+    WHEN 'FAILED' THEN 6
+    WHEN 'CANCELLED' THEN 7
+    WHEN 'DELETING' THEN 8
   END;
 
 -- Number of running jobs
@@ -305,10 +334,11 @@ SELECT COUNT(DISTINCT namespace) AS "User count" FROM jobs WHERE status = 'RUNNI
 SELECT
   flavor AS "Flavor",
   COUNT(*) FILTER (WHERE status = 'RUNNING') AS "Running",
-  COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED')) AS "Waiting",
+  COUNT(*) FILTER (WHERE status = 'DISPATCHED') AS "Awaiting Resource Allocation",
+  COUNT(*) FILTER (WHERE status = 'QUEUED') AS "Submitted",
   COUNT(*) FILTER (WHERE status = 'HELD') AS "Held"
 FROM jobs
-WHERE status IN ('RUNNING', 'QUEUED', 'DISPATCHING', 'DISPATCHED', 'HELD')
+WHERE status IN ('RUNNING', 'DISPATCHED', 'QUEUED', 'HELD')
 GROUP BY flavor
 ORDER BY flavor;
 

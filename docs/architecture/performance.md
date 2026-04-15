@@ -257,7 +257,7 @@ sweep 機能の導入後、`MAX_QUEUED_JOBS_PER_NAMESPACE` や `DISPATCH_BUDGET_
 | 大きなジョブが Kueue で滞留する（starvation） | 隙間充填機能が自動で対処（実装済み、[dispatcher.md](dispatcher.md) §2.4 参照）。`GAP_FILLING_STALL_THRESHOLD_SEC` で検知閾値を調整 |
 | ResourceQuota 枠不足でジョブが DISPATCHED のまま滞留する | ResourceQuota プレチェックが自動で対処（実装済み、[dispatcher.md](dispatcher.md) §2.5 参照）。`RESOURCE_QUOTA_SYNC_INTERVAL_SEC` で同期間隔を調整 |
 | K8s API への負荷が問題になる | Informer パターンの採用を検討（§3.3） |
-| クラスタの利用状況を把握したい | Grafana モニタリングダッシュボード（[monitoring.md](monitoring.md) 参照、実装済み）。CPU/GPU 予約率・待機中ジョブ数・推定待ち時間を可視化 |
+| クラスタの利用状況を把握したい | Grafana モニタリングダッシュボード（[monitoring.md](monitoring.md) 参照、実装済み）。CPU/GPU 予約率・リソース割当待ちジョブ数・推定待ち時間を可視化 |
 
 ## 6. スケーリング推定
 

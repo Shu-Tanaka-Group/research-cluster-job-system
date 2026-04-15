@@ -297,7 +297,7 @@
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_CJOB_DB}"
       },
-      "description": "DB 上で待機中のジョブ数（QUEUED + DISPATCHING + DISPATCHED）。0 なら投入したジョブはすぐ実行開始されます。",
+      "description": "DB 上でリソース割当を待っているジョブ数（DISPATCHED）。ClusterQueue の予約枠に空きができ次第、順に実行されます。QUEUED（Dispatcher 処理待ち）は含みません。",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -352,11 +352,11 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT COUNT(*) AS \"待機中\" FROM jobs WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED');",
+          "rawSql": "SELECT COUNT(*) AS \"リソース割当待ち\" FROM jobs WHERE status = 'DISPATCHED';",
           "refId": "A"
         }
       ],
-      "title": "待機中ジョブ数",
+      "title": "リソース割当待ちジョブ数",
       "type": "stat"
     },
     {
@@ -422,7 +422,7 @@
           "refId": "A"
         }
       ],
-      "title": "リソース割当て待ち (P50)",
+      "title": "リソース割当待ち (P50)",
       "type": "stat"
     },
     {
@@ -451,15 +451,11 @@
         },
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "待機中" },
+            "matcher": { "id": "byName", "options": "投入済み" },
             "properties": [{ "id": "color", "value": { "fixedColor": "semi-dark-yellow", "mode": "fixed" } }]
           },
           {
-            "matcher": { "id": "byName", "options": "投入中" },
-            "properties": [{ "id": "color", "value": { "fixedColor": "light-blue", "mode": "fixed" } }]
-          },
-          {
-            "matcher": { "id": "byName", "options": "実行待ち" },
+            "matcher": { "id": "byName", "options": "割当待ち" },
             "properties": [{ "id": "color", "value": { "fixedColor": "light-blue", "mode": "fixed" } }]
           },
           {
@@ -514,7 +510,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT\n  CASE status\n    WHEN 'QUEUED' THEN '待機中'\n    WHEN 'DISPATCHING' THEN '投入中'\n    WHEN 'DISPATCHED' THEN '実行待ち'\n    WHEN 'RUNNING' THEN '実行中'\n    WHEN 'HELD' THEN '保留中'\n    WHEN 'SUCCEEDED' THEN '成功'\n    WHEN 'FAILED' THEN '失敗'\n    WHEN 'CANCELLED' THEN 'キャンセル'\n    WHEN 'DELETING' THEN '削除中'\n    ELSE status\n  END AS \"状態\",\n  COUNT(*) AS \"件数\"\nFROM jobs\nWHERE created_at >= NOW() - INTERVAL '24 hours'\nGROUP BY status\nORDER BY\n  CASE status\n    WHEN 'RUNNING' THEN 1\n    WHEN 'QUEUED' THEN 2\n    WHEN 'HELD' THEN 3\n    WHEN 'DISPATCHING' THEN 4\n    WHEN 'DISPATCHED' THEN 5\n    WHEN 'SUCCEEDED' THEN 6\n    WHEN 'FAILED' THEN 7\n    WHEN 'CANCELLED' THEN 8\n    WHEN 'DELETING' THEN 9\n  END;",
+          "rawSql": "SELECT\n  CASE status\n    WHEN 'QUEUED' THEN '投入済み'\n    WHEN 'DISPATCHED' THEN '割当待ち'\n    WHEN 'RUNNING' THEN '実行中'\n    WHEN 'HELD' THEN '保留中'\n    WHEN 'SUCCEEDED' THEN '成功'\n    WHEN 'FAILED' THEN '失敗'\n    WHEN 'CANCELLED' THEN 'キャンセル'\n    WHEN 'DELETING' THEN '削除中'\n    ELSE status\n  END AS \"状態\",\n  COUNT(*) AS \"件数\"\nFROM jobs\nWHERE created_at >= NOW() - INTERVAL '24 hours'\n  AND status != 'DISPATCHING'\nGROUP BY status\nORDER BY\n  CASE status\n    WHEN 'RUNNING' THEN 1\n    WHEN 'QUEUED' THEN 2\n    WHEN 'HELD' THEN 3\n    WHEN 'DISPATCHED' THEN 4\n    WHEN 'SUCCEEDED' THEN 5\n    WHEN 'FAILED' THEN 6\n    WHEN 'CANCELLED' THEN 7\n    WHEN 'DELETING' THEN 8\n  END;",
           "refId": "A"
         }
       ],
@@ -694,7 +690,7 @@
         "type": "grafana-postgresql-datasource",
         "uid": "${DS_CJOB_DB}"
       },
-      "description": "Flavor ごとの実行中・待機中ジョブ数。",
+      "description": "Flavor ごとのキュー状態の内訳（実行中・リソース割当待ち・投入済み・保留中）。",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -721,7 +717,7 @@
           {
             "matcher": {
               "id": "byRegexp",
-              "options": ".*待機中$"
+              "options": ".*リソース割当待ち$"
             },
             "properties": [
               {
@@ -758,7 +754,7 @@
         {
           "format": "table",
           "rawQuery": true,
-          "rawSql": "SELECT flavor AS \"Flavor\", COUNT(*) FILTER (WHERE status = 'RUNNING') AS \"実行中\", COUNT(*) FILTER (WHERE status IN ('QUEUED', 'DISPATCHING', 'DISPATCHED')) AS \"待機中\", COUNT(*) FILTER (WHERE status = 'HELD') AS \"保留中\" FROM jobs WHERE status IN ('RUNNING', 'QUEUED', 'DISPATCHING', 'DISPATCHED', 'HELD') GROUP BY flavor ORDER BY flavor;",
+          "rawSql": "SELECT flavor AS \"Flavor\", COUNT(*) FILTER (WHERE status = 'RUNNING') AS \"実行中\", COUNT(*) FILTER (WHERE status = 'DISPATCHED') AS \"リソース割当待ち\", COUNT(*) FILTER (WHERE status = 'QUEUED') AS \"投入済み\", COUNT(*) FILTER (WHERE status = 'HELD') AS \"保留中\" FROM jobs WHERE status IN ('RUNNING', 'DISPATCHED', 'QUEUED', 'HELD') GROUP BY flavor ORDER BY flavor;",
           "refId": "A"
         }
       ],
@@ -833,7 +829,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
-      "description": "実行中ワークロードと待機中ワークロードの推移。待機中が増加傾向なら混雑しています。",
+      "description": "実行中ワークロードとリソース割当待ちワークロードの推移。リソース割当待ちが増加傾向ならクラスタが混雑しています。",
       "fieldConfig": {
         "defaults": {
           "color": {
@@ -878,7 +874,7 @@
           {
             "matcher": {
               "id": "byName",
-              "options": "待機中"
+              "options": "リソース割当待ち"
             },
             "properties": [
               {
@@ -918,7 +914,7 @@
         },
         {
           "expr": "sum(kueue_pending_workloads{cluster_queue=\"cjob-cluster-queue\"})",
-          "legendFormat": "待機中",
+          "legendFormat": "リソース割当待ち",
           "refId": "B"
         }
       ],
@@ -1782,7 +1778,7 @@
           "refId": "B"
         }
       ],
-      "title": "リソース割当て待ち時間の推移 (P50 / P95)",
+      "title": "リソース割当待ち時間の推移 (P50 / P95)",
       "type": "timeseries"
     },
     {
