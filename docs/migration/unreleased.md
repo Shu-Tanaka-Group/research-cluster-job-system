@@ -1,27 +1,5 @@
 # 未リリース移行手順
 
-本ファイルは **次回リリース向け** の移行手順を記載する作業ファイルである。リリース時にバージョン名（例: `v1.14.0.md`）にリネームし、新しい `unreleased.md` を作成する（[versioning.md](../versioning.md) 参照）。
+本ファイルは **次回リリース向け** の移行手順を記載する作業ファイルである。リリース時にバージョン名（例: `v1.16.0.md`）にリネームし、新しい `unreleased.md` を作成する（[versioning.md](../versioning.md) 参照）。
 
 [標準移行手順](../migration.md) に加えて次回リリース固有の移行手順がある場合は以下に追記する。
-
-## Grafana ダッシュボードの再インポート
-
-ユーザー向けダッシュボード `k8s/base/grafana/dashboard-user.json` のパネル文言・SQL を以下の通り見直した。Grafana UI から再インポートが必要（[deployment.md](../deployment.md) §17.5 参照）。
-
-- 「待機中ジョブ数」→「リソース割当待ちジョブ数」にリネーム。集計対象を `QUEUED + DISPATCHING + DISPATCHED` から `DISPATCHED` のみに変更
-- 「Flavor 別キュー使用状況」: 「待機中」列を「リソース割当待ち」にリネームし集計対象を `DISPATCHED` のみに変更。さらに「投入済み」(`QUEUED`) 列を追加し、Flavor ごとのキュー状態を全アクティブ状態（QUEUED / DISPATCHED / RUNNING / HELD）で確認できるようにした
-- 「キュー内ジョブ数の推移」の「待機中」凡例を「リソース割当待ち」にリネーム
-- 「ジョブ状態の内訳」piechart で `DISPATCHING` を表示対象から除外。`QUEUED` を「投入済み」、`DISPATCHED` を「割当待ち」にリネーム
-- 「リソース割当て待ち (P50)」「リソース割当て待ち時間の推移 (P50 / P95)」の送り仮名「て」を削除（「リソース割当待ち」に統一）
-
-## ConfigMap への `NODE_BIN_PACKING_ENABLED` 追加
-
-Dispatcher に per-node bin-packing プレチェック（[dispatcher.md](../architecture/dispatcher.md) §2.6 参照）が追加された。`cjob-config` ConfigMap に新しいキー `NODE_BIN_PACKING_ENABLED`（デフォルト `"true"`）を追加すること。Dispatcher Deployment は `optional: true` で参照するため、キーが未設定でも Pydantic のデフォルト `true` が適用されるが、運用上の見通しを良くするため明示的に設定することを推奨する。
-
-無効化（従来動作）が必要な場合のみ `"false"` を設定する。無効化すると Kueue の flavor 単位 nominalQuota のみで admit するため、合計値では収まるが個別ノードに配置できないジョブが DISPATCHED のまま滞留する事象が再発する可能性がある。
-
-## Kubernetes 最低バージョン要件
-
-Watcher の RUNNING 判定が K8s Job の `status.ready` フィールド（`JobReadyPods` 機能）を参照するようになった。`JobReadyPods` が GA となる **Kubernetes v1.26 以上** を要件として明文化した（[prerequisites.md](../architecture/prerequisites.md) §1 参照）。
-
-v1.26 未満のクラスタにデプロイした場合、`status.ready` が常に未設定（None）となり、Watcher はジョブを RUNNING 状態に遷移させなくなる。アップグレード前にクラスタの K8s バージョンを確認すること。
