@@ -68,7 +68,9 @@ The Dispatcher alone cannot detect K8s Job completion / failure, so the Watcher 
    | `type: Complete, status: True` | `SUCCEEDED` | |
    | `type: Failed, status: True, reason: DeadlineExceeded` | `FAILED` | Set `last_error` to `"time limit exceeded"` |
    | `type: Failed, status: True` | `FAILED` | Includes Pod exit code non-zero / startup failures |
-   | No conditions / Pod is Running | `RUNNING` | On first RUNNING transition, record `started_at`, retrieve `node_name` from all Pods' `spec.nodeName` and record it, and add cumulative consumption to `namespace_daily_usage` (see [database.md](database.md) §5.2) |
+   | No conditions, `status.active > 0` and `status.ready > 0` | `RUNNING` | On first RUNNING transition, record `started_at`, retrieve `node_name` from all Pods' `spec.nodeName` and record it, and add cumulative consumption to `namespace_daily_usage` (see [database.md](database.md) §5.2) |
+
+   **Handling Pending Pods:** A K8s Job's `status.active` is the count of "pending and running pods which are not terminating", so a Job whose Pod stays Pending due to insufficient node resources still reports `active > 0`. To avoid misclassifying a Pending Pod as RUNNING, combine the check with `status.ready` (Pods whose `Ready` condition is True, provided by the `JobReadyPods` feature that reached GA in K8s 1.26) to confirm that at least one Pod actually has its containers running. cjob jobs do not define readiness probes, so the kubelet's default behavior sets Pod Ready to True once all containers are Running; thus `ready > 0` is equivalent to "at least one Pod's containers are Running". `status.ready` is already included in the `list_job_for_all_namespaces()` response, so no additional K8s API / etcd load is incurred (for the minimum K8s version requirement, see [prerequisites.md](prerequisites.md) §1).
 
    **Completion fallback (usage recording):** Jobs that complete within one scan cycle cannot be observed in RUNNING state by the Watcher, and transition directly from DISPATCHED to SUCCEEDED / FAILED. In this case `started_at` remains NULL, so on completion transition, if `started_at` is NULL, `_record_resource_usage` is called to add usage to `namespace_daily_usage`. `started_at` is kept NULL (since RUNNING was never actually observed). The same fallback applies to sweep jobs.
 
@@ -134,7 +136,7 @@ This ensures that sweeps with partially failed tasks are always treated as FAILE
 
 ### 4.3 Transition to RUNNING
 
-When the first Pod enters RUNNING (K8s Job's `status.active >= 1`), the DB is updated to RUNNING. `started_at` and `node_name` are recorded, same as for regular jobs.
+When the first Pod enters RUNNING (K8s Job's `status.active >= 1` and `status.ready >= 1`, same criterion as §3), the DB is updated to RUNNING. `started_at` and `node_name` are recorded, same as for regular jobs.
 
 ### 4.3.1 Recording node_name
 
@@ -168,7 +170,7 @@ Fields held by `LightK8sJob`:
 - `namespace`, `job_id` (extracted from `cjob.io/namespace` / `cjob.io/job-id` labels)
 - `name` (`metadata.name`)
 - `conditions` (`status.conditions` converted to a tuple of `(type, status, reason)`)
-- `active`, `succeeded`, `failed`, `completed_indexes`, `failed_indexes`
+- `active`, `ready`, `succeeded`, `failed`, `completed_indexes`, `failed_indexes`
 
 `V1Job` information beyond the above (Pod template, full labels, annotations, etc.) is not referenced during reconcile, so it is discarded at the moment of conversion to the lightweight representation. This reduces memory per retained object to roughly 1/10.
 

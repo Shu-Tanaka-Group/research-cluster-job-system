@@ -133,7 +133,7 @@ Kubernetes コントローラや Prometheus が使用するパターン。Watch 
 
 Prometheus は各 Pod の `/metrics` エンドポイントを直接 HTTP scrape する方式であり、K8s API はサービスディスカバリ（Pod 一覧の取得）にのみ使用する。Prometheus が K8s API に大きな負荷をかけないのは、メトリクスの取得先が K8s API ではなく各 Pod であることと、サービスディスカバリに Watch API（Informer パターン）を使用しているためである。
 
-Watcher が必要とする情報（Job の `status.conditions`、`status.active`）は K8s API にしか存在しないため、Prometheus のように Pod に直接問い合わせる方式は適用できない。Prometheus から学べる教訓は「Watch API / Informer パターンを使うことで K8s API への負荷を最小化できる」という点である。
+Watcher が必要とする情報（Job の `status.conditions`、`status.active`、`status.ready`）は K8s API にしか存在しないため、Prometheus のように Pod に直接問い合わせる方式は適用できない。Prometheus から学べる教訓は「Watch API / Informer パターンを使うことで K8s API への負荷を最小化できる」という点である。
 
 ## 4. K8s スケーラビリティの制約
 

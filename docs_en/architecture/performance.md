@@ -135,7 +135,7 @@ A pattern used by Kubernetes controllers and Prometheus. A superset of the Watch
 
 Prometheus directly HTTP-scrapes the `/metrics` endpoint of each Pod, using the K8s API only for service discovery (fetching the Pod list). Prometheus does not impose significant load on the K8s API because metric collection targets are Pods rather than the K8s API, and it uses the Watch API (Informer pattern) for service discovery.
 
-The information the Watcher needs (`status.conditions`, `status.active` of Jobs) exists only in the K8s API, so a Pod-direct query approach like Prometheus cannot be applied. The lesson from Prometheus is that "using the Watch API / Informer pattern can minimize load on the K8s API."
+The information the Watcher needs (`status.conditions`, `status.active`, `status.ready` of Jobs) exists only in the K8s API, so a Pod-direct query approach like Prometheus cannot be applied. The lesson from Prometheus is that "using the Watch API / Informer pattern can minimize load on the K8s API."
 
 ## 4. K8s Scalability Constraints
 

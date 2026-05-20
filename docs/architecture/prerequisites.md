@@ -4,7 +4,7 @@
 
 本システムは次の前提で構築する。
 
-- Kubernetes クラスタが存在する
+- Kubernetes クラスタが存在する（v1.26 以上。Watcher が Job 状態判定に使う `status.ready` フィールドは `JobReadyPods` 機能が GA となった v1.26 で安定提供される。[watcher.md](watcher.md) §3 参照）
 - ユーザーごとに namespace が分離されている（手動作成・スクリプトで自動化）
 - ユーザー namespace ごとに作業用 PVC が存在する
 - PVC の mount path はデフォルト `/home/jovyan` とし、ConfigMap の `WORKSPACE_MOUNT_PATH` で変更可能

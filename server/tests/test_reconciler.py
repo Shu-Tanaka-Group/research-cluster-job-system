@@ -35,14 +35,27 @@ def _light_condition(cond: V1JobCondition) -> LightJobCondition:
     )
 
 
-def _make_k8s_job(namespace, job_id, name, conditions=None, active=None):
-    """Build a LightK8sJob with the fields reconcile_cycle uses."""
+_UNSET = object()
+
+
+def _make_k8s_job(namespace, job_id, name, conditions=None, active=None, ready=_UNSET):
+    """Build a LightK8sJob with the fields reconcile_cycle uses.
+
+    When ``ready`` is not specified, it defaults to ``active`` so existing
+    call sites that mean "Pod is up and Running" with ``active=1`` continue
+    to work without rewriting every test (watcher.md §3 requires
+    active>0 AND ready>0 for the RUNNING transition). Pass ``ready=None``
+    explicitly to simulate a Job whose ready field is absent.
+    """
+    if ready is _UNSET:
+        ready = active
     return LightK8sJob(
         namespace=namespace,
         job_id=job_id,
         name=name,
         conditions=tuple(_light_condition(c) for c in (conditions or [])),
         active=active,
+        ready=ready,
         succeeded=None,
         failed=None,
         completed_indexes=None,
@@ -115,6 +128,18 @@ class TestReconcileStatusSync:
 
         job = db_session.get(Job, (NS, 1))
         assert job.node_name is None
+
+    def test_pending_pod_does_not_transition_to_running(self, mock_delete, mock_fetch_nodes, db_session):
+        """Pod が Pending のまま留まる Job は RUNNING に遷移しない (#202)."""
+        _insert_job(db_session, 1, status="DISPATCHED")
+        # active=1 だが ready=0 → スケジューリング不可で Pod は Pending
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=0)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "DISPATCHED"
+        assert job.started_at is None
 
     def test_node_name_recorded_on_succeeded_if_missed_running(self, mock_delete, mock_fetch_nodes, db_session):
         """If RUNNING was skipped, node_name should be recorded on SUCCEEDED."""
@@ -585,15 +610,22 @@ class TestReconcileResourceUsage:
 
 
 def _make_sweep_k8s_job(namespace, job_id, name, conditions=None, active=None,
-                         succeeded=None, failed=None,
+                         ready=_UNSET, succeeded=None, failed=None,
                          completed_indexes=None, failed_indexes=None):
-    """Build a LightK8sJob with sweep-specific status fields."""
+    """Build a LightK8sJob with sweep-specific status fields.
+
+    When ``ready`` is not specified, it defaults to ``active`` so existing
+    call sites continue to work (see ``_make_k8s_job`` for the rationale).
+    """
+    if ready is _UNSET:
+        ready = active
     return LightK8sJob(
         namespace=namespace,
         job_id=job_id,
         name=name,
         conditions=tuple(_light_condition(c) for c in (conditions or [])),
         active=active,
+        ready=ready,
         succeeded=succeeded,
         failed=failed,
         completed_indexes=completed_indexes,
@@ -987,7 +1019,7 @@ class TestTerminalStateRegressionGuard:
 
 
 def _raw_v1job(namespace, job_id, name, conditions=None, active=None,
-               succeeded=None, failed=None,
+               ready=None, succeeded=None, failed=None,
                completed_indexes=None, failed_indexes=None):
     """Build a raw V1Job (used to drive list_cjob_k8s_jobs via mocks)."""
     return V1Job(
@@ -1002,6 +1034,7 @@ def _raw_v1job(namespace, job_id, name, conditions=None, active=None,
         status=V1JobStatus(
             conditions=conditions,
             active=active,
+            ready=ready,
             succeeded=succeeded,
             failed=failed,
             completed_indexes=completed_indexes,
@@ -1120,6 +1153,7 @@ class TestLightK8sJobFromV1Job:
             "alice", 5, "cjob-alice-5",
             conditions=[V1JobCondition(type="Complete", status="True")],
             active=0,
+            ready=0,
             succeeded=1,
             failed=0,
             completed_indexes="0",
@@ -1136,8 +1170,36 @@ class TestLightK8sJobFromV1Job:
             LightJobCondition(type="Complete", status="True", reason=None),
         )
         assert light.active == 0
+        assert light.ready == 0
         assert light.succeeded == 1
         assert light.completed_indexes == "0"
+
+    def test_extracts_ready_field(self):
+        """status.ready is extracted from V1JobStatus."""
+        v1 = _raw_v1job(
+            "alice", 1, "cjob-alice-1",
+            active=3,
+            ready=2,
+        )
+
+        light = LightK8sJob.from_v1job(v1)
+
+        assert light is not None
+        assert light.active == 3
+        assert light.ready == 2
+
+    def test_ready_is_none_when_missing(self):
+        """status.ready falls back to None when absent (older K8s)."""
+        v1 = _raw_v1job(
+            "alice", 1, "cjob-alice-1",
+            active=1,
+        )
+
+        light = LightK8sJob.from_v1job(v1)
+
+        assert light is not None
+        assert light.active == 1
+        assert light.ready is None
 
     def test_returns_none_on_missing_labels(self):
         v1 = V1Job(metadata=V1ObjectMeta(name="x"), status=V1JobStatus())
