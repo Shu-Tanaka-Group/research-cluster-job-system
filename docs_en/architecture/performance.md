@@ -2,92 +2,92 @@
 
 # Performance Analysis
 
-## 1. Load Characteristics by Component
+## 1. Load Characteristics per Component
 
 | Component | Processing | Dominant Load Factor |
 |---|---|---|
-| Submit API | Receiving `cjob add`, DB INSERT, flavor validation | Job submission frequency. Stateless, horizontally scalable (via replicas). Flavor validation only references DB (`node_resources` / `flavor_quotas`) and is lightweight |
-| DB (PostgreSQL) | Read/write from all components (`jobs` / `namespace_daily_usage` / `node_resources` / `flavor_quotas` / `namespace_resource_quotas`, etc.) | Row count is small (hundreds to thousands), and indexes exist, so this rarely becomes an issue. Watcher resource sync adds UPSERTs, but frequency and row count are both minimal |
-| Dispatcher | DB scan → DRF sort → gap-filling filter → ResourceQuota pre-check → K8s Job creation | Number of K8s API calls. Serial execution means each cycle is rate-limited by processing time. Gap-filling and ResourceQuota pre-check only access the DB and do not trigger additional external I/O. Budget is managed per `(namespace, flavor)`, but the additional SQL cost (one additional `ROW_NUMBER()`, GROUP BY expanding from `namespace` to `namespace, flavor` in the `active` CTE) is negligible since the row count is on the order of tens |
-| Kueue | Admission decision → Pod scheduling | Rate-limited by Dispatcher's dispatch pace |
-| Watcher | K8s Job status monitoring → DB updates, node resource sync, nominalQuota sync, ResourceQuota sync | Job monitoring: proportional to polling interval and number of active jobs. Resource sync: node and nominalQuota synced at `NODE_RESOURCE_SYNC_INTERVAL_SEC` (300s) intervals; ResourceQuota synced at `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` (10s) intervals |
+| Submit API | Accepts `cjob add`, DB INSERT, flavor validation | Job submission frequency. Stateless and horizontally scalable (handled via replicas). Flavor validation only references the DB (`node_resources` / `flavor_quotas`) and is lightweight |
+| DB (PostgreSQL) | Reads/writes from all components (`jobs` / `namespace_daily_usage` / `node_resources` / `flavor_quotas` / `namespace_resource_quotas`, etc.) | Row counts are small (hundreds to thousands), and indexes are in place, so this is unlikely to be problematic. UPSERTs from the Watcher's resource synchronization add load, but both frequency and row counts are minimal |
+| Dispatcher | DB scan → DRF sort → gap-filling filter → ResourceQuota precheck → K8s Job creation | Number of K8s API calls. Since execution is serial, the cycle is bottlenecked by the time to process one cycle. Gap filling and ResourceQuota precheck only reference the DB and do not call the K8s API, so no additional external I/O is incurred. The budget is managed per `(namespace, flavor)`, but the additional SQL cost (one extra `ROW_NUMBER()`, GROUP BY of the `active` CTE going from `namespace` to `namespace, flavor`) is negligible since row counts are only a few dozen |
+| Kueue | Admit decisions → Pod scheduling | Bottlenecked by the Dispatcher's dispatch pace |
+| Watcher | Monitoring K8s Job state → DB updates, node resource sync, nominalQuota sync, ResourceQuota sync | Job monitoring: proportional to polling interval and number of active jobs. Resource sync: nodes and nominalQuota are synced every `NODE_RESOURCE_SYNC_INTERVAL_SEC` (300 seconds), and ResourceQuota is synced every `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` (10 seconds) |
 
 ## 2. Bottleneck Analysis
 
-### 2.1 Typical Research Workloads (Long-Running Job-Centric)
+### 2.1 Typical Research Compute Workload (Long-Running Jobs)
 
-When jobs primarily run for tens of minutes to hours, the **Dispatcher** tends to be the bottleneck.
+When jobs that run for tens of minutes to several hours dominate, the **Dispatcher** tends to become the bottleneck.
 
-- K8s Job creation is executed serially one at a time via `dispatch_one` (each call takes hundreds of milliseconds to seconds)
-- Maximum of `DISPATCH_BATCH_SIZE` (50) jobs per cycle
+- K8s Job creation is executed serially one at a time by `dispatch_one` (several hundred milliseconds to a few seconds per call)
+- Up to `DISPATCH_BATCH_SIZE` (50) items per cycle
 - Cycle interval `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` (10 seconds)
 
-At the current scale (approximately 10 concurrent active users), a throughput of 50 jobs/10 seconds is sufficient; even at 100 users, burst-time delays will be temporary and self-resolving (see §6.2).
+At the current scale (around 10 concurrently active users), throughput of 50 jobs / 10 seconds is sufficient. Even at a 100-user scale, temporary delays during bursts converge (see §6.2).
 
 **Improvement options (if needed):**
 
 | Method | Effect | Trade-off |
 |---|---|---|
-| Increase `DISPATCH_BATCH_SIZE` | More jobs processed per cycle | Instantaneous load on K8s API increases |
-| Reduce `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` | Shorter cycle interval | DB and K8s API polling frequency increases |
-| Parallelize K8s Job creation | Significantly improved throughput | Requires implementation changes; error handling becomes more complex |
+| Increase `DISPATCH_BATCH_SIZE` | More items processed per cycle | Increased instantaneous load on K8s API |
+| Shorten `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` | Shorter cycle interval | Increased polling frequency to DB and K8s API |
+| Parallelize K8s Job creation | Significantly improves throughput | Requires implementation changes; error handling becomes more complex |
 
-### 2.2 High-Frequency Short-Duration Job Workloads
+### 2.2 High-Frequency Short-Job Workload
 
-When jobs with a `time_limit` of a few minutes cycle rapidly in large numbers, the **Watcher** becomes the bottleneck.
+When many jobs with a `time_limit` of a few minutes cycle rapidly, the **Watcher** becomes the bottleneck.
 
-Because the job lifecycle cycles quickly, RUNNING → SUCCEEDED transitions occur at high frequency. If the Watcher's state detection is delayed, the following cascade occurs:
+Because the job lifecycle cycles quickly, RUNNING → SUCCEEDED transitions occur frequently. If the Watcher's state detection lags, the following chain of effects occurs:
 
 ```
 Watcher detection delay (up to 10 seconds)
-  → Jobs in DB remain as RUNNING
-  → Dispatcher's budget calculation overestimates active job count
+  → Jobs remain RUNNING in the DB
+  → Active job count is overestimated in the Dispatcher's budget calculation
   → New jobs are not dispatched
-  → Throughput degradation
+  → Throughput drops
 ```
 
 **Improvement options (if needed):**
 
 | Method | Effect | Trade-off |
 |---|---|---|
-| Reduce polling interval | Reduced detection delay (e.g., 3–5 seconds) | Increased load on K8s API |
-| Migration to Watch API | Instant detection of state changes; also reduces K8s API load | Requires connection management implementation (reconnection, resourceVersion) |
-| Adopting Informer pattern | Most efficient with Watch API + local cache | Complex implementation; Go (client-go) has more mature libraries than Python |
+| Shorten polling interval | Reduces detection delay (e.g., 3-5 seconds) | Increased load on K8s API |
+| Migrate to Watch API | Detects state changes immediately. Also reduces K8s API load | Requires implementing connection management (reconnection, resourceVersion) |
+| Adopt Informer pattern | Most efficient via Watch API + local cache | More complex implementation. Go (client-go) has more mature libraries than Python |
 
-Switching languages (Python → Go, etc.) alone would have little effect. The bottleneck is I/O (K8s API polling interval and network latency), not CPU processing speed.
+A language change (Python → Go, etc.) by itself has little effect. The bottleneck is not CPU processing speed but I/O (K8s API polling interval and network latency).
 
 ### 2.3 Watcher Resource Sync Overhead
 
-In addition to job monitoring, the Watcher periodically executes the following K8s API calls (see [watcher.md](watcher.md) §1.1–§1.3).
+In addition to job monitoring, the Watcher periodically calls the following K8s APIs (see [watcher.md](watcher.md) §1.1-§1.3):
 
 | Sync Target | Interval | K8s API Calls | Data Volume |
 |---|---|---|---|
-| Node resources (`node_resources`) | 300 seconds | `list_node()` × number of flavors + `list_pod_for_all_namespaces()` × 1 (for aggregating DaemonSet reservations) | flavor count × node count + full Pod list (hundreds of entries) |
-| nominalQuota (`flavor_quotas`) | 300 seconds | `get_cluster_custom_object()` × 1 | 1 ClusterQueue entry |
-| ResourceQuota (`namespace_resource_quotas`) | 10 seconds | `list_namespace()` + `list_resource_quota_for_all_namespaces()` | namespace count + ResourceQuota count (approx. 20 each) |
+| Node resources (`node_resources`) | 300 seconds | `list_node()` × number of flavors + `list_pod_for_all_namespaces()` × 1 (for DaemonSet reservation aggregation) | flavors × nodes + all Pods (a few hundred) |
+| nominalQuota (`flavor_quotas`) | 300 seconds | `get_cluster_custom_object()` × 1 | 1 ClusterQueue |
+| ResourceQuota (`namespace_resource_quotas`) | 10 seconds | `list_namespace()` + `list_resource_quota_for_all_namespaces()` | Number of namespaces + Number of ResourceQuotas (about 20 each) |
 
-Node resource and nominalQuota sync runs at 300-second intervals, so the load on the K8s API is nearly negligible. The `list_pod_for_all_namespaces()` call included in node resource sync retrieves the cluster-wide Pod list, so its response size is comparatively large, but the 300-second interval and its sole purpose of computing DaemonSet allocations keeps the impact small. ResourceQuota sync runs at 10-second intervals (the same cycle as the Watcher's main loop) with 2 API calls, but response sizes are small (a list of tens of namespaces) and lightweight compared to the job monitoring `list_job_for_all_namespaces()`.
+Since node resources and nominalQuota are synced every 300 seconds, the load on the K8s API is essentially negligible. The `list_pod_for_all_namespaces()` included in node resource sync has a relatively large response size because it retrieves all Pods in the cluster, but the impact is small because it runs only every 300 seconds and is used only for DaemonSet allocation calculation. ResourceQuota sync makes 2 API calls every 10 seconds (same cycle as the Watcher's main loop), but the response size is small (a list of dozens of namespaces) and is lightweight compared to `list_job_for_all_namespaces()` used for job monitoring.
 
-In addition to the periodic sync operations above, the Watcher invokes `list_namespaced_pod()` on demand triggered by job state transitions (on RUNNING transition, on terminal transitions, and on sweep index changes) to retrieve each Pod's `node_name` and reflect it in the DB. This cost is proportional to the number of active jobs and state transition frequency, so it is not negligible for high-frequency short-duration job workloads (§2.2) and is one of the Watcher's load factors.
+In addition to the above periodic sync, the Watcher calls `list_namespaced_pod()` on demand at job state transition opportunities (RUNNING transition, terminal transition, sweep index changes) to retrieve the Pod's `node_name` and reflect it in the DB. Because this cost is proportional to the number of active jobs and the frequency of state transitions, it is not negligible for high-frequency short-job workloads (§2.2) and becomes one of the Watcher's load factors.
 
-DB writes for all sync operations are UPSERTs (row count = node count, namespace count, or flavor count), around tens of rows, so load is negligible.
+DB writes are all UPSERTs (row count = number of nodes, namespaces, or flavors), and load is negligible since only a few dozen rows are involved.
 
-The likelihood of these sync operations becoming a bottleneck is extremely low at the current scale (approximately 10 users), and even at hundreds of users.
+The likelihood of these sync processes becoming a bottleneck is extremely low not only at the current scale (about 10 users) but also at the hundreds-of-users scale.
 
 ### 2.4 Watcher Memory Consumption
 
-On each reconcile cycle the Watcher retains K8s API responses and DB query results in memory. In particular, the results of `list_job_for_all_namespaces()` (tens of KB per Job) and `list_pod_for_all_namespaces()` (used for DaemonSet reservation aggregation) are the dominant factor that grows with cluster size. The 256Mi memory limit is sufficient up to a few hundred jobs, but becomes OOMKilled once the number of concurrent Jobs exceeds a few thousand.
+The Watcher retains K8s API responses and DB query results in memory during each reconcile cycle. In particular, the results of `list_job_for_all_namespaces()` (a few tens of KB per Job) and `list_pod_for_all_namespaces()` (used for DaemonSet reservation aggregation) are the major factors that grow proportionally with cluster scale. Up to hundreds of items, a 256Mi memory limit is sufficient, but Jobs concurrently existing in excess of several thousand cause OOMKilled.
 
-The following measures control the Watcher's resident memory (details in [watcher.md](watcher.md) §5).
+The following countermeasures control the Watcher's resident memory (see [watcher.md](watcher.md) §5 for details):
 
-| Measure | Target hotspot | Effect |
+| Countermeasure | Target Hotspot | Effect |
 |---|---|---|
-| K8s Job pagination + lightweight dataclass | `list_job_for_all_namespaces()` | Reduces per-object memory by roughly 1/10 and suppresses parse-time peak |
-| Per-page aggregation of DaemonSet Pods | `list_pod_for_all_namespaces()` (node_sync) | Never holds more than one page of Pod objects in memory |
-| Narrowed DB queries | DB reads in Step 2 / Step 8 | Load only Jobs corresponding to K8s Jobs, or only the columns needed for existence checks |
-| Per-namespace batching of `list_namespaced_pod()` | `node_name` recording during reconcile | API calls scale with namespace count, not Job count. At most one `V1PodList` is held at a time |
+| K8s Job pagination + lightweight dataclass conversion | `list_job_for_all_namespaces()` | Reduces memory per object to about 1/10, also suppresses parse-time peak |
+| DaemonSet Pod per-page aggregation | `list_pod_for_all_namespaces()` (node_sync) | Avoids retaining Pod lists larger than the page size in memory at once |
+| Narrowed DB query scope | DB reads in Step 2 / Step 8 | Read only Jobs corresponding to K8s Jobs, or only columns required for existence checks |
+| Per-namespace batching of `list_namespaced_pod()` | `node_name` recording during reconcile | API calls scale with namespace count, not Job count. At most one `V1PodList` held at a time |
 
-With these measures, the Watcher's peak memory usage is expected to stay under 256Mi up to roughly 5,000 concurrent Jobs (in practice the memory limit is set to 1Gi as an additional safety margin).
+With these countermeasures, the Watcher's peak memory usage is expected to stay below 256Mi up to about 5,000 concurrently existing Jobs (in actual operation, the memory limit is set to 1Gi as an additional safety margin).
 
 ## 3. Watch API and Informer Pattern
 
@@ -95,79 +95,79 @@ With these measures, the Watcher's peak memory usage is expected to stay under 2
 
 ```
 Watcher → K8s API: list_job_for_all_namespaces() (every 10 seconds)
-K8s API → Watcher: full list of all Jobs (fetched in full every time)
+K8s API → Watcher: List of all Jobs (full list each time)
 ```
 
-All entries are fetched every time even if nothing changed, so response size grows as the number of active jobs increases.
+Because all Jobs are retrieved every time even when there are no changes, the response size grows as the number of active jobs increases.
 
 ### 3.2 Watch API
 
-The K8s Watch API streams state-change events over an HTTP long connection.
+The K8s Watch API streams state-change events over HTTP long connections.
 
 ```
-Watcher → K8s API: watch (connect once)
-K8s API → Watcher: "Job A is now RUNNING" (event, immediate)
-K8s API → Watcher: "Job B is now Complete" (event, immediate)
+Watcher → K8s API: watch (single connection)
+K8s API → Watcher: "Job A became RUNNING" (event, immediate)
+K8s API → Watcher: "Job B became Complete" (event, immediate)
 ```
 
-- Instant detection of state changes (no polling delay)
-- Significantly reduced load on K8s API (only diffs received)
-- Recovery on connection drop (reconnect + re-list) must be implemented
+- Detects state changes immediately (no polling delay)
+- Significantly reduces load on K8s API (only differentials received)
+- Requires implementing recovery (reconnect + re-list) on connection disconnect
 
-Implementable using the Python `kubernetes` library's `watch.stream()`.
+Implementable with `watch.stream()` in Python's `kubernetes` library.
 
 ### 3.3 Informer Pattern
 
 A pattern used by Kubernetes controllers and Prometheus. A superset of the Watch API.
 
 ```
-1. On startup, fetch all entries via list → store in local cache
-2. Receive diff events via Watch API → update cache
-3. Logic operates against the cache (does not directly call K8s API)
-4. On connection drop, automatically re-list + resume Watch
+1. At startup, retrieve all items via list → save to local cache
+2. Receive differential events via Watch API → update cache
+3. Logic operates on the cache (without hitting the K8s API directly)
+4. On disconnect, automatically re-list and resume Watch
 ```
 
-- Minimal K8s API load (initial list + Watch only thereafter)
-- Local cache access has no network latency
-- Go's `client-go` library has the most mature implementation. The Python `kubernetes` library has a simplified Informer implementation, but it is less mature
+- Minimal load on K8s API (initial list + only Watch thereafter)
+- No network latency for local cache access
+- Go's `client-go` library has the most mature implementation. Python's `kubernetes` library also has a simple Informer implementation but is less mature
 
 ### 3.4 Comparison with Prometheus
 
-Prometheus directly HTTP-scrapes the `/metrics` endpoint of each Pod, using the K8s API only for service discovery (fetching the Pod list). Prometheus does not impose significant load on the K8s API because metric collection targets are Pods rather than the K8s API, and it uses the Watch API (Informer pattern) for service discovery.
+Prometheus directly HTTP-scrapes the `/metrics` endpoint of each Pod, using the K8s API only for service discovery (retrieving the Pod list). The reason Prometheus does not place heavy load on the K8s API is that metric fetches go to each Pod (not the K8s API), and service discovery uses the Watch API (Informer pattern).
 
-The information the Watcher needs (`status.conditions`, `status.active`, `status.ready` of Jobs) exists only in the K8s API, so a Pod-direct query approach like Prometheus cannot be applied. The lesson from Prometheus is that "using the Watch API / Informer pattern can minimize load on the K8s API."
+The information the Watcher needs (Job's `status.conditions`, `status.active`, `status.ready`) exists only in the K8s API, so Prometheus's approach of querying Pods directly cannot be applied. The lesson from Prometheus is: "Using the Watch API / Informer pattern can minimize the load on the K8s API."
 
 ## 4. K8s Scalability Constraints
 
-### 4.1 The Core Bottleneck
+### 4.1 Essence of the Bottleneck
 
-What limits CJob's scalability is not the Dispatcher or Watcher, but the **number of Job objects simultaneously existing on K8s**. Because each K8s Job stores one Job object + one Pod object in etcd, increasing the number of simultaneously existing objects causes the following issues:
+What limits CJob's scalability is not the Dispatcher or Watcher, but the **number of Job objects that simultaneously exist on K8s**. Each K8s Job stores a Job object and a Pod object in etcd, so as the number of concurrently existing objects grows, the following become problems:
 
-| Factor | Impact | Horizontal Scalability |
+| Factor | Impact | Scale-out Feasibility |
 |---|---|---|
-| etcd write load | Job/Pod creation and state updates are all writes to etcd | Cannot be improved by adding nodes due to Raft consensus requirement |
-| kube-controller-manager (Job controller) | Handles state transitions for all Jobs | Single leader; cannot scale out |
-| Kueue controller | Handles admission decisions for all Workloads | Single leader; cannot scale out |
-| kube-apiserver | Handles list/watch requests | Horizontally scalable by adding replicas |
+| etcd write load | Job/Pod creation and state updates are all writes to etcd | Cannot be improved by adding nodes due to Raft consensus |
+| kube-controller-manager (Job controller) | Processes state transitions for all Jobs | Cannot scale out due to single-leader |
+| Kueue controller | Admission decisions for all Workloads | Cannot scale out due to single-leader |
+| kube-apiserver | Processes list/watch requests | Horizontally scalable by adding replicas |
 
-While kube-apiserver can be addressed by adding replicas, etcd writes and single-leader controllers cannot scale out, making **the maximum number of simultaneously existing Jobs a structural constraint of K8s**.
+While kube-apiserver can be scaled by increasing replica count, etcd writes and single-leader controllers cannot scale out, so the **upper limit on concurrently existing Job count is a structural constraint of K8s**.
 
-### 4.2 Estimating Simultaneously Existing Job Count
+### 4.2 Estimating Concurrently Existing Job Count
 
-The number of Job objects simultaneously existing on K8s is the sum of active Jobs and completed Jobs awaiting TTL expiration.
+The number of Job objects existing simultaneously on K8s is the sum of active Jobs and TTL-pending completed Jobs.
 
-Since budget is applied per `(namespace, flavor)`, the maximum active Job count per user is `DISPATCH_BUDGET_PER_NAMESPACE × number of flavors`.
+Since budget is per `(namespace, flavor)`, the max active Job count per user is `DISPATCH_BUDGET_PER_NAMESPACE × number of flavors`.
 
 ```
-Simultaneous Job count = (concurrent active users × DISPATCH_BUDGET_PER_NAMESPACE × number of flavors)
-                       + (completed Jobs within TTL window)
+Concurrently existing Jobs = (concurrent active users × DISPATCH_BUDGET_PER_NAMESPACE × flavor count)
+                           + (completed Jobs within TTL window)
 ```
 
-Shortening `ttlSecondsAfterFinished` (300 seconds = 5 minutes) reduces the backlog of completed Jobs, but does not affect active Job count. The table below estimates active Job count only; see §6.2 for the actual simultaneous count including TTL-pending completed Jobs.
+Shortening `ttlSecondsAfterFinished` (300 seconds = 5 minutes) reduces the retention of completed Jobs but does not affect the active Job count. The table below shows estimates of active Jobs only; the actual concurrent existence including TTL-pending completed Jobs is analyzed in §6.2.
 
-**Theoretical maximum** (all users simultaneously using all flavors up to budget limit):
+**Theoretical maximum** (when all users use all flavors up to the budget cap simultaneously):
 
-| Concurrent Active Users | Flavors | Budget/Flavor | Active Jobs (Max) | Safety |
+| Concurrent active users | flavors | budget/flavor | active Jobs (max) | Safety |
 |---|---|---|---|---|
 | 10 | 2 | 32 | 640 | Comfortable |
 | 20 | 2 | 32 | 1,280 | Comfortable |
@@ -175,103 +175,104 @@ Shortening `ttlSecondsAfterFinished` (300 seconds = 5 minutes) reduces the backl
 | 100 | 2 | 32 | 6,400 | Risk of exceeding |
 | 150 | 2 | 32 | 9,600 | Exceeds limit |
 
-**Real-world expectation**: In research computing, the majority of users run only CPU jobs, and users simultaneously using GPU up to the budget limit are limited. If α represents the effective active coefficient per user (budget occupancy across all flavors), then effective active Job count = `user count × 32 × flavor count × α`. An α of 0.5–0.7 is a realistic expectation; with 2 flavors, the effective estimate per user is approximately 32–45 jobs. Additionally, ResourceQuota (`count/jobs.batch`) acts as a per-namespace safety valve, preventing dispatch from exceeding the theoretical limit (see [dispatcher.md](dispatcher.md) §2.5).
+**Practical expectation**: In research computing, the majority of users run only CPU jobs, and users who saturate the GPU budget simultaneously are limited. If we let α be the effective active coefficient per user (budget occupancy across all flavors), effective active Jobs = `users × 32 × flavors × α`. α = 0.5-0.7 is realistic, and with 2 flavors, this works out to roughly 32-45 jobs per user. Additionally, ResourceQuota (`count/jobs.batch`) acts as a per-namespace safety valve, preventing dispatches that exceed the theoretical limit (see [dispatcher.md](dispatcher.md) §2.5).
 
-The practical upper limit for simultaneously existing Jobs in a standard K8s setup is approximately 5,000–10,000.
+In a standard K8s configuration, the practical upper limit is around 5,000-10,000 concurrently existing Jobs.
 
 ### 4.3 Improvement from Watch API Migration
 
-Migrating to the Watch API eliminates the full-fetch `list_job_for_all_namespaces()` calls from the Watcher, significantly reducing read load on the API Server and etcd. However, the core bottleneck—etcd write load and single-leader controller processing capacity—is not improved.
+Migrating to the Watch API eliminates the Watcher's full-list retrieval via `list_job_for_all_namespaces()`, significantly reducing the read load on API Server and etcd. However, the essential bottlenecks—etcd write load and the processing capacity of single-leader controllers—do not improve.
 
-Migration to the Watch API is expected to extend the maximum concurrent active user count by roughly 1.5x, but improvements of 2x or more should not be expected (see also §6.5 for combined effects).
+Watch API migration is expected to extend the upper limit of concurrent active users by about 1.5x, but improvements of 2x or more cannot be expected (see also §6.5 for combined effects).
 
-### 4.4 Comparison with Supercomputer Job Schedulers
+### 4.4 Comparison with HPC Job Schedulers
 
-The reason schedulers like Slurm can handle large numbers of jobs is that the architecture is fundamentally different.
+The reason supercomputer schedulers such as Slurm can handle massive numbers of jobs is that their architectures are fundamentally different.
 
-| | Supercomputer (Slurm, etc.) | CJob (K8s) |
+| | HPC (Slurm, etc.) | CJob (K8s) |
 |---|---|---|
-| Overhead per job | 1 record in memory | Job + Pod objects in etcd |
-| Execution start | Directly fork/exec process | Pod creation → container runtime startup |
+| Per-job overhead | 1 in-memory record | Job + Pod objects in etcd |
+| Execution start | Direct fork/exec of process | Pod creation → container runtime startup |
 | Scheduling | Scheduler directly assigns nodes | Dispatcher → K8s Job → Kueue → kube-scheduler → kubelet |
-| Bulk task approach | Job array (1 entry = tens of thousands of tasks) | Indexed Job (used with `cjob sweep`, see §4.6). However, per-task overhead is larger than Slurm's job arrays |
+| Mass task mechanism | job array (1 record = tens of thousands of tasks) | Indexed Job (used by `cjob sweep`, see §4.6). However, per-task overhead is larger than Slurm's job array |
 
-In supercomputers, the per-job overhead is orders of magnitude smaller, so parameter sweeps of 1 core × 10,000 jobs are routine. K8s is designed as a general-purpose container orchestration system and is fundamentally ill-suited for workloads involving large numbers of short-lived jobs cycling rapidly.
+In supercomputers, the overhead per job is orders of magnitude smaller, so parameter sweeps of 1 core × 10,000 jobs are routinely executed. K8s is designed as a general-purpose container orchestration system and is inherently unsuited for use cases that rapidly cycle large numbers of short-lived jobs.
 
-### 4.5 Reducing etcd Load with 1-Job-N-Pod Configuration
+### 4.5 Reducing etcd Load with 1 Job N Pod Configuration
 
-K8s `batch/v1 Job` allows multiple Pods to be executed incrementally from a single Job object via the `completions` and `parallelism` fields. For example, with `completions: 100, parallelism: 10`, up to 10 Pods run simultaneously, and as each one completes, the next Pod starts, repeating until 100 total completions.
+K8s's `batch/v1 Job` can execute multiple Pods in stages from a single Job object via the `completions` and `parallelism` fields. For example, with `completions: 100, parallelism: 10`, up to 10 Pods run simultaneously, and each time one completes, the next Pod starts, repeating until 100 complete in total.
 
-This can significantly reduce the number of Job objects in etcd (100 tasks represented as 1 Job instead of 100 Jobs). However, the following challenges exist:
+This can significantly reduce the number of Job objects in etcd (100 tasks expressed as 1 Job rather than 100 Jobs). However, there are the following challenges:
 
-| Challenge | Details |
+| Challenge | Description |
 |---|---|
-| Command branching | All Pods share the same container spec; Indexed Job (`completionMode: Indexed`) must be used, with logic inside the Pod to branch commands based on the index |
-| Failure isolation | If `backoffLimit` is reached, the entire Job fails; individual task success/failure cannot be handled independently |
-| time_limit granularity | `activeDeadlineSeconds` applies to the entire Job; different time_limits cannot be set per task |
-| Log separation | A mechanism to separate logs for multiple tasks within 1 Job is needed |
-| Cancellation granularity | Individual tasks cannot be cancelled independently |
-| Kueue admission | Kueue attempts to reserve resources for all `parallelism` Pods at once during admission, so incremental admission per Pod does not occur |
+| Command branching | Since all Pods share the same container spec, a mechanism is needed to use Indexed Job (`completionMode: Indexed`) and branch commands within the Pod by index |
+| Failure isolation | If `backoffLimit` is reached, the entire Job becomes Failed. Cannot treat individual task success/failure independently |
+| time_limit granularity | `activeDeadlineSeconds` applies to the entire Job. Cannot set a different time_limit per task |
+| Log separation | A mechanism is needed to separate logs for multiple tasks within a single Job |
+| Cancel granularity | Individual tasks cannot be canceled independently |
+| Kueue admit | Since Kueue tries to reserve resources for the full `parallelism` at admit time, individual Pods cannot be admitted incrementally |
 
-Due to these challenges, applying the 1-Job-N-Pod configuration generically is difficult; it is appropriate to limit it to groups of tasks with the same spec and same `time_limit`, such as parameter sweeps.
+Due to these challenges, applying the 1 Job N Pod configuration generally is difficult, and limiting it to task groups with identical specs and identical time_limit (such as parameter sweeps) is reasonable.
 
 ### 4.6 Load Reduction via Parameter Sweep Feature
 
-The parameter sweep feature equivalent to supercomputer job arrays is implemented as `cjob sweep` (see [cli.md](cli.md) §3, [api.md](api.md) §2.1, [dispatcher.md](dispatcher.md) §3, [watcher.md](watcher.md) §4). It uses K8s Indexed Job (`completionMode: Indexed`) to run large numbers of small tasks with fewer Job objects.
+The parameter sweep feature, equivalent to HPC job arrays, is implemented as `cjob sweep` (see [cli.md](cli.md) §3, [api.md](api.md) §2.1, [dispatcher.md](dispatcher.md) §3, [watcher.md](watcher.md) §4). It uses K8s Indexed Job (`completionMode: Indexed`) to execute large numbers of small tasks with a smaller number of Job objects.
 
-**Realized benefits:**
+**Realized effects:**
 
-- Reduction in Job objects in etcd (e.g., 1,000 tasks → 1 Job)
-- Only 1 `dispatch_budget` consumed, allowing efficient use of budget slots
-- Fewer Workloads submitted to Kueue, reducing admission processing load
-- `backoffLimitPerIndex: 0` prevents individual task failures from propagating to the entire Job
+- Reduces the number of Job objects in etcd (e.g., 1,000 tasks → 1 Job)
+- Consumes only 1 `dispatch_budget` slot, so budget can be used efficiently
+- Reduces the number of Workloads sent to Kueue, lightening admission processing
+- `backoffLimitPerIndex: 0` prevents individual task failures from cascading to the entire Job
 
 **Performance characteristics:**
 
-- For Indexed Jobs, the K8s Job controller creates Pods incrementally, so the Dispatcher only needs 1 K8s API call
-- The Watcher retrieves `status.completedIndexes` / `status.failedIndexes` each polling cycle to update the DB. Even with many tasks, polling load is equivalent to regular jobs (just reading the status of 1 Job object)
-- If the `parallelism` value is large, Kueue may attempt to reserve a large amount of resources at once, potentially increasing wait time until admission
+- Since Indexed Job is created in stages by the K8s Job controller, the Dispatcher's K8s API call is only one
+- The Watcher reads `status.completedIndexes` / `status.failedIndexes` each polling cycle and updates the DB. Even with a large number of tasks, polling load is on par with regular jobs (only reading the status of 1 Job object)
+- If `parallelism` is large, Kueue tries to reserve a large amount of resources at once, which can lengthen the wait time until admit
 
 **Incentive design:**
 
-After introducing the sweep feature, reducing `MAX_QUEUED_JOBS_PER_NAMESPACE` and `DISPATCH_BUDGET_PER_NAMESPACE` creates an incentive to use sweep rather than individual submissions. With sweep, hundreds of tasks can be represented within a single submission slot, so even with stricter submission limits, the user's effective capacity does not decrease.
+After introducing the sweep feature, lowering `MAX_QUEUED_JOBS_PER_NAMESPACE` and `DISPATCH_BUDGET_PER_NAMESPACE` creates an incentive to use sweep over individual submission. Since one submission slot in sweep can represent hundreds of tasks, even with stricter submission limits, the user's effective capacity does not decrease.
 
-The order of introduction is important: the sweep feature must be implemented first, and submission limit reductions come after. Lowering limits before the sweep feature exists simply makes things inconvenient for users.
+The order of introduction is important: the sweep feature must be implemented first, and submission limits lowered afterwards. Lowering the limits without the sweep feature would simply inconvenience users.
 
 ### 4.7 Scalability Improvement via dispatch_budget Reduction
 
-In environments with many concurrent active users, reducing `DISPATCH_BUDGET_PER_NAMESPACE` can suppress the number of simultaneously existing Jobs.
+In environments with a large number of concurrent active users, lowering `DISPATCH_BUDGET_PER_NAMESPACE` can suppress the number of concurrently existing Jobs.
 
-In environments with many active users, it is not necessary for a single user to monopolize the entire cluster; fair sharing is the normal operational model. Therefore, lowering dispatch_budget does not mean a reduction in resource utilization efficiency.
+In environments with many active users, there is no need for one user to monopolize the entire cluster; sharing fairly is the normal operational mode. Therefore, lowering dispatch_budget does not mean reduced resource utilization efficiency.
 
-However, during periods when active users are few, a low dispatch_budget may prevent a single user from fully utilizing the cluster, resulting in idle resources. This can be addressed with dynamic adjustment of dispatch_budget based on the number of active users, but this increases implementation complexity.
+However, during times with few active users, a low dispatch_budget means a single user cannot fully utilize the cluster, leading to idle resources. This issue can be addressed by dynamic adjustment of dispatch_budget based on the active user count, but it adds implementation complexity.
 
 ## 5. Current Recommendations
 
-The current configuration (2 nodes, approximately 10 users) provides sufficient performance with the polling approach. In an operation where nodes are added proportionally to the number of users, computational resources themselves continue to scale, but there is an upper limit on the number of concurrent active users due to K8s structural constraints (see §6). Consider improvements when the following situations arise:
+In the current configuration (2 nodes, ~10 users), the polling approach provides sufficient performance. In an operation where node count grows in proportion to users, compute resources themselves continue to scale, but the structural constraints of K8s impose an upper limit on the number of concurrent active users (see §6). Improvements should be considered if the following situations arise:
 
 | Situation | Response |
 |---|---|
-| Dispatch of QUEUED jobs cannot keep up | Increase `DISPATCH_BATCH_SIZE`, reduce cycle interval |
-| Short-job rotation is slow | Shorten Watcher polling interval, consider Watch API migration (§4.3) |
-| Increasing number of concurrent active users | Lower `DISPATCH_BUDGET_PER_NAMESPACE` (§4.7), Watch API migration (§4.3) |
-| Large number of small tasks (parameter sweep) | Use `cjob sweep` (§4.6, already implemented). Control load by adjusting completions / parallelism |
-| Large jobs stall in Kueue (starvation) | Gap-filling feature handles this automatically (implemented, see [dispatcher.md](dispatcher.md) §2.4). Adjust detection threshold with `GAP_FILLING_STALL_THRESHOLD_SEC` |
-| Jobs remain stuck as DISPATCHED due to insufficient ResourceQuota | ResourceQuota pre-check handles this automatically (implemented, see [dispatcher.md](dispatcher.md) §2.5). Adjust sync interval with `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` |
-| K8s API load becomes an issue | Consider adopting the Informer pattern (§3.3) |
-| Want to understand cluster utilization | Grafana monitoring dashboard (see [monitoring.md](monitoring.md), already implemented). Visualizes CPU/GPU reservation rates, jobs awaiting resource allocation, and estimated wait times |
+| QUEUED jobs cannot keep up with dispatching | Increase `DISPATCH_BATCH_SIZE`, shorten cycle interval |
+| Short jobs cycle too slowly | Shorten Watcher polling interval, consider migrating to Watch API (§4.3) |
+| Increase in concurrent active users | Lower `DISPATCH_BUDGET_PER_NAMESPACE` (§4.7), migrate to Watch API (§4.3) |
+| Many small tasks (parameter sweep) | Use `cjob sweep` (§4.6, already implemented). Tune completions / parallelism to control load |
+| Large jobs stall in Kueue (starvation) | Gap-filling feature handles this automatically (already implemented, see [dispatcher.md](dispatcher.md) §2.4). Adjust the detection threshold via `GAP_FILLING_STALL_THRESHOLD_SEC` |
+| Jobs stagnate in DISPATCHED due to insufficient ResourceQuota | ResourceQuota precheck handles this automatically (already implemented, see [dispatcher.md](dispatcher.md) §2.5). Adjust the sync interval via `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` |
+| Jobs stagnate in DISPATCHED because they fit total quota but cannot be placed on any single node | per-node bin-packing precheck handles this automatically (already implemented, see [dispatcher.md](dispatcher.md) §2.6). Toggle on/off via `NODE_BIN_PACKING_ENABLED` |
+| K8s API load becomes a problem | Consider adopting the Informer pattern (§3.3) |
+| Want to understand cluster utilization | Grafana monitoring dashboard (see [monitoring.md](monitoring.md), already implemented). Visualizes CPU/GPU reservation rates, count of jobs waiting for resource allocation, and estimated wait times |
 
 ## 6. Scaling Estimates
 
-### 6.1 Assumptions
+### 6.1 Preconditions
 
 | Item | Value |
 |---|---|
 | CPU per node | 128 cores |
 | Memory per node | 500Gi |
-| Current node count | 2 (approximately 10 users) |
-| Node expansion policy | Increases proportionally to user count |
-| Number of flavors | 2 (cpu, gpu) |
+| Current node count | 2 (about 10 users) |
+| Node scaling policy | Increases proportionally to user count |
+| Flavor count | 2 (cpu, gpu) |
 | DISPATCH_BUDGET_PER_NAMESPACE | 32 (applied per flavor) |
 | DISPATCH_BATCH_SIZE | 50 |
 | DISPATCH_ROUND_SIZE | 1 |
@@ -283,117 +284,117 @@ The current configuration (2 nodes, approximately 10 users) provides sufficient 
 | NODE_RESOURCE_SYNC_INTERVAL_SEC | 300 seconds (5 minutes) |
 | RESOURCE_QUOTA_SYNC_INTERVAL_SEC | 10 seconds |
 
-Since node count increases proportionally to user count, CPU and memory computational resources always scale. The analysis below focuses on structural constraints beyond resources.
+Since node count scales with user count, compute resources (CPU/memory) always scale. The following analyzes structural constraints other than resources.
 
-### 6.2 Upper Limit Estimates by Bottleneck
+### 6.2 Upper Limit Estimates per Bottleneck
 
-#### K8s Simultaneous Job Count (Most Dominant Constraint)
+#### K8s Concurrent Job Count (most dominant constraint)
 
-As described in §4.1, what limits K8s scalability is the number of Job objects simultaneously existing. Adding nodes does not improve etcd write load or the single-leader controller-manager.
+As described in §4.1, what limits K8s scalability is the number of concurrently existing Job objects. Adding nodes does not improve etcd write load or the single-leader controller-manager.
 
-The simultaneous Job count is the sum of active Jobs and completed Jobs awaiting TTL expiration. With `ttlSecondsAfterFinished = 300s` (5 minutes), `count/jobs.batch = 50`, and 2 flavors:
+The number of concurrently existing Jobs is the sum of active Jobs and TTL-pending completed Jobs. With `ttlSecondsAfterFinished = 300s` (5 minutes), `count/jobs.batch = 50`, and 2 flavors:
 
 ```
-Simultaneous Jobs/user = active Jobs + TTL-pending completed Jobs
-Max active Jobs/user = DISPATCH_BUDGET_PER_NAMESPACE × number of flavors = 32 × 2 = 64
-TTL-pending completed Jobs = completion rate × TTL = (active / avg execution time) × 300
+Concurrent Jobs/user = active Jobs + TTL-pending completed Jobs
+Max active Jobs/user = DISPATCH_BUDGET_PER_NAMESPACE × flavor count = 32 × 2 = 64
+TTL-pending completed Jobs = completion rate × TTL = (active / avg run time) × 300
 ```
 
-Since budget is independent per flavor, the theoretical maximum active Job count per user is 64 (= 32 × 2 flavors). However, in research computing, the majority of users are CPU-job-centric, and cases where both CPU and GPU are simultaneously used up to budget limits are limited. The table below shows effective active counts by workload.
+Since the budget is independent per flavor, the theoretical max active Job count per user is 64 (= 32 × 2 flavors). However, in research computing, the majority of users center on CPU jobs, and cases where both CPU and GPU are simultaneously used up to their budget caps are limited. The table below shows the effective active count by workload.
 
-| Workload | Effective Active | TTL-pending | Total/User | At 100 Users |
+| Workload | Effective active | TTL-pending | Total/user | At 100 users |
 |---|---|---|---|---|
 | CPU only (avg 2h) | 32 | 1.3 | 33.3 | 3,330 |
 | CPU only (avg 30m) | 32 | 5.3 | 37.3 | 3,730 |
-| CPU + GPU mixed (avg 2h) | 48 (※1) | 2.0 | 50 → capped by Quota | 5,000 |
-| Short CPU only (avg 5m) | 32 | 32 | 64 → capped by Quota 50 | 5,000 |
+| CPU + GPU mixed (avg 2h) | 48 (*1) | 2.0 | 50 → limited by Quota | 5,000 |
+| Short CPU only (avg 5m) | 32 | 32 | 64 → limited by Quota 50 | 5,000 |
 
-※1: Assumes CPU 32 + GPU 16. If all users use GPU up to budget limits, it can be 64, but since the number of GPU nodes is limited, in practice the CPU budget tends to fill up first.
+*1: Assumes CPU 32 + GPU 16. If all users use GPU up to the budget cap, it could be 64, but since GPU nodes are limited, in practice CPU budget tends to be saturated first.
 
-When the majority of users are CPU-only, the impact of flavor-aware budget on scaling is limited. If the proportion of CPU + GPU mixed users is high, `count/jobs.batch` (ResourceQuota) acts as a safety valve to limit simultaneous Job count per namespace. When quota is reached, it naturally recovers as TTL expires, and the Dispatcher automatically recovers via retry.
+When CPU-only users dominate, the impact of flavor-aware budget on scaling is limited. If the ratio of CPU + GPU mixed users is high, `count/jobs.batch` (ResourceQuota) acts as a safety valve, limiting the number of concurrently existing Jobs per namespace. When the quota is reached, recovery is natural via TTL expiration, and the Dispatcher's retry restores automatically.
 
-**Watcher list load**: The `list_job_for_all_namespaces()` every 10 seconds retrieves up to 3,300–5,000 Jobs at 100 users (approximately 10–15MB/call at 1 Job ≈ 3KB). Large, but not at a level that would cause system failure. Solvable by migrating to Watch API (see §6.5). Additionally, there are ResourceQuota sync API calls (every 10 seconds: `list_namespace()` + `list_resource_quota_for_all_namespaces()`), but response sizes are metadata for tens of namespaces, orders of magnitude lighter than the Job list (see §2.3). Node resource and nominalQuota sync at 300-second intervals are negligible.
+**Watcher list load**: The number of Jobs retrieved by `list_job_for_all_namespaces()` every 10 seconds is at most 3,300-5,000 at 100 users (about 10-15MB per call assuming 1 Job ≈ 3KB). This is large but not at a level that breaks operation. Resolvable via Watch API migration (see §6.5). In addition, ResourceQuota sync (`list_namespace()` + `list_resource_quota_for_all_namespaces()` every 10 seconds) involves API calls, but the response size is metadata for dozens of namespaces and is orders of magnitude lighter than the Job list (see §2.3). Node resource and nominalQuota syncs run every 300 seconds and are negligible.
 
 #### etcd write / kube-controller-manager
 
-Job/Pod creation and state updates are all writes to etcd, and adding nodes does not help due to Raft consensus requirements. kube-controller-manager (Job controller) is also single-leader. However, in research computing (execution time of tens of minutes to hours), job creation and completion frequency is low, so write throughput is unlikely to become a bottleneck even at 100 users. With short-duration jobs (a few minutes) cycling in large numbers, impact may begin to appear at around 50 users.
+Job/Pod creation and state updates are all writes to etcd and cannot improve by adding nodes due to Raft consensus. kube-controller-manager (Job controller) is also single-leader. However, for research computing (with run times of tens of minutes to several hours), the frequency of job creation and completion is low, so write throughput is unlikely to become a bottleneck even at 100 users. With large numbers of short jobs (few minutes) cycling rapidly, impact starts to appear from around 50 users.
 
 #### Dispatcher Throughput
 
 ```
 Max dispatch rate = DISPATCH_BATCH_SIZE / DISPATCH_BUDGET_CHECK_INTERVAL_SEC
-                  = 50 jobs / 10 seconds = 5 jobs/sec = 300 jobs/min
+                  = 50 / 10s = 5/s = 300/min
 ```
 
-In a burst scenario where all users submit simultaneously, the theoretical maximum is 100 users × 64 jobs (32 × 2 flavors) = 6,400 jobs, requiring approximately 21 minutes to complete dispatch. However, in practice with many CPU-only users, 100 users × 32–48 jobs = 3,200–4,800 jobs (approximately 11–16 minutes) is a realistic expectation. In the steady state of research computing, job completion and new submission frequency is gradual, so Dispatcher throughput becomes a bottleneck only during bursts, and delays are temporary and self-resolving.
+In a burst scenario where all users submit at once, the theoretical max is 100 users × 64 (32 × 2 flavors) = 6,400 jobs, which takes about 21 minutes to dispatch. In actual operation, however, CPU-only users dominate and a realistic expectation is 100 users × 32-48 = 3,200-4,800 jobs (about 11-16 minutes). In the steady state of research computing, job completion and new submissions occur at a gentle pace, so Dispatcher throughput becomes a bottleneck only during bursts, and resolves with temporary delay.
 
-The gap-filling filter ([dispatcher.md](dispatcher.md) §2.4) and ResourceQuota pre-check ([dispatcher.md](dispatcher.md) §2.5) are filtering processes on the candidate list in Python, without K8s API calls. The information needed for filtering (stalled jobs, remaining time for RUNNING jobs, available ClusterQueue resources, remaining ResourceQuota) is all retrieved from the DB. Gap-filling is scoped per `(namespace, flavor)`, so the `estimate_shortest_remaining` DB query runs for each `(namespace, flavor)` combination, but row count per query is around tens, and the number of combinations is limited to `stalled namespace count × flavor count` (typically a few to tens). The extension of the Dispatcher cycle from these additional processes is on the order of tens of milliseconds, negligible compared to K8s Job creation (hundreds of milliseconds/job). Moreover, by proactively avoiding dispatches that would certainly fail due to ResourceQuota insufficiency, there is a beneficial effect of reducing wasted K8s API calls.
+The gap-filling filter ([dispatcher.md](dispatcher.md) §2.4) and ResourceQuota precheck ([dispatcher.md](dispatcher.md) §2.5) are operations that filter the candidate list on the Python side and do not involve K8s API calls. The information needed for filtering (stalled jobs, remaining time of RUNNING jobs, ClusterQueue available resources, ResourceQuota remaining resources) is all retrieved from the DB. Since gap filling is scoped per `(namespace, flavor)`, the `estimate_shortest_remaining` DB query runs for each combination of `(namespace, flavor)`, but the row count per query is only a few dozen, and the combination count is limited to `number of stalled namespaces × number of flavors` (typically a few to a few dozen). The extension of the Dispatcher cycle due to these additional processes is only a few tens of milliseconds, negligible compared to K8s Job creation (a few hundred milliseconds per item). Rather, they have the effect of avoiding wasted K8s API calls by preventing dispatches that would certainly fail due to insufficient ResourceQuota.
 
-When short-duration jobs cycle rapidly, Watcher detection delay (up to 10 seconds) causes overestimation of budget, making Dispatcher throughput appear lower (see §2.2).
+When short jobs cycle rapidly, Watcher detection delay (up to 10 seconds) causes overestimation of budget, leading to apparent throughput degradation of the Dispatcher (see §2.2).
 
 #### PostgreSQL
 
-The `jobs` table holds thousands to tens of thousands of rows, and the `idx_jobs_namespace_status` index makes Dispatcher scans efficient. Additional table row counts are as follows:
+The `jobs` table has only a few thousand to tens of thousands of rows, and the `idx_jobs_namespace_status` index makes Dispatcher scans efficient. Row counts for additional tables are as follows.
 
-| Table | Estimated Row Count | Update Frequency |
+| Table | Estimated rows | Update frequency |
 |---|---|---|
-| `namespace_daily_usage` | user count × flavor count × window days (e.g., 200 × 2 × 7 = 2,800 rows) | On job RUNNING transition. For short jobs that complete without being observed in RUNNING state, recorded as a fallback on SUCCEEDED/FAILED transitions |
-| `node_resources` | compute node count (10–50 rows) | Every 300 seconds |
-| `flavor_quotas` | flavor count (2–5 rows) | Every 300 seconds |
-| `namespace_resource_quotas` | user namespace count (20–200 rows) | Every 10 seconds |
-| `namespace_weights` | namespaces with weight set (0–20 rows) | Only on admin operations |
+| `namespace_daily_usage` | users × flavors × window days (e.g., 200 × 2 × 7 = 2,800 rows) | At Job RUNNING transition. For short jobs that complete without being observed as RUNNING, recorded as fallback at SUCCEEDED/FAILED transitions |
+| `node_resources` | Compute nodes (10-50 rows) | Every 300 seconds |
+| `flavor_quotas` | flavors (2-5 rows) | Every 300 seconds |
+| `namespace_resource_quotas` | User namespaces (20-200 rows) | Every 10 seconds |
+| `namespace_weights` | Namespaces with explicit weight (0-20 rows) | Only on admin operations |
 
-All have extremely small row counts, and PostgreSQL is unlikely to become a bottleneck even at 200 users. The Dispatcher's DRF query (see [dispatcher.md](dispatcher.md) §1.2) includes a window aggregation of `namespace_daily_usage` (grouped by `(namespace, flavor)`) and a per-flavor SUM of `node_resources`, but the number of rows JOINed is on the order of `namespace count × flavor count` (tens to hundreds of rows), and the computational cost is negligible.
+All have extremely few rows, and PostgreSQL is unlikely to be a bottleneck even at 200 users. The Dispatcher's DRF query (see [dispatcher.md](dispatcher.md) §1.2) includes window aggregation of `namespace_daily_usage` per `(namespace, flavor)` and a per-flavor SUM of `node_resources`, but the joined row count is on the order of `namespace × flavor` (a few dozen to a few hundred rows), and the computational cost is negligible.
 
-#### Kueue controller (Single Leader)
+#### Kueue Controller (single-leader)
 
-Kueue's admission decisions are processed by a single leader for all Workloads. When the number of simultaneously existing Workloads exceeds a few thousand, admission delays may occur. Using the sweep feature can dramatically reduce the number of Workloads (1,000 tasks → 1 Workload), so if sweep is assumed to be used, the impact is minimal.
+Kueue's admission decisions are processed by a single leader for all Workloads. If the number of concurrently existing Workloads exceeds several thousand, admission delays may occur. Since use of the sweep feature can substantially reduce the Workload count (1,000 tasks → 1 Workload), if sweep is assumed to be used in combination, impact is minor.
 
-### 6.3 Estimated User Count Upper Limits by Workload
+### 6.3 Estimated User Limits per Workload
 
-Estimates for `DISPATCH_BUDGET_PER_NAMESPACE = 32` (per flavor), 2 flavors, `ttlSecondsAfterFinished = 300s`, and `count/jobs.batch = 50`.
+Estimates with `DISPATCH_BUDGET_PER_NAMESPACE = 32` (per flavor), 2 flavors, `ttlSecondsAfterFinished = 300s`, `count/jobs.batch = 50`.
 
-| Workload | Estimated Upper Limit Users | Rate-Limiting Factor |
+| Workload | Estimated user limit | Limiting factor |
 |---|---|---|
-| CPU-only long-running jobs (30 min to hours) | **150–200** | K8s simultaneous Job count (approx. 5,000 at 150 users) |
-| CPU + GPU mixed (long + sweep) | **100–130** | K8s simultaneous Job count (limited per namespace by Quota) |
-| Short-duration job-centric (few minutes) | **80–100** | Watcher detection delay + Dispatcher throughput |
+| CPU-only long-job centric (30 minutes to several hours) | **150-200** | K8s concurrent Job count (~5,000 at 150 users) |
+| CPU + GPU mixed (long + sweep) | **100-130** | K8s concurrent Job count (limited per namespace by Quota) |
+| Short-job centric (few minutes) | **80-100** | Watcher detection delay + Dispatcher throughput |
 
-For CPU-only workloads, scalability equivalent to before flavor-aware budget introduction is maintained (active per user ≈ 33). For CPU + GPU mixed workloads, the theoretical maximum active count per user increases to 64, but `count/jobs.batch = 50` ResourceQuota acts as a per-namespace safety valve to control simultaneous Job count. In environments where a high proportion of users actively use GPU, the upper limit may drop to 100–130. Short-duration job limits depend on Watcher detection delay and do not change.
+For CPU-only workloads, scalability is maintained on par with before flavor-aware budget (active ≈ 33 per user). For CPU + GPU mixed workloads, the theoretical max active count per user rises to 64, but the `count/jobs.batch = 50` ResourceQuota functions as a per-namespace safety valve, so concurrent Job counts remain controlled. In environments where the ratio of users actively using GPU is high, the limit may drop to 100-130. The limit for short jobs depends on Watcher detection delay and does not change.
 
-### 6.4 Scalability Extension via dispatch_budget Reduction
+### 6.4 Scalability Expansion via dispatch_budget Reduction
 
-As described in §4.7, lowering `DISPATCH_BUDGET_PER_NAMESPACE` suppresses simultaneous Job count to accommodate more users. With the sweep feature available, the practical impact of lowering budget on users is minimal (see §4.6).
+As described in §4.7, lowering `DISPATCH_BUDGET_PER_NAMESPACE` suppresses the number of concurrently existing Jobs and accommodates more users. With the sweep feature, the practical impact of lowering the budget on users is minor (see §4.6).
 
-Since budget is applied per flavor, the theoretical maximum active Job count is `budget × flavor count × user count`. The table below shows theoretical limits with 2 flavors and real-world expectations when the majority are CPU-only users (α = 0.6).
+Since budget is applied per flavor, the theoretical max active Job count is `budget × flavors × users`. The table below shows the theoretical limits and the realistic expectation when CPU-only users dominate (α = 0.6) for the case of 2 flavors.
 
-| DISPATCH_BUDGET | 100 Users Active Jobs (Theoretical Max) | Same (Real-world α=0.6) | 200 Users (Theoretical Max) | Same (Real-world α=0.6) |
+| DISPATCH_BUDGET | Active Jobs at 100 users (theoretical) | Same (realistic α=0.6) | At 200 users (theoretical) | Same (realistic α=0.6) |
 |---|---|---|---|---|
 | 32 | 6,400 | 3,840 | 12,800 | 7,680 |
 | 16 | 3,200 | 1,920 | 6,400 | 3,840 |
 | 8 | 1,600 | 960 | 3,200 | 1,920 |
 
-With budget 16, even at 200 users, the real-world expected active Job count is approximately 3,840, with comfortable margin against K8s practical limits even including TTL-pending completed Jobs. With budget 8, approximately 1,920 at 200 users leaves ample room, and simultaneous Job count is not an issue. Additionally, `count/jobs.batch` (ResourceQuota) acts as a per-namespace safety valve, limiting Job count per namespace before theoretical limits are reached.
+With budget 16, realistic active Job count is about 3,840 even at 200 users, and including TTL-pending Jobs at 300s TTL, there is room compared to K8s's practical upper limit. With budget 8, even 200 users have about 1,920, well within margin, and concurrent Job count is not an issue. Furthermore, `count/jobs.batch` (ResourceQuota) functions as a per-namespace safety valve, limiting Job count per namespace before reaching the theoretical limit.
 
-However, when active users are few and budget is low, idle resources may occur. This can be addressed with dynamic adjustment based on active user count, but implementation complexity increases (see §4.7).
+However, during times with few active users, a low budget causes idle resources. This issue can be addressed via dynamic adjustment based on active user count, but adds implementation complexity (see §4.7).
 
 ### 6.5 Combined Effect with Watch API Migration
 
 Combining Watch API migration (§4.3) with dispatch_budget reduction further improves scalability.
 
-The estimates below assume CPU-only long-running job-centric workloads (active per user ≈ 33). For CPU + GPU mixed workloads, the estimated upper limit decreases by 10–20% due to increased effective active count.
+The following estimates assume a CPU-only long-job centric workload (active ≈ 33 per user). For CPU + GPU mixed workloads, the increase in effective active count lowers the estimates by 10-20%.
 
-| Measure | Improvement Effect | Estimated Limit (CPU-only long-running job-centric) |
+| Measure | Improvement effect | Estimated limit (CPU-only long-job centric) |
 |---|---|---|
-| Current (polling + budget 32/flavor) | - | 150–200 users |
-| Watch API migration only | Reduced Watcher read load, eliminated detection delay | 200–250 users |
-| budget 16/flavor only | Active Job count halved | 250–300 users |
-| Watch API + budget 16/flavor | Both effects | 300–400 users |
+| Current (polling + budget 32/flavor) | - | 150-200 |
+| Watch API migration only | Reduces Watcher read load, eliminates detection delay | 200-250 |
+| budget 16/flavor only | Halves active Job count | 250-300 |
+| Watch API + budget 16/flavor | Both effects | 300-400 |
 
-At scales exceeding 400 users, etcd write load and single-leader controller processing capacity become structural limits. K8s cluster partitioning (multi-cluster) would be required.
+Beyond 400, etcd write load and the processing capacity of single-leader controllers become structural limits. K8s cluster partitioning (multi-cluster) becomes necessary.
 
-### 6.6 Assumptions and Caveats for Estimates
+### 6.6 Assumptions and Caveats
 
-- The estimates above are based on a worst-case scenario where all users are simultaneously active (submitting and running jobs). In practice, the active rate is often 50–80%, so effective upper limits are higher than these estimates
-- Node specs assume 128 CPU cores / 500Gi Memory per node. Even if node specs differ, the bottleneck is K8s structural constraints, not computational resources, so there is no significant impact on upper limit estimates
-- etcd performance depends on storage IOPS. If SSDs are not used, performance degradation may occur at lower scales than the estimates above
+- The estimates above are based on a worst-case scenario where all users are concurrently active (submitting and running jobs). In practice, the active rate is often 50-80%, so effective limits are higher than these estimates
+- Node specs assume CPU 128 cores / Memory 500Gi per node. Even with different node specs, since the bottleneck is structural K8s constraints rather than compute resources, the impact on the upper limit estimates is small
+- etcd performance depends on storage IOPS. Without SSDs, performance degradation may occur at lower thresholds than estimated above

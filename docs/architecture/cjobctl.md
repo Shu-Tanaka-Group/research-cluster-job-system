@@ -408,6 +408,7 @@ CLI 側で以下のバリデーションを行う:
 | `DISPATCH_MAX_RETRIES` | int | dispatcher |
 | `GAP_FILLING_ENABLED` | bool | dispatcher |
 | `GAP_FILLING_STALL_THRESHOLD_SEC` | int | dispatcher |
+| `NODE_BIN_PACKING_ENABLED` | bool | dispatcher |
 | `FAIR_SHARE_WINDOW_DAYS` | int | dispatcher, submit-api |
 | `USAGE_RETENTION_DAYS` | int | dispatcher |
 | `CPU_LIMIT_BUFFER_MULTIPLIER` | float | dispatcher |

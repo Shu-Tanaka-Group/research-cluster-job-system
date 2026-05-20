@@ -95,6 +95,12 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: GAP_FILLING_STALL_THRESHOLD_SEC
+            - name: NODE_BIN_PACKING_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: NODE_BIN_PACKING_ENABLED
+                  optional: true
             - name: FAIR_SHARE_WINDOW_DAYS
               valueFrom:
                 configMapKeyRef:

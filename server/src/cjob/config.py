@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     GAP_FILLING_ENABLED: bool = True
     GAP_FILLING_STALL_THRESHOLD_SEC: int = 300  # 5 minutes
 
+    # Dispatcher - per-node bin-packing precheck
+    NODE_BIN_PACKING_ENABLED: bool = True
+
     # Dispatcher - Fair Sharing
     FAIR_SHARE_WINDOW_DAYS: int = 7
     USAGE_RETENTION_DAYS: int = 7

@@ -85,6 +85,14 @@ ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User P
 
 隙間充填の詳細は [dispatcher.md](dispatcher.md) §2.4 を参照。
 
+### per-node bin-packing プレチェックに関する設定
+
+| 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
+|---|---|---|---|---|---|
+| `NODE_BIN_PACKING_ENABLED` | ConfigMap | true | Dispatcher | 全体 | per-node bin-packing プレチェックの有効/無効。false にするとプレチェックをスキップし、Kueue の flavor 単位 nominalQuota のみで admit する従来動作になる |
+
+per-node bin-packing プレチェックの詳細は [dispatcher.md](dispatcher.md) §2.6 を参照。
+
 ### Fair sharing に関する設定
 
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |

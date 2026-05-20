@@ -16,6 +16,12 @@ The user-facing dashboard at `k8s/base/grafana/dashboard-user.json` has been rev
 - "Job Status Breakdown" pie chart: `DISPATCHING` is now excluded from the display. `QUEUED` was relabeled to "Submitted" and `DISPATCHED` to "Allocation Wait".
 - "Resource Allocation Wait (P50)" and "Resource Allocation Wait Time Over Time (P50 / P95)": the Japanese okurigana "て" was removed from the title (unifying the term as "リソース割当待ち").
 
+## Adding `NODE_BIN_PACKING_ENABLED` to the ConfigMap
+
+A per-node bin-packing precheck has been added to the Dispatcher (see [dispatcher.md](../architecture/dispatcher.md) §2.6). Add a new key `NODE_BIN_PACKING_ENABLED` (default `"true"`) to the `cjob-config` ConfigMap. The Dispatcher Deployment references this key with `optional: true`, so the Pydantic default of `true` will be applied even if the key is not set; however, setting it explicitly is recommended for operational clarity.
+
+Set the value to `"false"` only if disabling it (reverting to the previous behavior) is required. When disabled, admission is performed using only Kueue's per-flavor `nominalQuota`, which may cause a recurrence of the issue where jobs fit within the aggregate quota but cannot be placed on any individual node, leaving them stuck in the `DISPATCHED` state.
+
 ## Kubernetes Minimum Version Requirement
 
 The Watcher's RUNNING determination now consults the `status.ready` field of K8s Jobs (the `JobReadyPods` feature). The minimum cluster requirement is now stated explicitly as **Kubernetes v1.26 or later**, the version where `JobReadyPods` reaches GA (see [prerequisites.md](../architecture/prerequisites.md) §1).

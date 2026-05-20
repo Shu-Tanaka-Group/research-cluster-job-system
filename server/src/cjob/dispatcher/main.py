@@ -22,6 +22,7 @@ from .scheduler import (
     cas_update_to_dispatching,
     defer_to_queue,
     fetch_dispatchable_jobs,
+    filter_by_node_capacity,
     filter_by_resource_quota,
     increment_retry,
     mark_dispatched,
@@ -129,6 +130,7 @@ def run():
             candidates = fetch_dispatchable_jobs(session, settings)
             candidates = apply_gap_filling(session, candidates, settings)
             candidates = filter_by_resource_quota(session, candidates)
+            candidates = filter_by_node_capacity(session, candidates, settings)
             # Cap to DISPATCH_BATCH_SIZE after filtering. SQL over-fetched
             # DISPATCH_BATCH_SIZE * DISPATCH_FETCH_MULTIPLIER candidates so
             # that later-namespace jobs can still dispatch when DRF-prioritised

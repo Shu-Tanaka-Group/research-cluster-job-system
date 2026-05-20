@@ -661,6 +661,251 @@ def filter_by_resource_quota(
     return result
 
 
+def _build_node_residuals(
+    session: Session,
+) -> dict[str, list[dict[str, int | str]]]:
+    """Build per-flavor list of per-node residual capacities from node_resources.
+
+    Returns a dict mapping flavor name to a list of dicts:
+        {"node_name": str, "cpu": int, "mem": int, "gpu": int}
+    """
+    rows = (
+        session.execute(
+            text(
+                "SELECT node_name, flavor, cpu_millicores, memory_mib, gpu "
+                "FROM node_resources "
+                "ORDER BY node_name ASC"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    residuals: dict[str, list[dict[str, int | str]]] = {}
+    for row in rows:
+        residuals.setdefault(row["flavor"], []).append(
+            {
+                "node_name": row["node_name"],
+                "cpu": int(row["cpu_millicores"]),
+                "mem": int(row["memory_mib"]),
+                "gpu": int(row["gpu"]),
+            }
+        )
+    return residuals
+
+
+def _find_least_loaded(
+    nodes: list[dict[str, int | str]], cpu: int, mem: int, gpu: int
+) -> int | None:
+    """Return the index of the node with the largest CPU residual that fits.
+
+    Mirrors kube-scheduler's default LeastAllocated scoring (spread). This
+    causes virtual placements to spread across nodes, matching what
+    kube-scheduler would actually do. Spread placement is also more
+    conservative for subsequent candidates within the same cycle than
+    best-fit (concentrate), since residuals shrink across all nodes rather
+    than draining one node at a time.
+    """
+    best_idx: int | None = None
+    best_remaining: int | None = None
+    for i, n in enumerate(nodes):
+        if n["cpu"] >= cpu and n["mem"] >= mem and n["gpu"] >= gpu:
+            remaining = int(n["cpu"])
+            if best_remaining is None or remaining > best_remaining:
+                best_remaining = remaining
+                best_idx = i
+    return best_idx
+
+
+def _subtract_running_consumption(
+    session: Session, residuals: dict[str, list[dict[str, int | str]]]
+) -> None:
+    """Subtract RUNNING job consumption from per-node residuals.
+
+    Non-sweep: subtract full per-pod resources from the single recorded node.
+    Sweep: distribute parallelism pods evenly across the recorded node list
+    (floor + remainder). node_name is a cumulative list (see database.md §1),
+    so per-node distribution is an approximation but is correct cluster-wide.
+    """
+    rows = (
+        session.execute(
+            text(
+                "SELECT namespace, job_id, flavor, node_name, cpu_millicores, "
+                "memory_mib, gpu, completions, parallelism "
+                "FROM jobs "
+                "WHERE status = 'RUNNING' AND node_name IS NOT NULL"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    for row in rows:
+        flavor = row["flavor"]
+        nodes = residuals.get(flavor)
+        if not nodes:
+            continue
+        node_names = [
+            name.strip() for name in (row["node_name"] or "").split(",") if name.strip()
+        ]
+        if not node_names:
+            continue
+
+        is_sweep = row["completions"] is not None
+        cpu_pp = int(row["cpu_millicores"] or 0)
+        mem_pp = int(row["memory_mib"] or 0)
+        gpu_pp = int(row["gpu"] or 0)
+        node_map = {n["node_name"]: n for n in nodes}
+
+        if is_sweep:
+            parallelism = int(row["parallelism"] or 1)
+            base, remainder = divmod(parallelism, len(node_names))
+            for i, name in enumerate(node_names):
+                pods = base + (1 if i < remainder else 0)
+                if pods == 0:
+                    continue
+                n = node_map.get(name)
+                if n is None:
+                    continue
+                n["cpu"] = max(int(n["cpu"]) - cpu_pp * pods, 0)
+                n["mem"] = max(int(n["mem"]) - mem_pp * pods, 0)
+                n["gpu"] = max(int(n["gpu"]) - gpu_pp * pods, 0)
+        else:
+            # Non-sweep: full consumption on the single node. If node_name
+            # contains multiple entries (unexpected), apply to the first match.
+            for name in node_names:
+                n = node_map.get(name)
+                if n is None:
+                    continue
+                n["cpu"] = max(int(n["cpu"]) - cpu_pp, 0)
+                n["mem"] = max(int(n["mem"]) - mem_pp, 0)
+                n["gpu"] = max(int(n["gpu"]) - gpu_pp, 0)
+                break
+
+
+def _subtract_in_flight_least_loaded(
+    session: Session, residuals: dict[str, list[dict[str, int | str]]]
+) -> None:
+    """Subtract DISPATCHING/DISPATCHED job consumption via least-loaded placement.
+
+    These jobs have not been observed running by Watcher yet, so node_name
+    is unknown. Simulate kube-scheduler's default LeastAllocated scoring
+    (spread) so that candidates evaluated later see a residual that already
+    accounts for in-flight jobs.
+
+    Also handles RUNNING jobs without node_name (e.g. completion fallback in
+    watcher.md §3) for consistency.
+    """
+    rows = (
+        session.execute(
+            text(
+                "SELECT namespace, job_id, flavor, cpu_millicores, memory_mib, gpu, "
+                "completions, parallelism "
+                "FROM jobs "
+                "WHERE status IN ('DISPATCHING', 'DISPATCHED') "
+                "   OR (status = 'RUNNING' AND node_name IS NULL) "
+                "ORDER BY namespace ASC, job_id ASC"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    for row in rows:
+        flavor = row["flavor"]
+        nodes = residuals.get(flavor)
+        if not nodes:
+            continue
+        is_sweep = row["completions"] is not None
+        num_pods = int(row["parallelism"] or 1) if is_sweep else 1
+        cpu = int(row["cpu_millicores"] or 0)
+        mem = int(row["memory_mib"] or 0)
+        gpu = int(row["gpu"] or 0)
+
+        for _ in range(num_pods):
+            idx = _find_least_loaded(nodes, cpu, mem, gpu)
+            if idx is None:
+                # No fit; stop. This matches kube-scheduler behaviour where
+                # the remaining pods stay Pending until capacity frees up.
+                break
+            nodes[idx]["cpu"] = int(nodes[idx]["cpu"]) - cpu
+            nodes[idx]["mem"] = int(nodes[idx]["mem"]) - mem
+            nodes[idx]["gpu"] = int(nodes[idx]["gpu"]) - gpu
+
+
+def filter_by_node_capacity(
+    session: Session, candidates: list[Job], settings: Settings
+) -> list[Job]:
+    """Filter dispatch candidates by per-node residual capacity.
+
+    For each candidate, simulate bin-packing of its pods (1 for non-sweep,
+    parallelism for sweep) onto per-flavor node residuals via least-loaded
+    placement (kube-scheduler's default LeastAllocated). A candidate is
+    admitted only when ALL of its pods can be placed.
+
+    Residuals are derived from node_resources minus consumption of RUNNING
+    jobs (via node_name) and DISPATCHING/DISPATCHED jobs (via least-loaded
+    virtual placement). Same-cycle cumulative tracking subtracts admitted
+    candidates from the residuals so that later candidates see the updated
+    state.
+
+    See docs/architecture/dispatcher.md §2.6.
+    """
+    if not settings.NODE_BIN_PACKING_ENABLED:
+        return candidates
+    if not candidates:
+        return candidates
+
+    residuals = _build_node_residuals(session)
+    if not residuals:
+        # node_resources is empty (Watcher not yet running) → unrestricted
+        return candidates
+
+    _subtract_running_consumption(session, residuals)
+    _subtract_in_flight_least_loaded(session, residuals)
+
+    result: list[Job] = []
+    for job in candidates:
+        nodes = residuals.get(job.flavor)
+        if nodes is None:
+            # flavor not present in node_resources → treat as unrestricted
+            result.append(job)
+            continue
+
+        is_sweep = job.completions is not None
+        num_pods = int(job.parallelism or 1) if is_sweep else 1
+        cpu = int(job.cpu_millicores or 0)
+        mem = int(job.memory_mib or 0)
+        gpu = int(job.gpu or 0)
+
+        # Trial placement: try to place all pods via least-loaded on a copy.
+        # Only commit to real residuals if all pods fit.
+        trial = [dict(n) for n in nodes]
+        placements: list[int] = []
+        all_fit = True
+        for _ in range(num_pods):
+            idx = _find_least_loaded(trial, cpu, mem, gpu)
+            if idx is None:
+                all_fit = False
+                break
+            trial[idx]["cpu"] = int(trial[idx]["cpu"]) - cpu
+            trial[idx]["mem"] = int(trial[idx]["mem"]) - mem
+            trial[idx]["gpu"] = int(trial[idx]["gpu"]) - gpu
+            placements.append(idx)
+
+        if not all_fit:
+            logger.debug(
+                "Node bin-packing: skipping %s/%d (pods=%d cpu=%d mem=%d gpu=%d)",
+                job.namespace, job.job_id, num_pods, cpu, mem, gpu,
+            )
+            continue
+
+        result.append(job)
+        for idx in placements:
+            nodes[idx]["cpu"] = int(nodes[idx]["cpu"]) - cpu
+            nodes[idx]["mem"] = int(nodes[idx]["mem"]) - mem
+            nodes[idx]["gpu"] = int(nodes[idx]["gpu"]) - gpu
+
+    return result
+
+
 def reset_stale_dispatching(session: Session) -> int:
     """Reset DISPATCHING jobs to QUEUED on startup."""
     result = session.execute(

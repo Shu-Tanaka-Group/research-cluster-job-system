@@ -272,6 +272,8 @@ class Dispatcher:
             candidates = apply_gap_filling(session, candidates, settings)
             # ResourceQuota pre-check from §2.5 (limit candidates based on namespace remaining resources)
             candidates = filter_by_resource_quota(session, candidates)
+            # Per-node bin-packing pre-check from §2.6 (limit candidates that cannot be placed on any node)
+            candidates = filter_by_node_capacity(session, candidates, settings)
             # Trim to first DISPATCH_BATCH_SIZE after filtering (cap on dispatches per cycle)
             candidates = candidates[:self.batch_size]
             for job in candidates:
@@ -516,7 +518,7 @@ def apply_gap_filling(
 
 - **Time estimation accuracy**: This is a DB-based estimate and may diverge from the actual node availability as understood by Kueue/K8s Scheduler. If a job completes earlier than its time_limit, resources become available sooner than estimated, but the Dispatcher re-evaluates in the next cycle. Time estimation only references RUNNING jobs in the same `(namespace, flavor)`, so job completions in different flavors are not considered (reasonable because resource pools of different flavors are independent)
 - **Resource estimation accuracy**: Since only RUNNING jobs are aggregated, resource consumption of recently DISPATCHED jobs admitted by Kueue but not yet transitioned to RUNNING is not reflected. This may result in a slight overestimate of available resources. While DRF scores add estimated consumption of DISPATCHING/DISPATCHED jobs via the in-flight CTE (see §1.2), gap-filling resource estimation is based on actual ClusterQueue consumption (RUNNING only), so a similar correction is not applied. Kueue makes the final admission decision, so there is no practical harm
-- **Node placement is not considered**: Resource estimation is done using per-flavor totals, without considering individual node availability. If the total fits but a specific node has no capacity, Kueue may not admit the job
+- **Node placement is not considered**: Gap-filling resource estimation uses per-flavor totals and does not consider individual node availability. Cases where the total fits but a specific node has no capacity are filtered by the per-node bin-packing pre-check in §2.6
 - **When time_limit_seconds significantly deviates from actual runtime**: If a user sets time_limit much longer than the actual runtime, T estimation becomes too conservative and the effectiveness of gap filling diminishes. However, this only biases control in the conservative direction (fewer dispatches) and does not worsen starvation
 
 ### 2.5 ResourceQuota Pre-check
@@ -553,7 +555,144 @@ Other 403s (RBAC denial, PodSecurityPolicy, etc. — true permanent errors) stil
 
 **Relationship with per-flavor budget separation:** Separating budget per `(namespace, flavor)` theoretically increases the maximum active jobs per namespace to `DISPATCH_BUDGET_PER_NAMESPACE × flavor count`. The `count/jobs.batch` pre-check (step 5) allows the Dispatcher to suppress dispatch before receiving K8s API errors when the total flavor-aware budget exceeds `count/jobs.batch`. If CPU/memory/GPU ResourceQuota was sized assuming a single budget, it may become relatively tight and more jobs may be rejected by ResourceQuota. This is conservative (fewer dispatches) and does not result in over-dispatch.
 
-### 2.6 Startup Initialization
+### 2.6 Per-node Bin-packing Pre-check
+
+The Dispatcher checks per-node remaining capacity against dispatch candidates and excludes jobs that cannot be placed on any node (leaving them in QUEUED). This compensates for Kueue's constraint that the ClusterQueue admits jobs based only on per-flavor total nominalQuota, preventing the situation where "jobs that fit in the total but cannot be placed on individual nodes stall in DISPATCHED."
+
+```python
+# This is pseudocode for conceptual explanation.
+
+candidates = fetch_dispatchable_jobs(session, settings)
+candidates = apply_gap_filling(session, candidates, settings)
+candidates = filter_by_resource_quota(session, candidates)
+candidates = filter_by_node_capacity(session, candidates, settings)  # added
+```
+
+#### 2.6.1 Computing Remaining Capacity
+
+`filter_by_node_capacity()` starts from the effective allocatable of each node in the `node_resources` table (see [database.md](database.md) §6) and computes per-node remaining capacity per flavor.
+
+1. **Use node_resources effective allocatable** as the base, and build a node list per flavor
+2. **Subtract RUNNING job consumption:**
+   - Normal jobs (`completions IS NULL`): subtract `cpu_millicores` / `memory_mib` / `gpu` from the single node specified by `node_name`
+   - Sweep jobs (`completions IS NOT NULL`): `node_name` is a cumulative record (all nodes the Watcher has observed pods placed on), and the current pod count per node is unknown. Treat `parallelism` pods as **evenly distributed** across the listed nodes, and subtract `floor(parallelism / N) × per_pod_resource` from each node (N is the number of nodes in the list). The remainder pods from `parallelism mod N` are assigned 1 extra pod each, starting from the front of the list
+3. **Subtract DISPATCHING/DISPATCHED job consumption via least-loaded provisional placement:**
+   - These jobs have `node_name` not yet determined (the Watcher records it on transition to RUNNING), so the node that kube-scheduler is likely to select is estimated
+   - For each job's per-pod resource request, select **the node with the largest remaining capacity among those that can fit** (least-loaded; matching kube-scheduler's default LeastAllocated), and subtract 1 pod's worth from that node
+   - For sweep jobs, each of `parallelism` pods is placed sequentially using least-loaded. If a pod cannot be placed midway, treat remaining capacity as exhausted and stop at that point (to match the actual kube-scheduler behavior)
+
+If the `node_resources` table is empty (Watcher not yet started), this check is skipped and all candidates pass through.
+
+#### 2.6.2 Candidate Decision and Intra-cycle Accumulation
+
+For each candidate job, attempt bin-packing against the node remaining capacities.
+
+1. For the candidate's per-pod resource request (1 pod for normal jobs, `parallelism` pods for sweep jobs), attempt **whether all pods can be placed using least-loaded**
+2. **Normal jobs**: pass if there is a node that can fit 1 pod, otherwise exclude (held in QUEUED)
+3. **Sweep jobs**: pass only if all `parallelism` pods can be placed; exclude if even one cannot be placed. This decision prevents a partial-launch new sweep from conflicting with already-running sweep pod placements
+4. The resources consumed by passed candidates are deducted from the selected node's remaining capacity and reflected in subsequent candidate decisions (intra-cycle cumulative tracking prevents over-dispatch)
+5. If no node corresponding to the candidate's `flavor` exists in `node_resources`, pass through without restriction (e.g., immediately after flavor configuration changes)
+
+#### 2.6.3 Design Decisions
+
+- **Choice of least-loaded strategy**: matches kube-scheduler's default scoring (`LeastAllocated`), which places pods on the most-empty nodes. This reduces the divergence between provisional placement and actual admission, and when evaluating multiple candidates within the same cycle, produces a conservative behavior where "a little is subtracted from every node, making per-node remaining capacity uniformly smaller." Best-fit (concentrating on the smallest remaining capacity) skews provisional placement, mistakenly judging unused nodes as available and causing over-admission
+- **Least-loaded provisional placement for DISPATCHING/DISPATCHED**: An optimistic evaluation that subtracts only RUNNING leads to recurrence of over-admission on the same node when multiple jobs are submitted during the few to tens of seconds before the Watcher records `node_name`. By pseudo-assigning in-flight jobs to nodes via least-loaded provisional placement, per-node remaining capacity can be evaluated consistently, including races between cycles
+- **Even distribution for sweep RUNNING jobs**: Because the `node_name` recorded by the Watcher is a cumulative record, the currently running pod count cannot be accurately mapped per node. Even distribution is an approximation, but cluster-wide total consumption is accurate, and it provides a reasonable per-node estimate in typical cases. State updates in the next cycle naturally correct it
+- **Requiring all pods to fit for new sweep admission**: If admission is granted with only 1 task, Pending pods of a new sweep can conflict with the pod rotation of existing sweeps, preventing the next task of an already-running sweep from being placed. Requiring all pods to fit guarantees that already-running sweeps are not disturbed. As a tradeoff, large sweeps may experience delayed startup, but gap filling (§2.4) acts as a last resort after `GAP_FILLING_STALL_THRESHOLD_SEC` elapses
+- **Relationship with existing gap filling (§2.4)**: Gap filling activates only when stalled jobs exist in the same `(namespace, flavor)` and judges based on per-flavor total available resources. This pre-check operates in every dispatch cycle and judges based on per-node remaining capacity. The two operate independently, and the introduction of this pre-check is expected to reduce stall events that proceed to gap filling
+- **K8s API is not queried**: per-node remaining capacity is computed solely from the DB's `node_resources` table. This prevents K8s API failures from propagating to the Dispatcher. Synchronization delay of `node_resources` (`NODE_RESOURCE_SYNC_INTERVAL_SEC`, default 300 seconds) manifests as a detection delay for node additions/removals, but in-flight job best-fit provisional placement and RUNNING job subtraction are performed on real-time DB state, so per-node remaining capacity changes from job inflow are reflected immediately
+
+#### 2.6.4 Configuration Values
+
+| Setting | ConfigMap Key | Default Value | Description |
+|---|---|---|---|
+| Per-node bin-packing pre-check enable/disable | `NODE_BIN_PACKING_ENABLED` | true | Set to false to skip this pre-check (legacy behavior) |
+
+#### 2.6.5 Constraints and Limitations
+
+- **Cannot fully predict kube-scheduler's choice**: Least-loaded provisional placement mimics kube-scheduler's default behavior, but may diverge from the actual choice due to anti-affinity, topology spread, additional plugins, etc. When divergence occurs, candidates may pass through but cannot be placed during actual admission. However, this is an improvement compared to not passing them through
+- **Per-node estimation error for sweep RUNNING jobs**: Even distribution is an approximation, and errors occur when actual pod placement is skewed. The error cancels out cluster-wide, but the judgment for specific nodes may become looser or stricter. The impact of the error is small, and state updates in the next cycle naturally correct it
+- **node_resources synchronization delay**: Because the Watcher synchronizes only every 300 seconds, there is up to 5 minutes of delay in detecting node additions/removals. When new nodes are added, judgment uses old information so candidates may be wrongly excluded, but it is corrected after 5 minutes
+- **RUNNING jobs with no node_name recorded in the DB**: Jobs that have transitioned to RUNNING with `node_name` still NULL due to §2 completion fallback etc. are not reflected in per-node subtraction. They are handled with the same best-fit provisional placement as in-flight subtraction
+
+#### 2.6.6 Pseudocode
+
+```python
+# This is pseudocode for conceptual explanation.
+
+def filter_by_node_capacity(
+    session: Session,
+    candidates: list[Job],
+    settings: Settings,
+) -> list[Job]:
+    """Filter dispatch candidates based on per-node remaining capacity."""
+    if not settings.NODE_BIN_PACKING_ENABLED:
+        return candidates
+    if not candidates:
+        return candidates
+
+    # Build node remaining capacity as flavor → [{node_name, cpu, mem, gpu}, ...]
+    residuals = _build_node_residuals(session)
+    if not residuals:
+        # node_resources is empty (Watcher not yet started) → no restriction
+        return candidates
+
+    # Subtract RUNNING job consumption (normal: from node_name, sweep: even distribution)
+    _subtract_running_consumption(session, residuals)
+
+    # Subtract DISPATCHING/DISPATCHED via least-loaded provisional placement
+    _subtract_in_flight_least_loaded(session, residuals)
+
+    result = []
+    for job in candidates:
+        nodes = residuals.get(job.flavor)
+        if nodes is None:
+            # No nodes corresponding to flavor → no restriction
+            result.append(job)
+            continue
+
+        is_sweep = job.completions is not None
+        num_pods = job.parallelism if is_sweep else 1
+        cpu, mem, gpu = job.cpu_millicores, job.memory_mib, job.gpu
+
+        # Use a trial copy to attempt placement of all pods
+        trial = [dict(n) for n in nodes]
+        placements: list[int] | None = []
+        for _ in range(num_pods):
+            idx = _find_least_loaded(trial, cpu, mem, gpu)
+            if idx is None:
+                placements = None   # Cannot place all pods
+                break
+            trial[idx]["cpu"] -= cpu
+            trial[idx]["mem"] -= mem
+            trial[idx]["gpu"] -= gpu
+            placements.append(idx)
+
+        if placements is None:
+            logger.debug("Node bin-packing: skipping %s/%d", job.namespace, job.job_id)
+            continue
+
+        # All pods can be placed → admit and definitively subtract from selected nodes
+        result.append(job)
+        for idx in placements:
+            nodes[idx]["cpu"] -= cpu
+            nodes[idx]["mem"] -= mem
+            nodes[idx]["gpu"] -= gpu
+
+    return result
+
+
+def _find_least_loaded(nodes, cpu, mem, gpu):
+    """Return the node with the largest current CPU remaining (least-loaded) among nodes that can fit the requested resources."""
+    best_idx, best_remaining = None, None
+    for i, n in enumerate(nodes):
+        if n["cpu"] >= cpu and n["mem"] >= mem and n["gpu"] >= gpu:
+            if best_remaining is None or n["cpu"] > best_remaining:
+                best_idx, best_remaining = i, n["cpu"]
+    return best_idx
+```
+
+### 2.7 Startup Initialization
 
 Upon Dispatcher restart, jobs stuck in `DISPATCHING` are reverted to `QUEUED`.
 
