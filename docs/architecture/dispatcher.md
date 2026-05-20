@@ -270,6 +270,8 @@ class Dispatcher:
             candidates = apply_gap_filling(session, candidates, settings)
             # §2.5 の ResourceQuota プレチェック（namespace の残リソースで候補を制限）
             candidates = filter_by_resource_quota(session, candidates)
+            # §2.6 の per-node bin-packing プレチェック（どのノードにも配置できない候補を制限）
+            candidates = filter_by_node_capacity(session, candidates, settings)
             # フィルタ通過後の先頭 DISPATCH_BATCH_SIZE 件に絞り込む（1サイクルの dispatch 数上限）
             candidates = candidates[:self.batch_size]
             for job in candidates:
@@ -514,7 +516,7 @@ def apply_gap_filling(
 
 - **時間推定の精度**: DB ベースの推定であり、Kueue/K8s Scheduler が把握する実際のノード空き状況とは乖離する。ジョブが time_limit より早く完了した場合、推定より早くリソースが空くが、Dispatcher は次のサイクルで再評価する。時間推定は同一 `(namespace, flavor)` の RUNNING ジョブのみを参照するため、異なる flavor のジョブ終了は考慮しない（異なる flavor のリソースプールは独立しているため合理的）
 - **リソース推定の精度**: RUNNING ジョブのみを集計するため、最近 DISPATCHED されて Kueue に admit 済みだがまだ RUNNING に遷移していないジョブのリソース消費は反映されない。結果として利用可能リソースを若干過大評価する場合がある。DRF スコアでは in-flight CTE により DISPATCHING/DISPATCHED ジョブの予測消費量を加算しているが（§1.2 参照）、隙間充填のリソース推定は ClusterQueue の実消費（RUNNING のみ）に基づくため、同様の補正は行わない。Kueue が最終的な admission を判断するため実害はない
-- **ノード配置は考慮しない**: リソース推定は flavor ごとの合計値で行い、個々のノードの空き状況は考慮しない。合計では収まるが特定ノードに空きがない場合、Kueue が admit しない可能性がある
+- **ノード配置は考慮しない**: 隙間充填のリソース推定は flavor ごとの合計値で行い、個々のノードの空き状況は考慮しない。合計では収まるが特定ノードに空きがない場合は §2.6 の per-node bin-packing プレチェックでフィルタされる
 - **time_limit_seconds が実行時間と大きく乖離する場合**: ユーザーが time_limit を実際の実行時間より大幅に長く設定すると、T の推定が保守的になりすぎて隙間充填の効果が薄れる。ただしこれは制御が保守的な方向（dispatch を控える）にずれるだけで、starvation を悪化させることはない
 
 ### 2.5 ResourceQuota プレチェック
@@ -551,7 +553,144 @@ candidates = filter_by_resource_quota(session, candidates)  # 追加
 
 **budget の flavor 分離との関係:** budget を `(namespace, flavor)` 単位に分離したことで、namespace あたりの最大 active ジョブ数が理論上 `DISPATCH_BUDGET_PER_NAMESPACE × flavor 数` に増加する。`count/jobs.batch` のプレチェック（ステップ 5）により、flavor-aware budget の合計が `count/jobs.batch` を超過する場合でも、Dispatcher が K8s API エラーを受ける前に dispatch を抑制できる。CPU/memory/GPU の ResourceQuota が単一 budget を前提にサイジングされている場合は、相対的に窮屈になり ResourceQuota で弾かれるジョブが増える可能性がある。これは保守的な方向（dispatch を控える）であり、過剰 dispatch にはならない。
 
-### 2.6 起動時の初期化処理
+### 2.6 per-node bin-packing プレチェック
+
+Dispatcher は dispatch 候補に対してノード単位の残量を確認し、どのノードにも配置できないジョブを候補から除外する（QUEUED に留める）。これにより、Kueue の ClusterQueue が flavor 単位の合計 nominalQuota でのみ admit を判定する制約を補い、「合計値では収まるが個々のノードに配置できないジョブが DISPATCHED のまま滞留する」事象を防ぐ。
+
+```python
+# ※ 概念説明のための擬似コードである。
+
+candidates = fetch_dispatchable_jobs(session, settings)
+candidates = apply_gap_filling(session, candidates, settings)
+candidates = filter_by_resource_quota(session, candidates)
+candidates = filter_by_node_capacity(session, candidates, settings)  # 追加
+```
+
+#### 2.6.1 残量の算出
+
+`filter_by_node_capacity()` は `node_resources` テーブル（[database.md](database.md) §6 参照）の各ノードの effective allocatable を出発点として、flavor ごとに per-node 残量を算出する。
+
+1. **node_resources の effective allocatable** をベースとして、flavor ごとにノードリストを構築する
+2. **RUNNING ジョブの消費を控除する**:
+   - 通常ジョブ（`completions IS NULL`）: `node_name` で指定された 1 ノードから `cpu_millicores` / `memory_mib` / `gpu` をそれぞれ控除する
+   - sweep ジョブ（`completions IS NOT NULL`）: `node_name` はカンマ区切りの累積記録（Watcher が pod 配置を観測した全ノード）であり、各ノードの現在の pod 数は不明。`parallelism` 個の pod をリストされたノードに**均等分配**したものとして、各ノードから `floor(parallelism / N) × per_pod_resource` を控除する（N はリスト中のノード数）。`parallelism mod N` の余り pod 分はリスト先頭から 1 ノードずつ 1 pod 余分に振る
+3. **DISPATCHING/DISPATCHED ジョブの消費を least-loaded 仮配置で控除する**:
+   - これらのジョブは `node_name` が未確定（Watcher は RUNNING 遷移時に記録する）であるため、kube-scheduler が選ぶであろうノードを推定する
+   - 各ジョブの per-pod リソース要求が**収まるノードのうち最も残量が大きいもの**（least-loaded; kube-scheduler のデフォルト LeastAllocated と一致）を選び、そのノードから 1 pod 分を控除する
+   - sweep の場合は `parallelism` 個の pod それぞれを least-loaded で順次配置する。途中で配置できない pod があった場合は残量が尽きたとみなしてその時点で打ち切る（実際の kube-scheduler の挙動と一致させるため）
+
+`node_resources` テーブルが空（Watcher 未起動）の場合は本チェックをスキップし、全候補を通過させる。
+
+#### 2.6.2 候補の判定とサイクル内累積
+
+候補ジョブごとに、ノード残量に対して bin-packing を試行する。
+
+1. 候補の per-pod リソース要求（通常ジョブは 1 pod、sweep ジョブは `parallelism` 個の pod）に対して**全 pod が least-loaded で配置可能か**を試行する
+2. **通常ジョブ**: 1 pod が収まるノードがあれば通過、なければ除外（QUEUED に留置）
+3. **sweep ジョブ**: `parallelism` 個の pod 全てが配置できる場合のみ通過、1 つでも配置できなければ除外。この判定にすることで、partial 起動の新規 sweep が既に起動済みの sweep の pod 配置と競合することを防ぐ
+4. 通過した候補が消費するリソースは選択されたノードの残量から控除し、後続候補の判定に反映する（同サイクル内累積追跡で過剰 dispatch を防止）
+5. 候補の `flavor` に対応するノードが `node_resources` に存在しない場合は制限なしとして通過させる（flavor 設定変更直後など）
+
+#### 2.6.3 設計判断
+
+- **least-loaded 戦略の選択**: kube-scheduler のデフォルトスコアリング（`LeastAllocated`）が pod を最も空いているノードに配置する挙動と一致させる。これにより仮配置と実 admission の乖離が小さくなり、同一サイクル内で複数候補を評価する際に「すべてのノードから少しずつ控除されて per-node 残量が一様に小さくなる」保守的な動きとなる。best-fit（最小残量へ集中）では仮配置が偏り、未使用ノードを誤って空いていると判定して過剰 admit を引き起こす
+- **DISPATCHING/DISPATCHED の least-loaded 仮配置**: RUNNING のみを控除する楽観評価では、Watcher が `node_name` を記録するまでの数秒〜十数秒の間に複数ジョブが投入された場合、同一ノードへの過剰 admit が再発する。least-loaded 仮配置で in-flight ジョブを擬似的にノードへ割り当てることで、サイクル間の race も含めて per-node 残量を一貫した状態で評価できる
+- **sweep RUNNING ジョブの均等分配**: Watcher が記録する `node_name` は累積記録のため、現在実行中の pod 数を per-node に正確にマッピングできない。均等分配は近似だが、cluster-wide で合計消費量が正確であり、典型ケースで合理的な per-node 推定となる。次サイクルで状態が更新されれば自然に補正される
+- **sweep 新規 admit で全 pod fit を要求**: 1 タスクのみで admit すると、新規 sweep の Pending pod が既存 sweep の pod rotation と競合し、起動済み sweep の next task が配置できない事象が起きうる。全 pod fit を要求することで起動済み sweep が邪魔されないことを保証する。代わりに大型 sweep の起動が遅れる場合があるが、隙間充填（§2.4）が `GAP_FILLING_STALL_THRESHOLD_SEC` 経過後に最終救済として効く
+- **既存の隙間充填（§2.4）との関係**: 隙間充填は同一 `(namespace, flavor)` の滞留ジョブが存在する場合のみ起動し、flavor 単位の合計利用可能リソースで判定する。本プレチェックは全 dispatch サイクルで動作し、per-node 残量で判定する。両者は独立に動作し、本プレチェックの導入により隙間充填まで進む滞留事象自体が減ることが期待される
+- **K8s API は参照しない**: per-node 残量は DB の `node_resources` テーブルのみから算出する。これにより K8s API 障害が Dispatcher に波及しない。`node_resources` の同期遅延（`NODE_RESOURCE_SYNC_INTERVAL_SEC`、デフォルト 300 秒）はノード追加・撤去の検知遅延として現れるが、in-flight ジョブの best-fit 仮配置と RUNNING ジョブの控除はリアルタイムの DB 状態で行われるため、ジョブ流入による per-node 残量変動は即座に反映される
+
+#### 2.6.4 設定値
+
+| 設定 | ConfigMap キー | デフォルト値 | 説明 |
+|---|---|---|---|
+| per-node bin-packing プレチェックの有効/無効 | `NODE_BIN_PACKING_ENABLED` | true | false にすると本プレチェックをスキップする（従来動作） |
+
+#### 2.6.5 制約と限界
+
+- **kube-scheduler の選択を予測しきれない**: least-loaded による仮配置は kube-scheduler のデフォルト挙動を模倣するが、anti-affinity・topology spread・追加プラグイン等の影響で実選択と乖離する可能性がある。乖離が起きると候補は通過しても実 admit で配置できないケースが残る。ただし通過させない場合と比べて改善される
+- **sweep RUNNING の per-node 推定誤差**: 均等分配は近似であり、実際の pod 配置が偏っている場合に誤差が生じる。誤差は cluster-wide では相殺されるが、特定ノードの判定が緩く/厳しくなる可能性がある。誤差の影響は小さく、次サイクルで状態が更新されれば自然に補正される
+- **node_resources の同期遅延**: Watcher が 300 秒間隔でしか同期しないため、ノード追加・撤去の検知に最大 5 分の遅延がある。新ノード追加時は古い情報で判定するため候補が誤って除外されるが、5 分後に補正される
+- **node_name が DB に未記録の RUNNING ジョブ**: §2 完了フォールバック等で `node_name` が NULL のまま RUNNING になっているジョブは per-node 控除に反映されない。in-flight 控除と同じ best-fit 仮配置で扱う
+
+#### 2.6.6 擬似コード
+
+```python
+# ※ 概念説明のための擬似コードである。
+
+def filter_by_node_capacity(
+    session: Session,
+    candidates: list[Job],
+    settings: Settings,
+) -> list[Job]:
+    """per-node 残量に基づき dispatch 候補をフィルタリングする。"""
+    if not settings.NODE_BIN_PACKING_ENABLED:
+        return candidates
+    if not candidates:
+        return candidates
+
+    # ノード残量を flavor → [{node_name, cpu, mem, gpu}, ...] で構築
+    residuals = _build_node_residuals(session)
+    if not residuals:
+        # node_resources が空（Watcher 未起動）→ 制限なし
+        return candidates
+
+    # RUNNING ジョブの控除（通常: node_name から、sweep: 均等分配）
+    _subtract_running_consumption(session, residuals)
+
+    # DISPATCHING/DISPATCHED の least-loaded 仮配置で控除
+    _subtract_in_flight_least_loaded(session, residuals)
+
+    result = []
+    for job in candidates:
+        nodes = residuals.get(job.flavor)
+        if nodes is None:
+            # flavor に対応するノードがない → 制限なし
+            result.append(job)
+            continue
+
+        is_sweep = job.completions is not None
+        num_pods = job.parallelism if is_sweep else 1
+        cpu, mem, gpu = job.cpu_millicores, job.memory_mib, job.gpu
+
+        # 試行用コピーで全 pod の配置を試みる
+        trial = [dict(n) for n in nodes]
+        placements: list[int] | None = []
+        for _ in range(num_pods):
+            idx = _find_least_loaded(trial, cpu, mem, gpu)
+            if idx is None:
+                placements = None   # 全 pod 配置不可
+                break
+            trial[idx]["cpu"] -= cpu
+            trial[idx]["mem"] -= mem
+            trial[idx]["gpu"] -= gpu
+            placements.append(idx)
+
+        if placements is None:
+            logger.debug("Node bin-packing: skipping %s/%d", job.namespace, job.job_id)
+            continue
+
+        # 全 pod 配置可 → admit し、選択ノードの残量を確定控除
+        result.append(job)
+        for idx in placements:
+            nodes[idx]["cpu"] -= cpu
+            nodes[idx]["mem"] -= mem
+            nodes[idx]["gpu"] -= gpu
+
+    return result
+
+
+def _find_least_loaded(nodes, cpu, mem, gpu):
+    """要求リソースが収まるノードのうち、現在の CPU 残量が最大（least-loaded）のノードを返す。"""
+    best_idx, best_remaining = None, None
+    for i, n in enumerate(nodes):
+        if n["cpu"] >= cpu and n["mem"] >= mem and n["gpu"] >= gpu:
+            if best_remaining is None or n["cpu"] > best_remaining:
+                best_idx, best_remaining = i, n["cpu"]
+    return best_idx
+```
+
+### 2.7 起動時の初期化処理
 
 Dispatcher 再起動時に `DISPATCHING` で止まっているジョブを `QUEUED` に戻す。
 

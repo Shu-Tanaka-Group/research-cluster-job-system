@@ -87,6 +87,14 @@ Difference between ResourceQuota and ClusterQueue nominalQuota: ResourceQuota is
 
 See [dispatcher.md](dispatcher.md) §2.4 for details on gap filling.
 
+### Settings Related to per-node bin-packing Pre-check
+
+| Setting | Location | Value | Manager | Scope | Description |
+|---|---|---|---|---|---|
+| `NODE_BIN_PACKING_ENABLED` | ConfigMap | true | Dispatcher | Global | Enables/disables the per-node bin-packing pre-check. Setting to false skips the pre-check and reverts to the legacy behavior, where admission is decided solely by Kueue's flavor-level nominalQuota. |
+
+See [dispatcher.md](dispatcher.md) §2.6 for details on the per-node bin-packing pre-check.
+
 ### Settings Related to Fair Sharing
 
 | Setting | Location | Value | Manager | Scope | Description |
