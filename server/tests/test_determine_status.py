@@ -15,14 +15,27 @@ def _light_condition(cond: V1JobCondition) -> LightJobCondition:
     )
 
 
-def _make_k8s_job(conditions=None, active=None):
-    """Helper to build a minimal LightK8sJob for testing determine_status."""
+_UNSET = object()
+
+
+def _make_k8s_job(conditions=None, active=None, ready=_UNSET):
+    """Helper to build a minimal LightK8sJob for testing determine_status.
+
+    When ``ready`` is not specified, it defaults to ``active`` so existing
+    call sites that mean "Pod is up and Running" with ``active=1`` continue
+    to work without rewriting every test (watcher.md §3 requires
+    active>0 AND ready>0 for the RUNNING transition). Pass ``ready=None``
+    explicitly to simulate a Job whose ready field is absent.
+    """
+    if ready is _UNSET:
+        ready = active
     return LightK8sJob(
         namespace="user-test",
         job_id=1,
         name="test-job",
         conditions=tuple(_light_condition(c) for c in (conditions or [])),
         active=active,
+        ready=ready,
         succeeded=None,
         failed=None,
         completed_indexes=None,
@@ -62,8 +75,28 @@ class TestDetermineStatus:
         assert reason == "DeadlineExceeded"
 
     def test_running(self):
-        job = _make_k8s_job(active=1)
+        job = _make_k8s_job(active=1, ready=1)
         assert determine_status(job) == ("RUNNING", None)
+
+    def test_pending_pod_not_running(self):
+        """active=1, ready=0 (Pod Pending, e.g. node resource shortage) → no transition."""
+        job = _make_k8s_job(active=1, ready=0)
+        assert determine_status(job) == (None, None)
+
+    def test_running_requires_ready_present(self):
+        """active=1 but ready field missing (older K8s) → no transition."""
+        job = _make_k8s_job(active=1, ready=None)
+        assert determine_status(job) == (None, None)
+
+    def test_sweep_partial_running(self):
+        """Sweep: some Pods Pending, some Running (active=5, ready=2) → RUNNING."""
+        job = _make_k8s_job(active=5, ready=2)
+        assert determine_status(job) == ("RUNNING", None)
+
+    def test_sweep_all_pending(self):
+        """Sweep: all Pods Pending (active=5, ready=0) → no transition."""
+        job = _make_k8s_job(active=5, ready=0)
+        assert determine_status(job) == (None, None)
 
     def test_no_status(self):
         job = _make_k8s_job()
@@ -90,6 +123,7 @@ class TestDetermineStatus:
             name="test-job",
             conditions=(),
             active=None,
+            ready=None,
             succeeded=None,
             failed=None,
             completed_indexes=None,

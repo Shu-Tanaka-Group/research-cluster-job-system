@@ -13,3 +13,9 @@
 - 「キュー内ジョブ数の推移」の「待機中」凡例を「リソース割当待ち」にリネーム
 - 「ジョブ状態の内訳」piechart で `DISPATCHING` を表示対象から除外。`QUEUED` を「投入済み」、`DISPATCHED` を「割当待ち」にリネーム
 - 「リソース割当て待ち (P50)」「リソース割当て待ち時間の推移 (P50 / P95)」の送り仮名「て」を削除（「リソース割当待ち」に統一）
+
+## Kubernetes 最低バージョン要件
+
+Watcher の RUNNING 判定が K8s Job の `status.ready` フィールド（`JobReadyPods` 機能）を参照するようになった。`JobReadyPods` が GA となる **Kubernetes v1.26 以上** を要件として明文化した（[prerequisites.md](../architecture/prerequisites.md) §1 参照）。
+
+v1.26 未満のクラスタにデプロイした場合、`status.ready` が常に未設定（None）となり、Watcher はジョブを RUNNING 状態に遷移させなくなる。アップグレード前にクラスタの K8s バージョンを確認すること。

@@ -37,6 +37,7 @@ class LightK8sJob:
     name: str
     conditions: tuple[LightJobCondition, ...]
     active: int | None
+    ready: int | None
     succeeded: int | None
     failed: int | None
     completed_indexes: str | None
@@ -60,6 +61,7 @@ class LightK8sJob:
 
         conditions: tuple[LightJobCondition, ...] = ()
         active: int | None = None
+        ready: int | None = None
         succeeded: int | None = None
         failed: int | None = None
         completed_indexes: str | None = None
@@ -77,6 +79,7 @@ class LightK8sJob:
                     for c in status.conditions
                 )
             active = status.active
+            ready = getattr(status, "ready", None)
             succeeded = status.succeeded
             failed = status.failed
             completed_indexes = getattr(status, "completed_indexes", None)
@@ -88,6 +91,7 @@ class LightK8sJob:
             name=meta.name or "",
             conditions=conditions,
             active=active,
+            ready=ready,
             succeeded=succeeded,
             failed=failed,
             completed_indexes=completed_indexes,
@@ -141,7 +145,12 @@ def determine_status(k8s_job: LightK8sJob) -> tuple[str | None, str | None]:
         if cond.type == "Failed" and cond.status == "True":
             return "FAILED", cond.reason
 
-    if k8s_job.active and k8s_job.active > 0:
+    # Pending Pod を RUNNING と誤判定しないため status.ready で
+    # 「実際にコンテナが Running 中の Pod」の存在を確認する (watcher.md §3)。
+    if (
+        k8s_job.active and k8s_job.active > 0
+        and k8s_job.ready and k8s_job.ready > 0
+    ):
         return "RUNNING", None
 
     return None, None

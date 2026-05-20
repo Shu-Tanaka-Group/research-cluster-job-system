@@ -15,3 +15,9 @@ The user-facing dashboard at `k8s/base/grafana/dashboard-user.json` has been rev
 - "Queue Job Count Over Time": the "Waiting" legend was renamed to "Awaiting Resource Allocation".
 - "Job Status Breakdown" pie chart: `DISPATCHING` is now excluded from the display. `QUEUED` was relabeled to "Submitted" and `DISPATCHED` to "Allocation Wait".
 - "Resource Allocation Wait (P50)" and "Resource Allocation Wait Time Over Time (P50 / P95)": the Japanese okurigana "て" was removed from the title (unifying the term as "リソース割当待ち").
+
+## Kubernetes Minimum Version Requirement
+
+The Watcher's RUNNING determination now consults the `status.ready` field of K8s Jobs (the `JobReadyPods` feature). The minimum cluster requirement is now stated explicitly as **Kubernetes v1.26 or later**, the version where `JobReadyPods` reaches GA (see [prerequisites.md](../architecture/prerequisites.md) §1).
+
+If deployed onto a cluster older than v1.26, `status.ready` will always be unset (None) and the Watcher will never transition jobs to RUNNING. Verify the cluster's K8s version before upgrading.

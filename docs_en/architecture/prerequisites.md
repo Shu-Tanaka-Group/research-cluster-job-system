@@ -6,7 +6,7 @@
 
 This system is built on the following assumptions.
 
-- A Kubernetes cluster exists
+- A Kubernetes cluster exists (v1.26 or later. The `status.ready` field that the Watcher uses for Job state determination is stably available since v1.26, when the `JobReadyPods` feature reached GA. See [watcher.md](watcher.md) §3.)
 - Namespaces are isolated per user (created manually or automated via scripts)
 - A working PVC exists per user namespace
 - The PVC mount path defaults to `/home/jovyan` and can be changed via the `WORKSPACE_MOUNT_PATH` key in ConfigMap
