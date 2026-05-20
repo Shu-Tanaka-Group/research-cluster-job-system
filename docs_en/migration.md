@@ -132,6 +132,7 @@ If there are version-specific verification items, refer to the PR's Test plan or
 
 For versions that require additional work beyond the standard procedure, version-specific migration procedures are provided in the `docs_en/migration/` directory. When updating to such a version, refer to these alongside the standard procedures. Files may not exist for versions with minor changes.
 
+- [v1.15.0](migration/v1.15.0.md) — Re-import Grafana dashboards, add `NODE_BIN_PACKING_ENABLED`, formalize K8s minimum version v1.26
 - [v1.14.0](migration/v1.14.0.md) — Raise Watcher memory limit, add `WATCHER_K8S_LIST_PAGE_SIZE` / `WATCHER_DISPATCH_GRACE_SEC`
 - [v1.13.0](migration/v1.13.0.md) — Retire `cjobctl counters list`, remove ClusterQueue cohortName/lendingLimit, add `DISPATCHER_METRICS_PORT`
 - [v1.12.0](migration/v1.12.0.md) — Per-flavor DRF weight, namespace_daily_usage flavor column addition, weight Float type conversion, USAGE_RETENTION_DAYS setting addition
