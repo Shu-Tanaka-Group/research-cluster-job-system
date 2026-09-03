@@ -156,8 +156,14 @@ def determine_status(k8s_job: LightK8sJob) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _delete_k8s_job(namespace: str, name: str):
-    """Delete a K8s Job with background propagation."""
+def _delete_k8s_job(namespace: str, name: str) -> bool:
+    """Delete a K8s Job with background propagation.
+
+    Returns True when the Job is known to be gone (deletion accepted or the
+    Job was already absent), False when the deletion request failed. Callers
+    that must not update the DB while the K8s Job may still be running check
+    this return value (watcher.md §3 Step 9).
+    """
     batch_v1 = k8s_client.BatchV1Api()
     try:
         batch_v1.delete_namespaced_job(
@@ -168,11 +174,13 @@ def _delete_k8s_job(namespace: str, name: str):
             ),
         )
         logger.info("Deleted K8s Job %s/%s", namespace, name)
+        return True
     except ApiException as e:
         if e.status == 404:
             logger.debug("K8s Job %s/%s already deleted", namespace, name)
-        else:
-            logger.error("Failed to delete K8s Job %s/%s: %s", namespace, name, e)
+            return True
+        logger.error("Failed to delete K8s Job %s/%s: %s", namespace, name, e)
+        return False
 
 
 class NamespacePodNodeResolver:
@@ -265,6 +273,83 @@ def _record_resource_usage(session: Session, job: Job):
             "delta_gpu": delta_gpu,
         },
     )
+
+
+def _as_utc(value: datetime) -> datetime:
+    """Normalize a DB timestamp to an aware UTC datetime.
+
+    PostgreSQL returns TIMESTAMPTZ as aware datetimes, while the SQLite test
+    fixture returns naive ones. Naive values are stored in UTC (the Watcher
+    only writes ``func.now()`` / UTC values), so they are simply tagged.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _enforce_time_limits(
+    session: Session, k8s_map: dict[tuple[str, int], LightK8sJob]
+):
+    """Terminate RUNNING jobs that exceeded their time limit (watcher.md §3 Step 9).
+
+    The time limit is measured from ``started_at`` (when the Watcher observed
+    RUNNING) rather than from the K8s Job's ``.status.startTime``, so time
+    spent waiting for a node after Kueue admitted the Job is not counted.
+
+    The K8s Job is deleted first and the DB is only updated once the deletion
+    succeeded. The reverse order would leave a surviving K8s Job able to
+    overwrite the DB with SUCCEEDED on completion (the terminal-state
+    regression guard only blocks transitions to RUNNING).
+    """
+    candidates = (
+        session.query(Job)
+        .filter(Job.status == "RUNNING", Job.started_at.isnot(None))
+        .all()
+    )
+    if not candidates:
+        return
+
+    now = datetime.now(timezone.utc)
+    for job in candidates:
+        deadline = _as_utc(job.started_at) + timedelta(
+            seconds=job.time_limit_seconds
+        )
+        if deadline >= now:
+            continue
+
+        ns, jid = job.namespace, job.job_id
+        kj = k8s_map.get((ns, jid))
+        k8s_job_name = job.k8s_job_name or (kj.name if kj else None)
+        if not k8s_job_name:
+            # Nothing to delete and no way to stop the workload; leave the job
+            # RUNNING so Step 8 can handle it once the K8s Job disappears.
+            logger.error(
+                "Time limit exceeded for %s/%d but k8s_job_name is unknown; "
+                "skipping enforcement",
+                ns, jid,
+            )
+            continue
+
+        if not _delete_k8s_job(ns, k8s_job_name):
+            # Retry on the next cycle; the job stays RUNNING until the K8s
+            # Job is confirmed gone.
+            logger.warning(
+                "Time limit exceeded for %s/%d but K8s Job deletion failed; "
+                "will retry next cycle",
+                ns, jid,
+            )
+            continue
+
+        job.status = "FAILED"
+        job.last_error = "time limit exceeded"
+        job.finished_at = func.now()
+        JOBS_COMPLETED_TOTAL.labels(status="failed").inc()
+        session.add(JobEvent(namespace=ns, job_id=jid, event_type="FAILED"))
+        logger.info(
+            "Marked %s/%d as FAILED: time limit exceeded "
+            "(time_limit=%ds, started_at=%s)",
+            ns, jid, job.time_limit_seconds, job.started_at,
+        )
 
 
 def reconcile_cycle(
@@ -405,6 +490,12 @@ def reconcile_cycle(
                 JobEvent(namespace=ns, job_id=jid, event_type=new_status)
             )
             logger.info("Updated %s/%d: %s -> %s", ns, jid, old_status, new_status)
+
+    # Step 9: Enforce time limits before the Step 8 disappearance check.
+    # Running it after the status sync above avoids killing jobs that already
+    # reached a terminal state in this cycle; running it before Step 8 keeps
+    # the jobs it just failed out of the disappearance query.
+    _enforce_time_limits(session, k8s_map)
 
     # Step 8: Mark DISPATCHED/RUNNING jobs with no K8s Job as FAILED.
     # First collect only (namespace, job_id) to avoid loading full Job rows

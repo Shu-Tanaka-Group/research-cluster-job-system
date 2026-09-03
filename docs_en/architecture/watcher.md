@@ -9,6 +9,7 @@ The Watcher / Reconciler reflects the execution state on the Kubernetes side int
 - Monitoring Job status
 - Monitoring Pod status
 - Transitioning to `RUNNING` / `SUCCEEDED` / `FAILED`
+- Enforcing the time limit (`time_limit_seconds`)
 - Deleting K8s Jobs for `CANCELLED` jobs
 - Deleting K8s Jobs, deleting DB records, and resetting counters for `DELETING` jobs
 - Detecting orphan Jobs
@@ -60,13 +61,13 @@ The Dispatcher alone cannot detect K8s Job completion / failure, so the Watcher 
 
 ## 3. Minimum Algorithm
 
-1. Periodically monitor the Kubernetes Job list using `WATCHER_K8S_LIST_PAGE_SIZE` (§5.5) for pagination, converting each page to lightweight dataclasses (§5.1). **If an API call fails for any page, the entire reconcile cycle is skipped** (Steps 2–8 and DELETING Phase 2 assume the K8s Job list is complete; continuing with an incomplete list would cause Step 8 to wrongly transition healthy jobs to FAILED and DELETING Phase 2 to clean up DB records while K8s Jobs still exist).
+1. Periodically monitor the Kubernetes Job list using `WATCHER_K8S_LIST_PAGE_SIZE` (§5.5) for pagination, converting each page to lightweight dataclasses (§5.1). **If an API call fails for any page, the entire reconcile cycle is skipped** (Steps 2–9 and DELETING Phase 2 assume the K8s Job list is complete; continuing with an incomplete list would cause Step 8 to wrongly transition healthy jobs to FAILED and DELETING Phase 2 to clean up DB records while K8s Jobs still exist).
 2. Interpret the Job's `status.conditions` according to the following rules:
 
    | K8s Job's `status.conditions` | DB status | Notes |
    |---|---|---|
    | `type: Complete, status: True` | `SUCCEEDED` | |
-   | `type: Failed, status: True, reason: DeadlineExceeded` | `FAILED` | Set `last_error` to `"time limit exceeded"` |
+   | `type: Failed, status: True, reason: DeadlineExceeded` | `FAILED` | Set `last_error` to `"time limit exceeded"`. cjob does not set `activeDeadlineSeconds` on K8s Jobs (the time limit is enforced in §3 Step 9), so this condition only appears for Jobs created before this change or Jobs given an `activeDeadlineSeconds` manually |
    | `type: Failed, status: True` | `FAILED` | Includes Pod exit code non-zero / startup failures |
    | No conditions, `status.active > 0` and `status.ready > 0` | `RUNNING` | On first RUNNING transition, record `started_at`, retrieve `node_name` from all Pods' `spec.nodeName` and record it, and add cumulative consumption to `namespace_daily_usage` (see [database.md](database.md) §5.2) |
 
@@ -96,6 +97,27 @@ The Dispatcher alone cannot detect K8s Job completion / failure, so the Watcher 
 8. Transition jobs that are DISPATCHED / RUNNING in the DB but whose corresponding K8s Job no longer exists to FAILED (set `last_error` to `"K8s Job not found (TTL expired or manually deleted)"` and `finished_at` to the current time). This provides automatic recovery when DB and K8s state diverge due to automatic K8s Job deletion via `ttlSecondsAfterFinished` or manual deletion.
 
    **Dispatcher grace period:** DISPATCHED jobs whose `dispatched_at` is newer than `NOW() - WATCHER_DISPATCH_GRACE_SEC` are excluded from this check. When the Dispatcher creates a job immediately after the Watcher snapshots the K8s Job list at the start of a reconcile cycle, that cycle's list will not yet contain the newly-created Job; without this guard, freshly dispatched jobs would be incorrectly recorded as FAILED. The grace period is not applied to RUNNING jobs (once observed, their K8s Job will remain visible in subsequent cycles, so disappearance indicates a real deletion).
+
+9. Terminate jobs whose execution time exceeded the time limit (time limit enforcement)
+
+   The K8s Job's `activeDeadlineSeconds` is not used; instead the Watcher enforces the time limit measured from `started_at`. K8s measures from `.status.startTime`, which is fixed at the moment Kueue unsuspends the Job, so the time the Pod subsequently spends Pending while kube-scheduler waits for a node to free up would be counted against the time limit. To avoid this, the time at which execution actually began (`started_at`) is used as the origin.
+
+   **Targets:** jobs with `status = 'RUNNING'` and `started_at IS NOT NULL` and `started_at + time_limit_seconds < NOW()`
+
+   **Order of operations:** delete the K8s Job with `propagation_policy="Background"` (Pods are deleted along with it and terminate after SIGTERM plus the grace period), and update the DB **only after the deletion succeeds (including 404)**. Set `status` to `FAILED`, `last_error` to `"time limit exceeded"`, and `finished_at` to the current time; append `FAILED` to `job_events`; and increment `cjob_jobs_completed_total{status="failed"}`. Usage (`namespace_daily_usage`) is not added, because it was already recorded on the RUNNING transition.
+
+   Deletion comes first because in the reverse order a failed deletion would leave the K8s Job alive, and if that job then ran to completion Step 4 would overwrite the DB with `SUCCEEDED` (the terminal-state regression guard only blocks transitions to RUNNING). With deletion first, a job whose deletion failed stays RUNNING and is retried on the next cycle.
+
+   If the Watcher crashes after a successful deletion but before the DB commit, the next cycle's Step 8 picks the job up and `last_error` becomes `"K8s Job not found (TTL expired or manually deleted)"`. The window is on the order of milliseconds and the final state (FAILED) is correct, so this is acceptable.
+
+   **Execution position:** run after all of Step 4's status synchronization is complete, and before Step 8's disappearance check. Running it after Step 4 avoids deleting jobs that naturally transitioned to SUCCEEDED / FAILED in the same cycle. Running it before Step 8 keeps the jobs it just marked FAILED from being picked up twice.
+
+   **Expected constraints:**
+
+   - Detection granularity equals the scan cycle interval (`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`, default 10 seconds). This is a negligible error relative to a 24-hour time limit
+   - If the Watcher is stopped for a long period, jobs past their time limit keep running. The liveness probe automatically recovers a stalled loop, but a crash loop is not recovered. The impact is limited to resource occupation; no data loss occurs
+   - `started_at` is the time the Watcher observed RUNNING, which lags the container's actual start time by at most one scan cycle. This works in the user's favor, so it is acceptable
+   - K8s Jobs created before this change keep running with their `activeDeadlineSeconds`, so jobs already running at rollout time retain the old behavior (see [migration](../migration.md))
 
 **Relationship between the grace period and scan cycle interval:**
 
@@ -130,7 +152,9 @@ WHERE namespace = :namespace
 Follows the K8s Job's `status.conditions` (same logic as regular jobs). The final status is determined at the point where a `Complete` or `Failed` condition appears.
 
 - When K8s returns `Complete`: **FAILED** if `failed_count > 0`, **SUCCEEDED** if `failed_count == 0`.
-- When K8s returns `Failed` (e.g. `activeDeadlineSeconds` exceeded): **FAILED**.
+- When K8s returns `Failed` (e.g. Pod exit code non-zero, startup failure): **FAILED**.
+
+Time limit excess is enforced by the Watcher rather than by K8s `activeDeadlineSeconds` (§3 Step 9). Sweep jobs are handled the same way as regular jobs: a single time limit applies to the whole Job, measured from `started_at` (the time the first Pod entered RUNNING).
 
 This ensures that sweeps with partially failed tasks are always treated as FAILED.
 

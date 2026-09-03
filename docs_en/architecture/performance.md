@@ -208,7 +208,7 @@ This can significantly reduce the number of Job objects in etcd (100 tasks expre
 |---|---|
 | Command branching | Since all Pods share the same container spec, a mechanism is needed to use Indexed Job (`completionMode: Indexed`) and branch commands within the Pod by index |
 | Failure isolation | If `backoffLimit` is reached, the entire Job becomes Failed. Cannot treat individual task success/failure independently |
-| time_limit granularity | `activeDeadlineSeconds` applies to the entire Job. Cannot set a different time_limit per task |
+| time_limit granularity | The time limit applies to the entire Job (the Watcher enforces it per Job). Cannot set a different time_limit per task |
 | Log separation | A mechanism is needed to separate logs for multiple tasks within a single Job |
 | Cancel granularity | Individual tasks cannot be canceled independently |
 | Kueue admit | Since Kueue tries to reserve resources for the full `parallelism` at admit time, individual Pods cannot be admitted incrementally |

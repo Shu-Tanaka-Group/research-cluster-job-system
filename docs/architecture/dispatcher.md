@@ -301,7 +301,7 @@ class Dispatcher:
 
         # DISPATCHING への更新が確定したので続行
         try:
-            k8s.create_job(job)  # job.time_limit_seconds を activeDeadlineSeconds に設定
+            k8s.create_job(job)
             # AND status='DISPATCHING' 条件により CANCELLED を上書きしない
             # updated_rows == 0 の場合は status が CANCELLED のまま維持され、
             # Watcher が次のサイクルで CANCELLED ジョブの K8s Job を削除する（watcher.md §3 Step 5）
@@ -716,7 +716,6 @@ spec:
   completions: <completions>
   parallelism: <parallelism>
   backoffLimitPerIndex: 0
-  activeDeadlineSeconds: <time_limit_seconds>
 ```
 
 `backoffLimitPerIndex: 0` により、1 回失敗したタスクは再試行せず即座に `failedIndexes` に追加される。sweep ジョブでは失敗タスクの再試行が parallelism 枠を占有し、他のタスクの実行を妨げるため、即座に枠を解放する必要がある。

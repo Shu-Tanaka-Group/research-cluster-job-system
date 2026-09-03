@@ -12,7 +12,7 @@ from kubernetes.client import (
 from kubernetes.client.rest import ApiException
 
 from cjob.metrics import JOBS_COMPLETED_TOTAL
-from cjob.models import Job, NamespaceDailyUsage, UserJobCounter
+from cjob.models import Job, JobEvent, NamespaceDailyUsage, UserJobCounter
 from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 from cjob.watcher.reconciler import (
     LightJobCondition,
@@ -1308,3 +1308,201 @@ class TestMetrics:
         before = JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get()
         reconcile_cycle(db_session, [])
         assert JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get() - before == 1
+
+
+@patch.object(NamespacePodNodeResolver, "resolve", return_value=[])
+@patch("cjob.watcher.reconciler._delete_k8s_job")
+class TestTimeLimitEnforcement:
+    """Test Step 9: RUNNING jobs past started_at + time_limit are terminated."""
+
+    @staticmethod
+    def _ago(**kwargs):
+        return datetime.now(timezone.utc) - timedelta(**kwargs)
+
+    def test_over_limit_job_marked_failed(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.last_error == "time limit exceeded"
+        assert job.finished_at is not None
+
+    def test_over_limit_job_deletes_k8s_job(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        mock_delete.assert_called_once_with(NS, "cjob-alice-1")
+
+    def test_over_limit_job_records_event(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        events = db_session.query(JobEvent).filter_by(namespace=NS, job_id=1).all()
+        assert [e.event_type for e in events] == ["FAILED"]
+
+    def test_over_limit_job_increments_failed_counter(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        before = JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get()
+        reconcile_cycle(db_session, k8s_jobs)
+        assert JOBS_COMPLETED_TOTAL.labels(status="failed")._value.get() - before == 1
+
+    def test_over_limit_job_does_not_record_usage_again(self, mock_delete, mock_resolve, db_session):
+        """Usage was already added on the RUNNING transition (watcher.md §3 Step 9)."""
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        assert db_session.query(NamespaceDailyUsage).all() == []
+
+    def test_within_limit_job_untouched(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(minutes=10), k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
+        assert job.finished_at is None
+        mock_delete.assert_not_called()
+
+    def test_naive_started_at_treated_as_utc(self, mock_delete, mock_resolve, db_session):
+        """SQLite returns naive timestamps; they must be read as UTC, not local time."""
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=datetime.now(timezone.utc).replace(tzinfo=None),
+                    k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
+
+    def test_delete_failure_keeps_job_running(self, mock_delete, mock_resolve, db_session):
+        """DB is only updated once the K8s Job is confirmed gone."""
+        mock_delete.return_value = False
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
+        assert job.last_error is None
+        assert db_session.query(JobEvent).filter_by(namespace=NS, job_id=1).all() == []
+
+    def test_started_at_null_not_targeted(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=1,
+                    started_at=None, k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
+        mock_delete.assert_not_called()
+
+    def test_terminal_job_not_targeted(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="SUCCEEDED", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1",
+                                  conditions=[V1JobCondition(type="Complete", status="True")])]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "SUCCEEDED"
+        assert job.last_error is None
+
+    def test_job_completed_in_same_cycle_not_killed(self, mock_delete, mock_resolve, db_session):
+        """Step 9 runs after the status sync, so a job that finished wins."""
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1",
+                                  conditions=[V1JobCondition(type="Complete", status="True")])]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "SUCCEEDED"
+        assert job.last_error is None
+        mock_delete.assert_not_called()
+
+    def test_job_starting_this_cycle_not_killed(self, mock_delete, mock_resolve, db_session):
+        """started_at is set in this very cycle, so the deadline is far away."""
+        _insert_job(db_session, 1, status="DISPATCHED", time_limit_seconds=3600,
+                    k8s_job_name="cjob-alice-1")
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
+        mock_delete.assert_not_called()
+
+    def test_falls_back_to_observed_k8s_job_name(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name=None)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        mock_delete.assert_called_once_with(NS, "cjob-alice-1")
+        assert db_session.get(Job, (NS, 1)).status == "FAILED"
+
+    def test_unknown_k8s_job_name_skipped(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name=None)
+        k8s_jobs = [_make_k8s_job(NS, 1, "", active=1)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
+        mock_delete.assert_not_called()
+
+    def test_sweep_job_enforced(self, mock_delete, mock_resolve, db_session):
+        """One time limit applies to the whole sweep, measured from started_at."""
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1",
+                    completions=10, parallelism=5)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=5)]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.last_error == "time limit exceeded"
+        mock_delete.assert_called_once_with(NS, "cjob-alice-1")
+
+    def test_only_over_limit_job_affected(self, mock_delete, mock_resolve, db_session):
+        _insert_job(db_session, 1, status="RUNNING", time_limit_seconds=3600,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-1")
+        _insert_job(db_session, 2, status="RUNNING", time_limit_seconds=86400,
+                    started_at=self._ago(hours=2), k8s_job_name="cjob-alice-2")
+        k8s_jobs = [
+            _make_k8s_job(NS, 1, "cjob-alice-1", active=1),
+            _make_k8s_job(NS, 2, "cjob-alice-2", active=1),
+        ]
+
+        reconcile_cycle(db_session, k8s_jobs)
+
+        assert db_session.get(Job, (NS, 1)).status == "FAILED"
+        assert db_session.get(Job, (NS, 2)).status == "RUNNING"
+        mock_delete.assert_called_once_with(NS, "cjob-alice-1")

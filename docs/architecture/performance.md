@@ -206,7 +206,7 @@ K8s の `batch/v1 Job` は `completions` と `parallelism` フィールドによ
 |---|---|
 | コマンドの分岐 | 全 Pod が同一のコンテナ spec を持つため、Indexed Job（`completionMode: Indexed`）を使い Pod 内でインデックスに応じてコマンドを分岐させる仕組みが必要 |
 | 失敗の分離 | `backoffLimit` に達すると Job 全体が Failed になる。個別タスクの成功・失敗を独立に扱えない |
-| time_limit の粒度 | `activeDeadlineSeconds` は Job 全体に適用される。タスクごとに異なる time_limit を設定できない |
+| time_limit の粒度 | 制限時間は Job 全体に適用される（Watcher が Job 単位で強制する）。タスクごとに異なる time_limit を設定できない |
 | ログの分離 | 複数タスクのログを 1 Job 内で分離する仕組みが必要 |
 | キャンセルの粒度 | 個別タスクだけをキャンセルできない |
 | Kueue の admit | Kueue は admit 時に `parallelism` 分のリソースをまとめて確保しようとするため、個々の Pod 単位で段階的に admit されない |

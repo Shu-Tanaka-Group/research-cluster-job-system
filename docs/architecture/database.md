@@ -18,7 +18,7 @@ CREATE TABLE jobs (
     memory        TEXT NOT NULL,
     gpu           INTEGER NOT NULL DEFAULT 0,
     flavor        TEXT NOT NULL DEFAULT 'cpu', -- ジョブ実行先の ResourceFlavor 名（例: 'cpu', 'gpu-a100'）
-    time_limit_seconds INTEGER NOT NULL,   -- 実行時間上限（秒）。K8s Job の activeDeadlineSeconds に設定される
+    time_limit_seconds INTEGER NOT NULL,   -- 実行時間上限（秒）。Watcher が started_at 起点で強制する
     status        TEXT NOT NULL,
     retry_count   INTEGER NOT NULL DEFAULT 0,
     retry_after   TIMESTAMPTZ,              -- K8s 一時障害時の再試行解禁時刻（NULL = 即時対象）
