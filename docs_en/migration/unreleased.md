@@ -8,6 +8,8 @@ If there are migration procedures specific to the next release in addition to th
 
 ## Deployment Order (Watcher Before Dispatcher)
 
+> Related: issue #207 / PR #211
+
 Time limit enforcement moved from the Dispatcher (setting `activeDeadlineSeconds`) to the Watcher (enforcement measured from `started_at`), so **the Watcher must be deployed before the Dispatcher**.
 
 In the reverse order, the Dispatcher would create Jobs without `activeDeadlineSeconds` while the Watcher-side enforcement is not yet active, leaving jobs submitted during that window with no time limit at all.
@@ -15,6 +17,8 @@ In the reverse order, the Dispatcher would create Jobs without `activeDeadlineSe
 Following the deployment order in the [standard migration procedures](../migration.md) (`watcher` → `dispatcher` → `submit-api`) is sufficient.
 
 ## Old Behavior Remaining for Jobs Running at Rollout Time
+
+> Related: issue #207 / PR #211
 
 The time limit enforcement mechanism changed from the K8s Job's `activeDeadlineSeconds` to Watcher-side enforcement measured from `started_at` (see [watcher.md](../architecture/watcher.md) §3 Step 9).
 
@@ -26,6 +30,8 @@ K8s Jobs created by the Dispatcher before this version still carry `activeDeadli
 Newly created K8s Jobs are not given `activeDeadlineSeconds`, so jobs submitted after the rollout use the new behavior.
 
 ## Adding the DISPATCHED Stall Guard Settings to `cjob-config`
+
+> Related: issue #208 / PR #212
 
 Two new standard keys are added to the `cjob-config` ConfigMap.
 
@@ -43,6 +49,8 @@ Set `WATCHER_DISPATCH_TIMEOUT_SEC` well above the gap filling stall threshold (`
 
 ## Run the DB Schema Update (`jobs.unschedulable_count`) Before Step 4
 
+> Related: issue #208 / PR #212
+
 `unschedulable_count INTEGER NOT NULL DEFAULT 0` is added to the `jobs` table. It is applied idempotently by Step 5 (`cjobctl db migrate`) of the [standard migration procedures](../migration.md), and existing rows are filled with the default 0, so no additional data migration is required.
 
 For this version, however, **run Step 5 before Step 4 (applying K8s resources)**. The new Watcher writes to this column and the new Dispatcher reads it in its stalled-job detection query, so if the new components start while the column is missing, the reconcile and dispatch cycles keep failing with SQL errors.
@@ -55,6 +63,8 @@ cjobctl db migrate
 ```
 
 ## Re-import the Grafana Dashboard
+
+> Related: issue #208 / PR #212
 
 An "Awaiting Placement (Backoff)" panel was added to Row 3 of `k8s/base/grafana/dashboard-user.json`, and the width of the "Queue Usage by Flavor" table was changed from 24 to 18. The new panel reads `jobs.unschedulable_count`, so re-import it **after the DB schema update above**.
 

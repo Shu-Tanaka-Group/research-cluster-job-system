@@ -81,6 +81,16 @@ If any of the following changes are present, add migration steps to `docs/migrat
 - RBAC or Kyverno policy changes
 - Any other changes requiring manual configuration changes or data migration
 
+**Section format:** Immediately after each heading, add a one-line reference to the change that made the step necessary.
+
+```markdown
+## <Step heading>
+
+> Related: issue #<number>
+```
+
+The deployment cross-check (`/deploy-runbook` skill) uses this to map each section of `unreleased.md` to the actual changes mechanically. The PR number is not required because it can be traced from `Closes #<number>` in the PR body, but it may be added as `> Related: issue #<number> / PR #<number>` once known. For a change with no issue, use `> Related: PR #<number>`; for a direct commit with no PR either, use `> Related: <commit hash>`.
+
 ### Step 5: Rename the Migration Guide
 
 If `docs/migration/unreleased.md` contains specific migration steps, update the title at the top of the file, remove the instructions about creating `unreleased.md`, and rename the file to the version name.

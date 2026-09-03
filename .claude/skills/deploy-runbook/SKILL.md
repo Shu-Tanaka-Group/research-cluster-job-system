@@ -70,7 +70,7 @@ Kyverno ポリシーは Kustomize 管理外のため、変更があれば個別�
 
 導出が終わってから、記録側を読む。
 
-1. `docs/migration/unreleased.md` を読み、節ごとに「どの作業について書かれているか」を抽出する
+1. `docs/migration/unreleased.md` を読み、節ごとに「どの作業について書かれているか」を抽出する。各節の見出し直後には `> 関連: issue #<番号>` の 1 行がある（[versioning.md](../../../docs/versioning.md) Step 4 の書式。PR 番号が併記されている場合もある）。この行から節と issue の対応を機械的に取れるため、Step 4 の突き合わせではまずこれを使う。issue から PR への対応は、各 PR 本文の `Closes #<番号>` から辿る。`> 関連:` 行が無い節は書式違反として報告する（記録の出所が追えないため）
 2. 範囲内にマージされた PR を列挙し、各本文の `## Post-apply actions` と `Closes #<issue>` を取得する
 
 ```bash
@@ -88,6 +88,7 @@ PR 本文は **起草時点の情報** であり、後続の PR が前提を覆�
 - **`[GAP]`** — 導出されたが、`unreleased.md` にも PR の Post-apply actions にも現れない作業。記載漏れの疑い
 - **`[STALE]`** — 記録にあるが、導出で裏付けが取れない作業。既に解消済み、または記述が古い疑い
 - **`[CONFLICT]`** — `unreleased.md` と PR 本文、または記録同士で内容が食い違っている
+- **`[NOREF]`** — `unreleased.md` の節に `> 関連:` 行が無い、または参照先の issue / PR が範囲内に存在しない
 
 **GAP の判定で誤検出しないための除外規則:**
 
@@ -119,7 +120,7 @@ PR 本文は **起草時点の情報** であり、後続の PR が前提を覆�
 <tag>..<ref>（コミット N 件 / PR M 件: #X, #Y）
 
 ## 突き合わせ結果
-- GAP: N 件 / STALE: N 件 / CONFLICT: N 件 / 検証で破棄: N 件
+- GAP: N 件 / STALE: N 件 / CONFLICT: N 件 / NOREF: N 件 / 検証で破棄: N 件
 （0 件なら「記載漏れなし」と明記する）
 
 ### [GAP] <作業の 1 行要約>

@@ -11,6 +11,7 @@
 - 該当する `docs/` 配下の設計書を **先に更新** し、更新後の設計書に基づいて実装する
 - 設計書を更新した後、変更内容に関連するキーワードで `docs/` 全体を Grep し、同一情報が他の設計書にも記載されていないか確認する。該当箇所があれば同時に更新する
 - 当該変更にプロジェクト固有の移行手順（実環境管理者の作業、例: ConfigMap 更新・DB スキーマ更新）が必要な場合は `docs/migration/unreleased.md` に追記する。`docs/migration.md` に記載済みの標準手順は再掲しない。単なる変更点の記録には用いない
+- `docs/migration/unreleased.md` に節を追加する際は、見出しの直後に `> 関連: issue #<番号>` の 1 行を併記する（詳細は [versioning.md](../docs/versioning.md) Step 4 参照）。デプロイ時に `/deploy-runbook` skill が各節と実際の変更を対応付けるために使う。PR 番号は PR 本文の `Closes #<番号>` から辿れるため記載不要
 - `docs/` を変更した場合、PR 作成までに `/translate-docs` skill を実行して英語版を `docs_en/` に反映し、コミットに含める
 
 設計書一覧は `CLAUDE.md` の「開発ドキュメント一覧」を参照。

@@ -6,6 +6,8 @@
 
 ## デプロイ順序（Watcher を Dispatcher より先に）
 
+> 関連: issue #207 / PR #211
+
 制限時間の強制が Dispatcher（`activeDeadlineSeconds` の付与）から Watcher（`started_at` 起点の強制）へ移ったため、**Watcher を Dispatcher より先にデプロイすること**。
 
 逆順にすると、Dispatcher が `activeDeadlineSeconds` を付けない Job を作成する一方で Watcher 側の強制がまだ有効になっておらず、その間に投入されたジョブは制限時間が一切効かない状態になる。
@@ -13,6 +15,8 @@
 [標準移行手順](../migration.md) のデプロイ順序（`watcher` → `dispatcher` → `submit-api`）どおりに実施すれば問題ない。
 
 ## ロールアウト時に実行中のジョブに残る旧挙動
+
+> 関連: issue #207 / PR #211
 
 制限時間の強制方式が K8s Job の `activeDeadlineSeconds` から Watcher による `started_at` 起点の強制に変更された（[watcher.md](../architecture/watcher.md) §3 ステップ 9 参照）。
 
@@ -24,6 +28,8 @@
 新しく作成される K8s Job には `activeDeadlineSeconds` が付与されないため、ロールアウト以降に投入されたジョブは新挙動になる。
 
 ## `cjob-config` への DISPATCHED 滞留ガード設定の追加
+
+> 関連: issue #208 / PR #212
 
 `cjob-config` ConfigMap に新しい標準キーが 2 つ追加される。
 
@@ -41,6 +47,8 @@
 
 ## DB スキーマの更新（`jobs.unschedulable_count`）を Step 4 より先に実行する
 
+> 関連: issue #208 / PR #212
+
 `jobs` テーブルに `unschedulable_count INTEGER NOT NULL DEFAULT 0` が追加される。[標準移行手順](../migration.md) の Step 5（`cjobctl db migrate`）で冪等に適用され、既存行はデフォルト値 0 で埋まるため追加のデータ移行は不要である。
 
 ただし本バージョンでは、**Step 5 を Step 4（K8s リソースの適用）より先に実行すること**。新しい Watcher はこのカラムに書き込み、新しい Dispatcher は滞留ジョブ検知クエリでこのカラムを参照するため、カラムが無い状態で新しいコンポーネントが起動すると reconcile サイクルと dispatch サイクルが SQL エラーで失敗し続ける。
@@ -53,6 +61,8 @@ cjobctl db migrate
 ```
 
 ## Grafana ダッシュボードの再インポート
+
+> 関連: issue #208 / PR #212
 
 `k8s/base/grafana/dashboard-user.json` に「配置待ちバックオフ中」パネル（Row 3）を追加し、「Flavor 別キュー使用状況」テーブルの幅を 24 → 18 に変更した。新パネルは `jobs.unschedulable_count` を参照するため、**DB スキーマ更新（上記）の後に**再インポートすること。
 
