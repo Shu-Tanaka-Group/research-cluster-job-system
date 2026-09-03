@@ -10,6 +10,7 @@
 
 - The title should be written in kebab-case (lowercase, words separated by hyphens)
 - Minor changes not tied to an issue may be committed directly to main
+- The `release` type is not tied to an issue, so it uses the exceptional form `release/v<version>` (e.g., `release/v1.15.0`). See [versioning.md](versioning.md) §Step 7 for the procedure
 
 ### Change Types
 
@@ -20,6 +21,7 @@
 | `docs` | Documentation-only changes |
 | `refactor` | Code improvements without functional changes |
 | `test` | Adding or modifying tests |
+| `release` | Version bump (release preparation) |
 
 ### Examples
 
@@ -27,7 +29,12 @@
 feature/#2_gap-filling-dispatch-for-large-jobs
 fix/#15_cancel-race-condition
 docs/#8_update-deployment-guide
+release/v1.15.0
 ```
+
+### Tag Naming Rules
+
+Release tags do **not** carry a `v` prefix (e.g., `1.15.0`). Branch names use `release/v1.15.0` with the `v`, so the two are asymmetric — take care. The tag format must match the `on.push.tags` pattern (`[0-9]+.[0-9]+.[0-9]+*`) in [`.github/workflows/release.yml`](../.github/workflows/release.yml).
 
 ## 2. Commit Messages
 

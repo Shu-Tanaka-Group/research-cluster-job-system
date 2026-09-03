@@ -8,6 +8,7 @@
 
 - タイトルはケバブケース（小文字、単語区切りはハイフン）で記述する
 - issue に紐づかない軽微な変更は main に直接コミットしてよい
+- `release` タイプは issue に紐づかないため例外的に `release/v<バージョン>` 形式とする（例: `release/v1.15.0`）。手順は [versioning.md](versioning.md) §Step 7 を参照
 
 ### 変更のタイプ
 
@@ -18,6 +19,7 @@
 | `docs` | ドキュメントのみの変更 |
 | `refactor` | 機能変更を伴わないコードの改善 |
 | `test` | テストの追加・修正 |
+| `release` | バージョン更新（リリース準備） |
 
 ### 例
 
@@ -25,7 +27,12 @@
 feature/#2_gap-filling-dispatch-for-large-jobs
 fix/#15_cancel-race-condition
 docs/#8_update-deployment-guide
+release/v1.15.0
 ```
+
+### タグ命名規則
+
+リリースタグは `v` 接頭辞を**付けない**（例: `1.15.0`）。ブランチ名は `release/v1.15.0` と `v` を付けるため、両者で非対称になる点に注意する。タグ形式は [`.github/workflows/release.yml`](../.github/workflows/release.yml) の `on.push.tags` パターン（`[0-9]+.[0-9]+.[0-9]+*`）と一致させる必要がある。
 
 ## 2. コミットメッセージ
 

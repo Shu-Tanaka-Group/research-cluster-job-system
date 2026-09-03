@@ -24,6 +24,8 @@ CJob は単一の `VERSION` ファイルでプロジェクト全体のバージ�
 
 ## バージョン更新手順
 
+以下の Step 1〜7 は `/release` skill で実行できる。skill はバージョン番号・リンク一覧の要約文・push についてユーザーの確認を取り、Step 4 では `/deploy-runbook` skill に委譲する。タグの作成と push（Step 7 の最後）は不可逆な操作のため skill では行わない。
+
 ### Step 1: VERSION ファイルの更新
 
 ```bash
@@ -95,11 +97,14 @@ git diff <old-tag>..HEAD -- docs/deployment.md                   # デプロイ�
 
 ```bash
 mv docs/migration/unreleased.md docs/migration/vX.Y.Z.md
+mv docs_en/migration/unreleased.md docs_en/migration/vX.Y.Z.md
 ```
 
-`docs/migration.md` 末尾のリンクも更新する（`unreleased` → `vX.Y.Z`）。
+**日本語版と英語版の両方を同じように処理する。** `docs_en/` 側を落とすと、英語版の `unreleased.md` に前バージョンの内容が残り続ける。
 
-リネーム後、以下のテンプレートを使って新しい `docs/migration/unreleased.md` を作成する。
+`docs/migration.md` と `docs_en/migration.md` の末尾にある「バージョン固有の移行手順」のリンク一覧に `vX.Y.Z` の行を追加する（`unreleased` へのリンクは元から無いため、置換ではなく追加になる）。要約文はそのバージョンの主な移行作業を 1 行でまとめる。
+
+リネーム後、以下のテンプレートを使って新しい `docs/migration/unreleased.md` と `docs_en/migration/unreleased.md` を作成する。
 
 ````markdown
 # 未リリース移行手順
@@ -108,6 +113,8 @@ mv docs/migration/unreleased.md docs/migration/vX.Y.Z.md
 
 [標準移行手順](../migration.md) に加えて次回リリース固有の移行手順がある場合は以下に追記する。
 ````
+
+英語版のテンプレートは既存の `docs_en/migration/unreleased.md` の冒頭部（自動翻訳の注記を含む）をそのまま使う。
 
 `unreleased.md` に記載がない（大きな変更がない）場合は、Step 5 全体（リネーム・再作成）をスキップしてよい。
 
@@ -123,9 +130,37 @@ mv docs/migration/unreleased.md docs/migration/vX.Y.Z.md
 - `ctl/Cargo.lock`
 - `server/uv.lock`
 - `k8s/overlay-example/kustomization.yaml`
-- `docs/migration/vX.Y.Z.md`（リネームした場合）
-- `docs/migration/unreleased.md`（テンプレートから再作成した場合）
-- `docs/migration.md`（リンクを更新した場合）
+- `docs/migration/vX.Y.Z.md` / `docs_en/migration/vX.Y.Z.md`（リネームした場合）
+- `docs/migration/unreleased.md` / `docs_en/migration/unreleased.md`（テンプレートから再作成した場合）
+- `docs/migration.md` / `docs_en/migration.md`（リンクを更新した場合）
+
+### Step 7: リリースブランチ・PR・タグ
+
+Step 6 のコミットを `release/vX.Y.Z` ブランチに載せ、PR を作成してマージした後にタグを打つ（[git_conventions.md](git_conventions.md) §1 参照）。
+
+```bash
+git checkout -b release/vX.Y.Z
+# Step 1〜6 を実施してコミット
+git push -u origin release/vX.Y.Z
+```
+
+PR は `/create-pr` skill で作成する。タイトルは `Bump version to X.Y.Z`、本文には以下を含める。
+
+- `## Summary` — 前バージョン以降の主な変更（issue 番号を添える）
+- `## Post-apply actions` — `docs/migration/vX.Y.Z.md` の内容を要約し、詳細はそのファイルへリンクする
+- `## Test plan` — `sync-version.sh` の冪等性、各ファイルのバージョン一致、ロックファイルの更新、移行手順書のリネームとリンク追加、`unreleased.md` のテンプレート復帰
+
+マージ後、`main` を最新化してマージコミットにタグを付けて push する。**タグ名は `v` 接頭辞なし**（ブランチ名は `v` あり、タグ名は `v` なし）。
+
+```bash
+git checkout main && git pull
+git tag X.Y.Z
+git push origin X.Y.Z
+```
+
+タグの push により [`.github/workflows/release.yml`](../.github/workflows/release.yml) が起動し、cjob CLI（`cjob-linux-x86_64`）をビルドして GitHub Release を作成する。プレリリース（`X.Y.Z-alpha.N` / `-beta.N` / `-rc.N`）は自動的に prerelease として扱われ、latest にはならない。
+
+タグの push は GitHub Release を自動生成する不可逆な操作である。PR がマージ済みであること、タグ名が `VERSION` の内容と一致することを確認してから実行する。
 
 ## 備考
 
