@@ -337,16 +337,23 @@ To address this, the Dispatcher uses time_limit to perform gap filling in the ti
 
 #### 2.4.2 Detecting Stalled Jobs
 
-Jobs that have remained in the DISPATCHED state for longer than `GAP_FILLING_STALL_THRESHOLD_SEC` (default 300 seconds = 5 minutes) are considered "stalled jobs."
+Jobs that have remained in the DISPATCHED state for longer than `GAP_FILLING_STALL_THRESHOLD_SEC` (default 300 seconds = 5 minutes), as well as jobs requeued by the DISPATCHED stall guard and waiting out their backoff, are considered "stalled jobs."
 
 ```sql
 SELECT namespace, job_id
 FROM jobs
-WHERE status = 'DISPATCHED'
-  AND dispatched_at <= NOW() - MAKE_INTERVAL(secs => :threshold)
+WHERE (status = 'DISPATCHED'
+       AND dispatched_at <= NOW() - MAKE_INTERVAL(secs => :threshold))
+   OR (status = 'QUEUED'
+       AND unschedulable_count > 0
+       AND retry_after > NOW())
 ```
 
 Stalled jobs represent "jobs passed to Kueue but not yet admitted due to insufficient resources." Normal jobs typically transition from DISPATCHED to RUNNING within seconds to tens of seconds, so exceeding the threshold indicates the job is waiting due to resource shortage.
+
+**Why jobs waiting out a backoff are included:** The Watcher's DISPATCHED stall guard ([watcher.md](watcher.md) §3 Step 10) deletes the K8s Job of a job that stayed DISPATCHED beyond `WATCHER_DISPATCH_TIMEOUT_SEC`, requeues it to `QUEUED`, and sets an exponential backoff in `retry_after`. A requeued job no longer matches the `status = 'DISPATCHED'` condition, so the first clause alone would break the stall signal. As a result, gap filling would not fire while the backoff is in effect, and small jobs in the same `(namespace, flavor)` would keep overtaking the large job (a regression of the starvation countermeasure introduced in §2.4.1). The second clause keeps gap filling active after a requeue for as long as the stall itself persists.
+
+`unschedulable_count > 0` is part of the condition because `retry_after` is also set by the `RETRY` path for transient K8s API errors and the `DEFERRED` path for ResourceQuota races (see [database.md](database.md) §1). Those are transient rollbacks that clear within tens of seconds and mean something different from a resource stall, so they are not included as gap filling triggers.
 
 If the threshold is too short, jobs currently being processed normally by Kueue may also be treated as stalled. If the threshold is too long, countermeasures are delayed. 5 minutes is a conservative value that accounts for normal cluster operation.
 
@@ -523,7 +530,7 @@ def apply_gap_filling(
 
 ### 2.5 ResourceQuota Pre-check
 
-The Dispatcher checks the remaining ResourceQuota for dispatch candidate namespaces and excludes jobs with insufficient resources from candidates (leaving them in QUEUED). This prevents jobs from stalling in DISPATCHED and ultimately failing with a timeout when User Pods such as JupyterHub are consuming ResourceQuota.
+The Dispatcher checks the remaining ResourceQuota for dispatch candidate namespaces and excludes jobs with insufficient resources from candidates (leaving them in QUEUED). This prevents jobs from stalling in DISPATCHED and holding quota indefinitely when User Pods such as JupyterHub are consuming ResourceQuota. Stalls that slip past the pre-check are requeued by the Watcher's DISPATCHED stall guard as a last line of defence (see [watcher.md](watcher.md) §3 Step 10).
 
 ```python
 # This is pseudocode for conceptual explanation.
@@ -541,7 +548,7 @@ candidates = filter_by_resource_quota(session, candidates)  # added
 4. Accumulate resources of passed jobs within the same cycle and reflect in remaining resource calculations for subsequent jobs (prevents over-dispatch within the same cycle)
 5. If `hard_count` is not NULL, verify that remaining job count (hard_count - used_count - cumulative dispatch count within cycle) is ≥ 1. Sweep jobs are also counted as 1 K8s Job (no parallelism multiplier)
 
-**Prerequisite:** ResourceQuota usage is periodically synchronized by the Watcher, so there is a delay of `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` (default 10 seconds). This check is best-effort; ResourceQuota usage may change between the check and Kueue's admission. However, this is a significant improvement compared to no check (DISPATCHED stalling → timeout FAILED).
+**Prerequisite:** ResourceQuota usage is periodically synchronized by the Watcher, so there is a delay of `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` (default 10 seconds). This check is best-effort; ResourceQuota usage may change between the check and Kueue's admission. However, this is a significant improvement compared to no check (DISPATCHED stalling → requeue by the stall guard and a backoff wait).
 
 **Recovery from a ResourceQuota race:** Because the pre-check is best-effort, a stale cache can let a candidate through and the K8s API Server's ResourceQuota admission controller will reject it with 403. The dispatcher recovers as follows:
 
@@ -557,7 +564,7 @@ Other 403s (RBAC denial, PodSecurityPolicy, etc. — true permanent errors) stil
 
 ### 2.6 Per-node Bin-packing Pre-check
 
-The Dispatcher checks per-node remaining capacity against dispatch candidates and excludes jobs that cannot be placed on any node (leaving them in QUEUED). This compensates for Kueue's constraint that the ClusterQueue admits jobs based only on per-flavor total nominalQuota, preventing the situation where "jobs that fit in the total but cannot be placed on individual nodes stall in DISPATCHED."
+The Dispatcher checks per-node remaining capacity against dispatch candidates and excludes jobs that cannot be placed on any node (leaving them in QUEUED). This compensates for Kueue's constraint that the ClusterQueue admits jobs based only on per-flavor total nominalQuota, preventing the situation where "jobs that fit in the total but cannot be placed on individual nodes stall in DISPATCHED." This pre-check lowers the probability of a stall; stalls that slip through because of the limits in §2.6.5 are requeued by the Watcher's DISPATCHED stall guard (see [watcher.md](watcher.md) §3 Step 10). The two are complementary.
 
 ```python
 # This is pseudocode for conceptual explanation.
@@ -614,6 +621,7 @@ For each candidate job, attempt bin-packing against the node remaining capacitie
 - **Per-node estimation error for sweep RUNNING jobs**: Even distribution is an approximation, and errors occur when actual pod placement is skewed. The error cancels out cluster-wide, but the judgment for specific nodes may become looser or stricter. The impact of the error is small, and state updates in the next cycle naturally correct it
 - **node_resources synchronization delay**: Because the Watcher synchronizes only every 300 seconds, there is up to 5 minutes of delay in detecting node additions/removals. When new nodes are added, judgment uses old information so candidates may be wrongly excluded, but it is corrected after 5 minutes
 - **RUNNING jobs with no node_name recorded in the DB**: Jobs that have transitioned to RUNNING with `node_name` still NULL due to §2 completion fallback etc. are not reflected in per-node subtraction. They are handled with the same best-fit provisional placement as in-flight subtraction
+- **Cleaning up stalls that slip through**: Because of the limits above, cases remain where a candidate passes but cannot actually be placed at admission time. Such a stall is requeued to `QUEUED` by the Watcher's DISPATCHED stall guard after `WATCHER_DISPATCH_TIMEOUT_SEC`, with an exponential backoff (see [watcher.md](watcher.md) §3 Step 10). In structural cases where the pre-check keeps judging nodes as free (occupation by non-cjob Pods, etc.) this becomes a dispatch → requeue loop, but the backoff decays the waste
 
 #### 2.6.6 Pseudocode
 

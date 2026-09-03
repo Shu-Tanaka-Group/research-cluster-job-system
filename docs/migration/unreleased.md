@@ -22,3 +22,41 @@
 - 旧挙動を残したくない場合は、ロールアウト前に実行中ジョブの完了を待つか、対象ジョブを `cjob cancel` して再投入する
 
 新しく作成される K8s Job には `activeDeadlineSeconds` が付与されないため、ロールアウト以降に投入されたジョブは新挙動になる。
+
+## `cjob-config` への DISPATCHED 滞留ガード設定の追加
+
+`cjob-config` ConfigMap に新しい標準キーが 2 つ追加される。
+
+| キー | デフォルト | 用途 |
+|---|---|---|
+| `WATCHER_DISPATCH_TIMEOUT_SEC` | `"1800"` | DISPATCHED のまま RUNNING に遷移しないジョブを配置不能とみなし、K8s Job を削除して QUEUED に差し戻すまでの秒数 |
+| `WATCHER_DISPATCH_BACKOFF_MAX_SEC` | `"7200"` | 差し戻し時に設定する `retry_after` の指数バックオフ上限秒数 |
+
+`kubectl apply -k overlays/<env>` で base の ConfigMap が反映された後、以下のいずれかを実行すること。
+
+- base の ConfigMap をそのまま使っている場合: 追加作業は不要
+- 独自 overlay で `cjob-config` の内容をパッチしている場合: overlay 側の ConfigMap patch に上記 2 キーを追記してから apply する。値を明示しない場合でも Python 側のデフォルトで動作するが、`cjobctl config show` の出力と一致させるため ConfigMap にも載せることを推奨する
+
+`WATCHER_DISPATCH_TIMEOUT_SEC` は隙間充填の滞留閾値（`GAP_FILLING_STALL_THRESHOLD_SEC`、デフォルト 300 秒）より十分に長く設定すること。短くすると、隙間充填が大型ジョブを起動させる前に滞留ガードが差し戻してしまう。
+
+## DB スキーマの更新（`jobs.unschedulable_count`）を Step 4 より先に実行する
+
+`jobs` テーブルに `unschedulable_count INTEGER NOT NULL DEFAULT 0` が追加される。[標準移行手順](../migration.md) の Step 5（`cjobctl db migrate`）で冪等に適用され、既存行はデフォルト値 0 で埋まるため追加のデータ移行は不要である。
+
+ただし本バージョンでは、**Step 5 を Step 4（K8s リソースの適用）より先に実行すること**。新しい Watcher はこのカラムに書き込み、新しい Dispatcher は滞留ジョブ検知クエリでこのカラムを参照するため、カラムが無い状態で新しいコンポーネントが起動すると reconcile サイクルと dispatch サイクルが SQL エラーで失敗し続ける。
+
+`ADD COLUMN ... DEFAULT 0` は旧コードから見ると未参照のカラムが増えるだけなので、先に適用しても旧バージョンのコンポーネントには影響しない。
+
+```bash
+# Step 3 で cjobctl をビルドした後、Step 4 の前に実行する
+cjobctl db migrate
+```
+
+## Grafana ダッシュボードの再インポート
+
+`k8s/base/grafana/dashboard-user.json` に「配置待ちバックオフ中」パネル（Row 3）を追加し、「Flavor 別キュー使用状況」テーブルの幅を 24 → 18 に変更した。新パネルは `jobs.unschedulable_count` を参照するため、**DB スキーマ更新（上記）の後に**再インポートすること。
+
+1. Grafana UI の `Dashboards > Import` から更新後の JSON をアップロードする
+2. 既存ダッシュボードを上書きする（同一 UID）
+3. データソース変数（`${DS_PROMETHEUS}` / `${DS_CJOB_DB}`）を環境に合わせて選択する
+

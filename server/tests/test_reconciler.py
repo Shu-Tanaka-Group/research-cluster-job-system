@@ -11,13 +11,14 @@ from kubernetes.client import (
 )
 from kubernetes.client.rest import ApiException
 
-from cjob.metrics import JOBS_COMPLETED_TOTAL
+from cjob.metrics import JOBS_COMPLETED_TOTAL, JOBS_UNSCHEDULABLE_REQUEUED_TOTAL
 from cjob.models import Job, JobEvent, NamespaceDailyUsage, UserJobCounter
 from cjob.resource_utils import parse_cpu_millicores, parse_memory_mib
 from cjob.watcher.reconciler import (
     LightJobCondition,
     LightK8sJob,
     NamespacePodNodeResolver,
+    _as_utc,
     _merge_node_names,
     list_cjob_k8s_jobs,
     reconcile_cycle,
@@ -1505,4 +1506,295 @@ class TestTimeLimitEnforcement:
 
         assert db_session.get(Job, (NS, 1)).status == "FAILED"
         assert db_session.get(Job, (NS, 2)).status == "RUNNING"
+        mock_delete.assert_called_once_with(NS, "cjob-alice-1")
+
+
+@patch.object(NamespacePodNodeResolver, "resolve", return_value=[])
+@patch("cjob.watcher.reconciler._delete_k8s_job")
+class TestDispatchStallGuard:
+    """Test Step 10: DISPATCHED jobs that never start are requeued.
+
+    See watcher.md §3 Step 10. The K8s Job is deleted and the job goes back to
+    QUEUED with an exponential backoff in ``retry_after``.
+    """
+
+    TIMEOUT = 1800
+    BACKOFF_MAX = 7200
+
+    @staticmethod
+    def _ago(**kwargs):
+        return datetime.now(timezone.utc) - timedelta(**kwargs)
+
+    def _run(self, session, k8s_jobs, **overrides):
+        kwargs = dict(
+            dispatch_timeout_sec=self.TIMEOUT,
+            dispatch_backoff_max_sec=self.BACKOFF_MAX,
+        )
+        kwargs.update(overrides)
+        reconcile_cycle(session, k8s_jobs, **kwargs)
+
+    def _stalled(self, session, job_id=1, **kwargs):
+        defaults = dict(
+            status="DISPATCHED",
+            dispatched_at=self._ago(hours=2),
+            k8s_job_name=f"cjob-alice-{job_id}",
+        )
+        defaults.update(kwargs)
+        return _insert_job(session, job_id, **defaults)
+
+    def test_stalled_job_requeued(self, mock_delete, mock_resolve, db_session):
+        self._stalled(db_session)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "QUEUED"
+        assert job.unschedulable_count == 1
+        assert job.retry_after is not None
+        assert job.finished_at is None
+
+    def test_stalled_job_deletes_k8s_job(self, mock_delete, mock_resolve, db_session):
+        self._stalled(db_session)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        mock_delete.assert_called_once_with(NS, "cjob-alice-1")
+
+    def test_stalled_job_records_event_with_payload(
+        self, mock_delete, mock_resolve, db_session
+    ):
+        self._stalled(db_session)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        events = db_session.query(JobEvent).filter_by(namespace=NS, job_id=1).all()
+        assert [e.event_type for e in events] == ["UNSCHEDULABLE"]
+        payload = events[0].payload_json
+        assert payload["attempt"] == 1
+        assert payload["backoff_sec"] == self.TIMEOUT
+        assert payload["waited_sec"] >= self.TIMEOUT
+
+    def test_stalled_job_increments_counter(self, mock_delete, mock_resolve, db_session):
+        self._stalled(db_session)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        before = JOBS_UNSCHEDULABLE_REQUEUED_TOTAL._value.get()
+        self._run(db_session, k8s_jobs)
+        assert JOBS_UNSCHEDULABLE_REQUEUED_TOTAL._value.get() - before == 1
+
+    def test_backoff_is_first_timeout_on_first_requeue(
+        self, mock_delete, mock_resolve, db_session
+    ):
+        self._stalled(db_session)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        before = datetime.now(timezone.utc)
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        delay = (_as_utc(job.retry_after) - before).total_seconds()
+        assert self.TIMEOUT - 5 <= delay <= self.TIMEOUT + 5
+
+    def test_backoff_doubles_on_second_requeue(
+        self, mock_delete, mock_resolve, db_session
+    ):
+        self._stalled(db_session, unschedulable_count=1)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        before = datetime.now(timezone.utc)
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.unschedulable_count == 2
+        delay = (_as_utc(job.retry_after) - before).total_seconds()
+        assert 2 * self.TIMEOUT - 5 <= delay <= 2 * self.TIMEOUT + 5
+
+    def test_backoff_capped_at_max(self, mock_delete, mock_resolve, db_session):
+        # attempt 4 => 1800 * 2^3 = 14400, capped to BACKOFF_MAX (7200)
+        self._stalled(db_session, unschedulable_count=3)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        before = datetime.now(timezone.utc)
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.unschedulable_count == 4
+        delay = (_as_utc(job.retry_after) - before).total_seconds()
+        assert self.BACKOFF_MAX - 5 <= delay <= self.BACKOFF_MAX + 5
+
+    def test_backoff_capped_for_very_large_attempt_count(
+        self, mock_delete, mock_resolve, db_session
+    ):
+        """The exponent is clamped so the doubling cannot build a huge int."""
+        self._stalled(db_session, unschedulable_count=10_000)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        before = datetime.now(timezone.utc)
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        delay = (_as_utc(job.retry_after) - before).total_seconds()
+        assert self.BACKOFF_MAX - 5 <= delay <= self.BACKOFF_MAX + 5
+
+    def test_retry_count_not_incremented(self, mock_delete, mock_resolve, db_session):
+        """Cluster-side stalls must not consume the dispatch retry budget."""
+        self._stalled(db_session, retry_count=2)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        assert db_session.get(Job, (NS, 1)).retry_count == 2
+
+    def test_usage_not_recorded(self, mock_delete, mock_resolve, db_session):
+        """The job never ran, so nothing is charged to namespace_daily_usage."""
+        self._stalled(db_session)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        assert db_session.query(NamespaceDailyUsage).all() == []
+
+    def test_within_timeout_untouched(self, mock_delete, mock_resolve, db_session):
+        self._stalled(db_session, dispatched_at=self._ago(minutes=5))
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "DISPATCHED"
+        assert job.unschedulable_count == 0
+        assert job.retry_after is None
+        mock_delete.assert_not_called()
+
+    def test_null_dispatched_at_not_targeted(self, mock_delete, mock_resolve, db_session):
+        self._stalled(db_session, dispatched_at=None)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        assert db_session.get(Job, (NS, 1)).status == "DISPATCHED"
+        mock_delete.assert_not_called()
+
+    def test_missing_k8s_job_left_to_disappearance_check(
+        self, mock_delete, mock_resolve, db_session
+    ):
+        """A DISPATCHED job with no K8s Job belongs to Step 8, not Step 10."""
+        self._stalled(db_session)
+
+        self._run(db_session, [])
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "FAILED"
+        assert job.last_error == "K8s Job not found (TTL expired or manually deleted)"
+        assert job.unschedulable_count == 0
+
+    def test_delete_failure_keeps_job_dispatched(
+        self, mock_delete, mock_resolve, db_session
+    ):
+        """DB is only updated once the K8s Job is confirmed gone."""
+        mock_delete.return_value = False
+        self._stalled(db_session)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "DISPATCHED"
+        assert job.unschedulable_count == 0
+        assert job.retry_after is None
+        assert db_session.query(JobEvent).filter_by(namespace=NS, job_id=1).all() == []
+
+    def test_k8s_job_name_falls_back_to_observed_job(
+        self, mock_delete, mock_resolve, db_session
+    ):
+        self._stalled(db_session, k8s_job_name=None)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        mock_delete.assert_called_once_with(NS, "cjob-alice-1")
+        assert db_session.get(Job, (NS, 1)).status == "QUEUED"
+
+    def test_running_transition_this_cycle_protected(
+        self, mock_delete, mock_resolve, db_session
+    ):
+        """A job that reached RUNNING in this cycle must not be requeued."""
+        self._stalled(db_session)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=1)]
+
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
+        assert job.unschedulable_count == 0
+        mock_delete.assert_not_called()
+
+    def test_completed_this_cycle_protected(self, mock_delete, mock_resolve, db_session):
+        """Jobs that finished within one scan cycle go DISPATCHED -> SUCCEEDED."""
+        self._stalled(db_session)
+        k8s_jobs = [
+            _make_k8s_job(
+                NS, 1, "cjob-alice-1",
+                conditions=[V1JobCondition(type="Complete", status="True")],
+            )
+        ]
+
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "SUCCEEDED"
+        assert job.unschedulable_count == 0
+
+    def test_running_job_not_targeted(self, mock_delete, mock_resolve, db_session):
+        self._stalled(
+            db_session, status="RUNNING", started_at=self._ago(minutes=1)
+        )
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=1)]
+
+        self._run(db_session, k8s_jobs)
+
+        job = db_session.get(Job, (NS, 1))
+        assert job.status == "RUNNING"
+        assert job.unschedulable_count == 0
+        mock_delete.assert_not_called()
+
+    def test_zero_timeout_disables_guard(self, mock_delete, mock_resolve, db_session):
+        self._stalled(db_session)
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs, dispatch_timeout_sec=0)
+
+        assert db_session.get(Job, (NS, 1)).status == "DISPATCHED"
+        mock_delete.assert_not_called()
+
+    def test_naive_dispatched_at_treated_as_utc(
+        self, mock_delete, mock_resolve, db_session
+    ):
+        """SQLite returns naive timestamps; they must be read as UTC."""
+        self._stalled(
+            db_session,
+            dispatched_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        )
+        k8s_jobs = [_make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None)]
+
+        self._run(db_session, k8s_jobs)
+
+        assert db_session.get(Job, (NS, 1)).status == "DISPATCHED"
+        mock_delete.assert_not_called()
+
+    def test_only_stalled_job_affected(self, mock_delete, mock_resolve, db_session):
+        self._stalled(db_session, job_id=1)
+        self._stalled(db_session, job_id=2, dispatched_at=self._ago(minutes=5))
+        k8s_jobs = [
+            _make_k8s_job(NS, 1, "cjob-alice-1", active=1, ready=None),
+            _make_k8s_job(NS, 2, "cjob-alice-2", active=1, ready=None),
+        ]
+
+        self._run(db_session, k8s_jobs)
+
+        assert db_session.get(Job, (NS, 1)).status == "QUEUED"
+        assert db_session.get(Job, (NS, 2)).status == "DISPATCHED"
         mock_delete.assert_called_once_with(NS, "cjob-alice-1")

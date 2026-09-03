@@ -59,6 +59,14 @@ DISPATCHED のまま長時間経過しているジョブ（隙間充填の対象
 cjobctl jobs stalled
 ```
 
+`WATCHER_DISPATCH_TIMEOUT_SEC`（デフォルト 1800 秒 = 30 分）を超えて DISPATCHED に留まったジョブは、Watcher の滞留ガードが K8s Job を削除して `QUEUED` に差し戻す（[watcher.md](architecture/watcher.md) §3 ステップ 10 参照）。差し戻されたジョブは `status = 'DISPATCHED'` ではなくなるため本コマンドには現れない。バックオフ待機中の滞留ジョブは以下で確認する。
+
+- **クラスタ全体の件数**: Grafana ダッシュボードの「配置待ちバックオフ中」パネル（[monitoring.md](architecture/monitoring.md) §3.2 Row 3）
+- **差し戻しの発生ペース**: Prometheus の `cjob_jobs_unschedulable_requeued_total`（Watcher の `/metrics`）
+- **個別ジョブの理由**: `cjob status <job_id>` の `events` に `UNSCHEDULABLE` が記録され、`retry_after` に再 dispatch 解禁時刻が表示される
+
+「配置待ちバックオフ中」が常時 0 でない場合、per-node bin-packing プレチェックが「空いている」と誤判定し続ける構造的な要因（cjob 以外の Pod によるノード占有、PVC の node affinity 等）を疑う（[dispatcher.md](architecture/dispatcher.md) §2.6.5 参照）。
+
 ### 1.6 RUNNING ジョブの残り時間
 
 ```bash

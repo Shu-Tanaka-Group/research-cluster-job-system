@@ -10,3 +10,8 @@ JOBS_COMPLETED_TOTAL = Counter(
     "Total number of jobs that reached a terminal status",
     ["status"],
 )
+
+JOBS_UNSCHEDULABLE_REQUEUED_TOTAL = Counter(
+    "cjob_jobs_unschedulable_requeued_total",
+    "Total number of DISPATCHED jobs requeued by the stall guard",
+)

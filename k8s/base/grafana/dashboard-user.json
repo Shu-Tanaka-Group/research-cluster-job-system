@@ -733,7 +733,7 @@
       },
       "gridPos": {
         "h": 4,
-        "w": 24,
+        "w": 18,
         "x": 0,
         "y": 12
       },
@@ -760,6 +760,60 @@
       ],
       "title": "Flavor 別キュー使用状況",
       "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "${DS_CJOB_DB}"
+      },
+      "description": "DISPATCHED 滞留ガードで QUEUED に差し戻され、retry_after のバックオフ待機中のジョブ数。0 以外が続く場合はノードに配置できない構造的要因（cjob 以外の Pod によるノード占有等）を確認する。",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 12
+      },
+      "id": 25,
+      "options": {
+        "colorMode": "background",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "targets": [
+        {
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT COUNT(*) AS \"バックオフ中\" FROM jobs WHERE status = 'QUEUED' AND unschedulable_count > 0 AND retry_after > NOW();",
+          "refId": "A"
+        }
+      ],
+      "title": "配置待ちバックオフ中",
+      "type": "stat"
     },
     {
       "datasource": {

@@ -85,6 +85,16 @@ spec:
                 configMapKeyRef:
                   name: cjob-config
                   key: WATCHER_DISPATCH_GRACE_SEC
+            - name: WATCHER_DISPATCH_TIMEOUT_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: WATCHER_DISPATCH_TIMEOUT_SEC
+            - name: WATCHER_DISPATCH_BACKOFF_MAX_SEC
+              valueFrom:
+                configMapKeyRef:
+                  name: cjob-config
+                  key: WATCHER_DISPATCH_BACKOFF_MAX_SEC
             - name: RESOURCE_QUOTA_NAME
               valueFrom:
                 configMapKeyRef:

@@ -329,6 +329,57 @@ class TestFetchStalledJobs:
         stalled = fetch_stalled_jobs(pg_session, 300)
         assert len(stalled) == 0
 
+    def test_returns_backoff_waiting_jobs_requeued_by_stall_guard(self, pg_session):
+        """QUEUED jobs waiting out the stall guard backoff still count as stalled.
+
+        Without this the gap filling trigger would disappear the moment the
+        Watcher requeues a stalled job (dispatcher.md §2.4.2).
+        """
+        _insert_job(pg_session, 1, status="QUEUED", unschedulable_count=1)
+        pg_session.execute(
+            text("UPDATE jobs SET retry_after = NOW() + INTERVAL '600 seconds' "
+                 "WHERE namespace = :ns AND job_id = 1"),
+            {"ns": NS_ALICE},
+        )
+        pg_session.flush()
+
+        stalled = fetch_stalled_jobs(pg_session, 300)
+        assert len(stalled) == 1
+        assert stalled[0].job_id == 1
+
+    def test_ignores_backoff_without_unschedulable_count(self, pg_session):
+        """RETRY / DEFERRED backoffs are short lived and are not resource stalls."""
+        _insert_job(pg_session, 1, status="QUEUED", unschedulable_count=0)
+        pg_session.execute(
+            text("UPDATE jobs SET retry_after = NOW() + INTERVAL '600 seconds' "
+                 "WHERE namespace = :ns AND job_id = 1"),
+            {"ns": NS_ALICE},
+        )
+        pg_session.flush()
+
+        stalled = fetch_stalled_jobs(pg_session, 300)
+        assert len(stalled) == 0
+
+    def test_ignores_elapsed_backoff(self, pg_session):
+        """Once the backoff has elapsed the job is dispatchable again, not stalled."""
+        _insert_job(pg_session, 1, status="QUEUED", unschedulable_count=1)
+        pg_session.execute(
+            text("UPDATE jobs SET retry_after = NOW() - INTERVAL '10 seconds' "
+                 "WHERE namespace = :ns AND job_id = 1"),
+            {"ns": NS_ALICE},
+        )
+        pg_session.flush()
+
+        stalled = fetch_stalled_jobs(pg_session, 300)
+        assert len(stalled) == 0
+
+    def test_ignores_queued_job_without_backoff(self, pg_session):
+        _insert_job(pg_session, 1, status="QUEUED", unschedulable_count=1)
+        pg_session.flush()
+
+        stalled = fetch_stalled_jobs(pg_session, 300)
+        assert len(stalled) == 0
+
 
 # ── estimate_shortest_remaining ──
 

@@ -38,6 +38,9 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String, nullable=False)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    unschedulable_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
     k8s_job_name: Mapped[str | None] = mapped_column(String)
     log_dir: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(

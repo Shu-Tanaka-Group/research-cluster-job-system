@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     # missing K8s Job. Must be >= 2x DISPATCH_BUDGET_CHECK_INTERVAL_SEC so
     # that a Job created mid-cycle is always visible in the next list call.
     WATCHER_DISPATCH_GRACE_SEC: int = 30
+    # DISPATCHED stall guard (watcher.md §3 Step 10). Jobs that stay
+    # DISPATCHED longer than this without reaching RUNNING are treated as
+    # unschedulable: their K8s Job is deleted and they are requeued with an
+    # exponential backoff capped at WATCHER_DISPATCH_BACKOFF_MAX_SEC.
+    # Must be well above GAP_FILLING_STALL_THRESHOLD_SEC so gap filling gets
+    # a chance to rescue the job before the guard fires.
+    WATCHER_DISPATCH_TIMEOUT_SEC: int = 1800        # 30 minutes
+    WATCHER_DISPATCH_BACKOFF_MAX_SEC: int = 7200    # 2 hours
 
     # Submit API
     MAX_QUEUED_JOBS_PER_NAMESPACE: int = 500

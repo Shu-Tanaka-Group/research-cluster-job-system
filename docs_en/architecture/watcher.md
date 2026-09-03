@@ -10,11 +10,12 @@ The Watcher / Reconciler reflects the execution state on the Kubernetes side int
 - Monitoring Pod status
 - Transitioning to `RUNNING` / `SUCCEEDED` / `FAILED`
 - Enforcing the time limit (`time_limit_seconds`)
+- Requeueing jobs stalled in `DISPATCHED` back to `QUEUED` (guard for unschedulable jobs)
 - Deleting K8s Jobs for `CANCELLED` jobs
 - Deleting K8s Jobs, deleting DB records, and resetting counters for `DELETING` jobs
 - Detecting orphan Jobs
 - Correcting discrepancies between DB and Kubernetes
-- Providing Prometheus counter metrics (`cjob_jobs_completed_total`) via the `/metrics` endpoint on `WATCHER_METRICS_PORT`
+- Providing Prometheus counter metrics (`cjob_jobs_completed_total` / `cjob_jobs_unschedulable_requeued_total`) via the `/metrics` endpoint on `WATCHER_METRICS_PORT`
 
 The Watcher's main loop touches the `/tmp/liveness` file upon completion of each scan cycle. Kubernetes' Liveness probe checks the last modification time of this file to detect loop stoppage and trigger a restart (see [deployment.md](../deployment.md) §13.5).
 
@@ -119,6 +120,52 @@ The Dispatcher alone cannot detect K8s Job completion / failure, so the Watcher 
    - `started_at` is the time the Watcher observed RUNNING, which lags the container's actual start time by at most one scan cycle. This works in the user's favor, so it is acceptable
    - K8s Jobs created before this change keep running with their `activeDeadlineSeconds`, so jobs already running at rollout time retain the old behavior (see [migration](../migration.md))
 
+10. Requeue jobs stalled in `DISPATCHED` back to `QUEUED` (guard for unschedulable jobs)
+
+    cjob does not set `activeDeadlineSeconds` on K8s Jobs (Step 9), so there is no mechanism to terminate a job pinned in `DISPATCHED` because it cannot be placed on any node. Left alone, such a job occupies ClusterQueue quota and namespace ResourceQuota indefinitely, blocking admission of other users' jobs. The Dispatcher's per-node bin-packing precheck ([dispatcher.md](dispatcher.md) §2.6) lowers the probability of a stall, but stalls remain possible because kube-scheduler's choice cannot be predicted exactly and because `node_resources` is synced with a delay (§2.6.5). This step is the last line of defence.
+
+    **Targets:** jobs satisfying all of the following
+
+    - `status = 'DISPATCHED'`
+    - `dispatched_at IS NOT NULL` and `dispatched_at + WATCHER_DISPATCH_TIMEOUT_SEC < NOW()`
+    - a corresponding K8s Job exists in the K8s Job list fetched this cycle
+
+    Restricting to jobs whose K8s Job exists is required because a job whose K8s Job has disappeared falls under Step 8 (FAILED transition); requeueing it here would disable that self-healing path.
+
+    **The decision is based purely on elapsed time.** Pod `status.conditions` (`PodScheduled=False` / reason `Unschedulable`) is not inspected, for the following reasons.
+
+    - No additional API cost for fetching Pods
+    - Stalls where Kueue has not admitted the job (no Pod exists yet) are rescued through the same path. For a last line of defence, catching stalls regardless of cause is more robust
+    - A requeue is a harmless operation that never loses the job, so the accuracy requirement on the decision is low. Setting the threshold long enough avoids catching legitimate startup delays such as image pulls or PVC attach waits
+
+    **Processing order:** as in Step 9, the K8s Job is deleted with `propagation_policy="Background"` and the DB is updated **only after the deletion is confirmed to have succeeded (404 included)**. A job whose deletion fails stays `DISPATCHED` and is retried on the next cycle. The reverse order would let a surviving K8s Job transition to `RUNNING` / `SUCCEEDED` afterwards, so a job that was supposed to be back in `QUEUED` would run twice.
+
+    **DB update content:**
+
+    - Roll `status` back to `QUEUED`
+    - Increment `unschedulable_count` by 1 (see [database.md](database.md) §1)
+    - Set `retry_after` to `NOW() + min(WATCHER_DISPATCH_TIMEOUT_SEC × 2^(unschedulable_count - 1), WATCHER_DISPATCH_BACKOFF_MAX_SEC)` (exponential backoff)
+    - Append `UNSCHEDULABLE` to `job_events` (with the wait time and requeue count in `payload_json`, see [database.md](database.md) §3.1)
+    - Increment `cjob_jobs_unschedulable_requeued_total`
+
+    `retry_count` is not incremented. A stall stems from a lack of free capacity on the cluster side rather than a failure of the job itself, so it must not consume the `DISPATCH_MAX_RETRIES` retry budget (the same reasoning as `DEFERRED` for ResourceQuota races, see [dispatcher.md](dispatcher.md) §2.5). `k8s_job_name` / `dispatched_at` are left as they are (the Dispatcher overwrites them on re-dispatch). Usage (`namespace_daily_usage`) is not added because the job never ran.
+
+    **Suppressing infinite loops:** a requeued job becomes a target of the Dispatcher's candidate query on the next cycle, but `retry_after` excludes it from the candidates while the backoff is in effect ([dispatcher.md](dispatcher.md) §1.2). In structural cases where the per-node bin-packing precheck keeps judging nodes as free (occupation by non-cjob Pods, PVC node affinity, max-pods, etc.), the job enters a dispatch → timeout → requeue loop, but because the backoff grows exponentially the waste of cycles and resources decays, converging on "wait until the cluster frees up" behavior. The job lives on as `QUEUED`, so it is never abandoned and lost.
+
+    **Why no new state is added:** a dedicated state (e.g. `BLOCKED`) or a transition to `HELD` are alternatives, but both move in the direction of "stopping the job", which is out of proportion with the cause residing on the cluster side. `QUEUED` + `retry_after` has no ripple effect on the Dispatcher / CLI / cjobctl / Grafana and requires no follow-up in every layer that enumerates statuses. If operations reveal that jobs waiting in backoff actually accumulate and need dedicated visualization, this can be reconsidered then.
+
+    **Execution position:** run after Step 9 and before Step 8's disappearance check. Running before Step 8 keeps the jobs this step moved to `QUEUED` out of Step 8's `DISPATCHED` reconciliation.
+
+    **Expected constraints:**
+
+    - Detection granularity is the scan cycle interval (`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`, default 10 seconds), a negligible error against a 30-minute threshold
+    - Jobs whose image pull or PVC attach takes longer than the threshold are requeued. A requeue never loses the job, and the image layer cache remains on the node, so re-dispatch is fast. The backoff wait is still incurred
+    - `WATCHER_DISPATCH_TIMEOUT_SEC` must be set well above the gap filling stall threshold (`GAP_FILLING_STALL_THRESHOLD_SEC`, default 300 seconds), so gap filling has time to attempt its own rescue (starting a large job through time-direction gap filling) before this last line of defence fires
+
+**Relationship between the stall guard and gap filling:**
+
+When this step requeues a stalled job to `QUEUED`, the job drops out of the Dispatcher's stall detection (`status = 'DISPATCHED'` with `dispatched_at` older than the threshold). Left as is, gap filling would not fire while the backoff is in effect, and small jobs in the same `(namespace, flavor)` would keep overtaking the large job (a regression of the starvation countermeasure). To prevent this, the Dispatcher's stall detection also treats jobs requeued by this step and waiting out their backoff (`status = 'QUEUED'` and `unschedulable_count > 0` and `retry_after > NOW()`) as stalled jobs (see [dispatcher.md](dispatcher.md) §2.4.2)
+
 **Relationship between the grace period and scan cycle interval:**
 
 `WATCHER_DISPATCH_GRACE_SEC` must be set to at least twice the Watcher's scan cycle interval (`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`). This ensures that a K8s Job created by the Dispatcher mid-cycle is guaranteed to appear in the next cycle's K8s Job list. The current settings (grace 30 seconds vs cycle interval 10 seconds) provide a 3x safety margin.
@@ -217,6 +264,7 @@ DB reads during the reconcile cycle suppress resident memory by the following st
 - **Fetching DB Jobs corresponding to K8s Jobs**: Restrict to the set of keys `(namespace, job_id)` from `k8s_map` (`tuple_(Job.namespace, Job.job_id).in_(...)`). Compared to the prior approach of fetching all Jobs per namespace, this avoids loading Jobs such as HELD / QUEUED / CANCELLED that reconcile does not use.
 - **Fetching DELETING jobs**: A namespace-wide fetch is retained because DELETING Phase 2 requires per-namespace cleanup determination (the number of DELETING jobs is typically small, so memory impact is minor).
 - **Step 8 DISPATCHED / RUNNING reconciliation**: For existence checks, only the `(namespace, job_id)` tuples are SELECTed. For Jobs not present in `k8s_map`, a targeted ORM query loads the rows for FAILED transition and event insertion.
+- **Step 10 DISPATCHED stall decision**: Targets are limited to DISPATCHED jobs whose K8s Job was observed, so the `(namespace, job_id) -> Job` map already loaded above is scanned directly. No dedicated DB query is issued.
 
 ### 5.4 Per-Namespace Batching of Pod Fetches
 
@@ -234,5 +282,7 @@ As a result, the number of API calls scales only with the number of namespaces, 
 |---|---|---|
 | `WATCHER_K8S_LIST_PAGE_SIZE` | 500 | Page size for `list_job_for_all_namespaces()` and `list_pod_for_all_namespaces()`. Larger values reduce the number of pages and API round-trip costs, but increase the response size per page |
 | `WATCHER_DISPATCH_GRACE_SEC` | 30 | Grace period (seconds) before Step 8 marks a DISPATCHED job as FAILED due to a missing K8s Job. Until this much time has elapsed since `dispatched_at`, a missing K8s Job does not trigger the FAILED transition. Guards against the race between the Dispatcher and the Watcher's reconcile cycle. Recommended: at least 2x `DISPATCH_BUDGET_CHECK_INTERVAL_SEC` |
+| `WATCHER_DISPATCH_TIMEOUT_SEC` | 1800 (30 min) | Stall tolerance (seconds) before Step 10 requeues a DISPATCHED job to QUEUED. A job that does not reach RUNNING within this much time after `dispatched_at` is treated as unschedulable. Set it well above `GAP_FILLING_STALL_THRESHOLD_SEC` (default 300 seconds) |
+| `WATCHER_DISPATCH_BACKOFF_MAX_SEC` | 7200 (2 hours) | Ceiling (seconds) for Step 10's exponential backoff. However many requeues occur, `retry_after` is never set further ahead than this |
 
 These settings are registered as standard keys in the `cjob-config` ConfigMap and can be updated via `cjobctl config set <key> <value>` (see [cjobctl.md](cjobctl.md) §`cjobctl config set`). After updating, apply the change with `cjobctl system restart watcher`.

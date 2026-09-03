@@ -23,7 +23,8 @@ CREATE TABLE jobs (
     time_limit_seconds INTEGER NOT NULL,   -- Execution time limit (seconds). Enforced by the Watcher from started_at
     status        TEXT NOT NULL,
     retry_count   INTEGER NOT NULL DEFAULT 0,
-    retry_after   TIMESTAMPTZ,              -- Retry unlock time for K8s transient failures (NULL = eligible immediately)
+    retry_after   TIMESTAMPTZ,              -- Next dispatch unlock time (NULL = eligible immediately)
+    unschedulable_count INTEGER NOT NULL DEFAULT 0,  -- Requeue count from the DISPATCHED stall guard (recorded by the Watcher)
     k8s_job_name  TEXT,
     log_dir       TEXT,          -- /home/jovyan/.cjob/logs/<job_id>
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -52,6 +53,21 @@ CREATE INDEX idx_jobs_namespace_status ON jobs (namespace, status);
 ```
 
 `completions IS NULL` distinguishes regular jobs from sweep jobs. For sweep jobs, `completed_indexes` / `failed_indexes` are written by the Watcher from K8s API `status.completedIndexes` / `status.failedIndexes` (compressed notation strings). `succeeded_count` / `failed_count` are cache columns for referencing aggregate values without parsing `completed_indexes`.
+
+`retry_after` is "the earliest time this job may be dispatched again", read by the Dispatcher's candidate query as `retry_after IS NULL OR retry_after <= NOW()` (see [dispatcher.md](dispatcher.md) §1.2). Three paths set it.
+
+| Path | Set by | Interval | `retry_count` | `unschedulable_count` |
+|---|---|---|---|---|
+| Retry after a transient K8s API error (`RETRY`) | Dispatcher | `DISPATCH_RETRY_INTERVAL_SEC` | +1 | unchanged |
+| Rollback on a ResourceQuota race (`DEFERRED`) | Dispatcher | `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` | unchanged | unchanged |
+| Requeue by the DISPATCHED stall guard (`UNSCHEDULABLE`) | Watcher | `min(WATCHER_DISPATCH_TIMEOUT_SEC × 2^(n-1), WATCHER_DISPATCH_BACKOFF_MAX_SEC)` | unchanged | +1 |
+
+`unschedulable_count` is the cumulative number of times the DISPATCHED stall guard (see [watcher.md](watcher.md) §3 Step 10) has requeued the job to `QUEUED`. It serves two purposes.
+
+- As the exponent (`n` in the table above) used to compute `retry_after`
+- To let the Dispatcher's stall detection identify jobs that were requeued and are waiting out their backoff (`status = 'QUEUED'` and `unschedulable_count > 0` and `retry_after > NOW()`, see [dispatcher.md](dispatcher.md) §2.4.2)
+
+It is kept separate from `retry_count` because a stall stems from a lack of free capacity on the cluster side rather than a failure of the job itself, and so must not consume the `DISPATCH_MAX_RETRIES` retry budget. The value is not reset when the job starts running (transitions to `RUNNING`): it is retained as the requeue history and matches the number of `UNSCHEDULABLE` entries in `job_events`.
 
 `cpu_millicores` / `memory_mib` are denormalized numeric representations of the `cpu` / `memory` string columns, set by the Submit API at job creation using `parse_cpu_millicores()` / `parse_memory_mib()`. Used in the Dispatcher DRF query to aggregate predicted consumption of DISPATCHING/DISPATCHED jobs within SQL (see [dispatcher.md](dispatcher.md) §1.2).
 
@@ -102,6 +118,7 @@ The following values are treated as canonical for `event_type`. When adding a ne
 | `DISPATCHED` | Immediately after the Dispatcher creates the K8s Job and transitions `DISPATCHING` → `DISPATCHED` | Dispatcher | `{}` |
 | `RETRY`      | When the Dispatcher rolls `DISPATCHING` → `QUEUED` due to a transient K8s API error (`retry_count` is incremented) | Dispatcher | `{}` |
 | `DEFERRED`   | When the Dispatcher rolls `DISPATCHING` → `QUEUED` due to a ResourceQuota race (`retry_count` is left unchanged, see [dispatcher.md](dispatcher.md) §2.5) | Dispatcher | `{}` |
+| `UNSCHEDULABLE` | When the Watcher rolls `DISPATCHED` → `QUEUED` via the DISPATCHED stall guard (`retry_count` is left unchanged and `unschedulable_count` is incremented, see [watcher.md](watcher.md) §3 Step 10) | Watcher | `{"waited_sec": 1834, "attempt": 1, "backoff_sec": 1800}` |
 | `RUNNING`    | When the Watcher detects a Pod RUNNING transition and updates the DB status to `RUNNING` | Watcher | `{}` |
 | `SUCCEEDED`  | When the Watcher detects K8s Job completion | Watcher | `{}` |
 | `FAILED`     | When the Watcher / Dispatcher transitions the job to FAILED (permanent error, retry limit exceeded, K8s Job disappeared, etc.) | Dispatcher / Watcher | `{"error": "..."}` (via Dispatcher's mark_failed) |
@@ -481,11 +498,12 @@ QUEUED
        ├─ CANCELLED (user cancels → skipped before CAS, Watcher deletes K8s Job after CAS)
        ├─ DISPATCHED (Kubernetes Job creation succeeded)
        │    ├─ CANCELLED (user cancels → Watcher deletes K8s Job)
+       │    ├─ QUEUED (stall guard: Watcher detects the job cannot be placed, deletes the K8s Job and requeues it with a retry_after backoff)
        │    └─ RUNNING (Watcher detects Pod running)
        │         ├─ SUCCEEDED
        │         ├─ FAILED
        │         └─ CANCELLED (user cancels → Watcher deletes K8s Job)
-       ├─ QUEUED (on retry: Dispatcher restart / retry_after rollback after K8s transient failure)
+       ├─ QUEUED (on retry: Dispatcher restart / retry_after rollback after a K8s transient failure or a ResourceQuota race)
        └─ FAILED (validation error / max retry exceeded)
 CANCELLED (user cancels at any point in QUEUED / DISPATCHING / DISPATCHED / RUNNING)
 CANCELLED / SUCCEEDED / FAILED

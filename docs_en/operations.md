@@ -61,6 +61,14 @@ Check jobs that have been in DISPATCHED state for an extended period (targets fo
 cjobctl jobs stalled
 ```
 
+A job that stays DISPATCHED beyond `WATCHER_DISPATCH_TIMEOUT_SEC` (default 1800 seconds = 30 minutes) is requeued to `QUEUED` by the Watcher's stall guard, which deletes its K8s Job first (see [watcher.md](architecture/watcher.md) §3 Step 10). Requeued jobs are no longer `status = 'DISPATCHED'`, so they do not appear in this command. Use the following to inspect stalled jobs that are waiting out their backoff.
+
+- **Cluster-wide count**: the "Awaiting Placement (Backoff)" panel on the Grafana dashboard ([monitoring.md](architecture/monitoring.md) §3.2 Row 3)
+- **Rate of requeues**: the Prometheus counter `cjob_jobs_unschedulable_requeued_total` (Watcher's `/metrics`)
+- **Reason for an individual job**: `cjob status <job_id>` records `UNSCHEDULABLE` in `events` and shows the re-dispatch unlock time in `retry_after`
+
+If "Awaiting Placement (Backoff)" is persistently non-zero, suspect a structural reason the per-node bin-packing precheck keeps judging nodes as free (nodes occupied by non-cjob Pods, PVC node affinity, etc.; see [dispatcher.md](architecture/dispatcher.md) §2.6.5).
+
 ### 1.6 Remaining Time for RUNNING Jobs
 
 ```bash

@@ -8,7 +8,10 @@ from kubernetes.client.rest import ApiException
 from sqlalchemy import and_, func, or_, select, text, tuple_
 from sqlalchemy.orm import Session
 
-from cjob.metrics import JOBS_COMPLETED_TOTAL
+from cjob.metrics import (
+    JOBS_COMPLETED_TOTAL,
+    JOBS_UNSCHEDULABLE_REQUEUED_TOTAL,
+)
 from cjob.models import Job, JobEvent
 
 logger = logging.getLogger(__name__)
@@ -352,11 +355,103 @@ def _enforce_time_limits(
         )
 
 
+def _requeue_stalled_dispatched(
+    session: Session,
+    k8s_map: dict[tuple[str, int], LightK8sJob],
+    db_jobs: dict[tuple[str, int], Job],
+    *,
+    timeout_sec: int,
+    backoff_max_sec: int,
+):
+    """Requeue DISPATCHED jobs that never started (watcher.md §3 Step 10).
+
+    cjob does not set ``activeDeadlineSeconds`` on K8s Jobs, so a job that
+    cannot be placed on any node would otherwise sit in DISPATCHED forever,
+    holding ClusterQueue and ResourceQuota capacity. This is the last line of
+    defence behind the Dispatcher's per-node bin-packing precheck.
+
+    Only jobs whose K8s Job was observed in this cycle are considered: a
+    DISPATCHED job with no K8s Job belongs to Step 8 (FAILED transition), and
+    requeueing it here would disable that self-healing path.
+
+    The detection is purely time based; Pod conditions are not inspected (see
+    watcher.md §3 Step 10 for the rationale). The K8s Job is deleted first and
+    the DB is only updated once the deletion succeeded, so a delete failure
+    can never leave a surviving Job running behind a QUEUED DB row.
+
+    ``db_jobs`` is the map reconcile_cycle already loaded for the observed
+    K8s Jobs, so this step needs no DB query of its own (watcher.md §5.3).
+    """
+    if timeout_sec <= 0:
+        return
+
+    now = datetime.now(timezone.utc)
+    for (ns, jid), kj in k8s_map.items():
+        job = db_jobs.get((ns, jid))
+        if job is None:
+            continue
+        if job.status != "DISPATCHED" or job.dispatched_at is None:
+            continue
+
+        waited = (now - _as_utc(job.dispatched_at)).total_seconds()
+        if waited < timeout_sec:
+            continue
+
+        k8s_job_name = job.k8s_job_name or kj.name
+        if not k8s_job_name:
+            logger.error(
+                "Dispatch timeout for %s/%d but k8s_job_name is unknown; "
+                "skipping requeue",
+                ns, jid,
+            )
+            continue
+
+        if not _delete_k8s_job(ns, k8s_job_name):
+            # Retry on the next cycle; the job stays DISPATCHED until the
+            # K8s Job is confirmed gone.
+            logger.warning(
+                "Dispatch timeout for %s/%d but K8s Job deletion failed; "
+                "will retry next cycle",
+                ns, jid,
+            )
+            continue
+
+        attempt = (job.unschedulable_count or 0) + 1
+        # Cap the exponent so the doubling cannot build a huge int before
+        # min() clamps it.
+        exponent = min(attempt - 1, 32)
+        backoff = min(timeout_sec * (2 ** exponent), backoff_max_sec)
+
+        job.status = "QUEUED"
+        job.unschedulable_count = attempt
+        job.retry_after = now + timedelta(seconds=backoff)
+        JOBS_UNSCHEDULABLE_REQUEUED_TOTAL.inc()
+        session.add(
+            JobEvent(
+                namespace=ns,
+                job_id=jid,
+                event_type="UNSCHEDULABLE",
+                payload_json={
+                    "waited_sec": int(waited),
+                    "attempt": attempt,
+                    "backoff_sec": backoff,
+                },
+            )
+        )
+        logger.info(
+            "Requeued %s/%d: not scheduled within %ds "
+            "(attempt=%d, backoff=%ds)",
+            ns, jid, timeout_sec, attempt, backoff,
+        )
+
+
 def reconcile_cycle(
     session: Session,
     k8s_jobs: list[LightK8sJob],
     *,
     dispatch_grace_sec: int = 30,
+    dispatch_timeout_sec: int = 1800,
+    dispatch_backoff_max_sec: int = 7200,
 ):
     """Run one reconciliation cycle.
 
@@ -367,6 +462,12 @@ def reconcile_cycle(
     (watcher.md §3 Step 8). Production always passes the value from
     ``Settings.WATCHER_DISPATCH_GRACE_SEC``; the default exists only to
     keep test setup terse.
+
+    ``dispatch_timeout_sec`` and ``dispatch_backoff_max_sec`` drive Step 10's
+    DISPATCHED stall guard: jobs that stay DISPATCHED longer than the timeout
+    are requeued with an exponential backoff capped at the maximum
+    (``Settings.WATCHER_DISPATCH_TIMEOUT_SEC`` /
+    ``Settings.WATCHER_DISPATCH_BACKOFF_MAX_SEC`` in production).
     """
     # Build lookup: (namespace, job_id) -> lightweight K8s Job snapshot
     k8s_map: dict[tuple[str, int], LightK8sJob] = {
@@ -496,6 +597,17 @@ def reconcile_cycle(
     # reached a terminal state in this cycle; running it before Step 8 keeps
     # the jobs it just failed out of the disappearance query.
     _enforce_time_limits(session, k8s_map)
+
+    # Step 10: Requeue DISPATCHED jobs that never reached RUNNING. Runs after
+    # Step 9 (disjoint candidate sets) and before Step 8 so the jobs it moves
+    # to QUEUED are not picked up by the DISPATCHED disappearance query.
+    _requeue_stalled_dispatched(
+        session,
+        k8s_map,
+        db_jobs,
+        timeout_sec=dispatch_timeout_sec,
+        backoff_max_sec=dispatch_backoff_max_sec,
+    )
 
     # Step 8: Mark DISPATCHED/RUNNING jobs with no K8s Job as FAILED.
     # First collect only (namespace, job_id) to avoid loading full Job rows

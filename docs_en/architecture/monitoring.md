@@ -72,6 +72,7 @@ The Submit API and Watcher expose Prometheus counter metrics. Configure scraping
 |---|---|---|---|---|
 | `cjob_jobs_submitted_total` | Counter | — | Submit API | Number of jobs submitted (incremented on successful `submit_job` / `submit_sweep`) |
 | `cjob_jobs_completed_total` | Counter | `status` | Watcher / Submit API | Number of completed jobs. `status` is `succeeded` / `failed` / `cancelled` |
+| `cjob_jobs_unschedulable_requeued_total` | Counter | — | Watcher | Number of times the DISPATCHED stall guard requeued a job to QUEUED ([watcher.md](watcher.md) §3 Step 10). Sustained growth means there is a structural reason jobs cannot be placed on the cluster side |
 
 Instrumentation points for `cjob_jobs_completed_total`:
 - `succeeded` / `failed`: On status transition in Watcher's `reconcile_cycle()`
@@ -129,6 +130,7 @@ A summary row placed at the top of the dashboard. Allows understanding cluster s
 | Panel | Type | DataSource | Content |
 |---|---|---|---|
 | Queue Usage by Flavor | Table | PostgreSQL | Number of running, awaiting resource allocation, submitted, and held jobs per flavor |
+| Awaiting Placement (Backoff) | Stat | PostgreSQL | Number of jobs requeued by the DISPATCHED stall guard whose `retry_after` is in the future |
 | Queue Job Count Over Time | Time series | Prometheus | Trend of running (admitted_active) and awaiting-resource-allocation (pending) jobs |
 | Job Submission and Completion Over Time | Time series (line) | Prometheus | Submission and completion counts by time period |
 
@@ -185,7 +187,7 @@ Because the dashboard is user-facing, raw `jobs.status` values are not displayed
 
 | Internal status | UI label | Notes |
 |---|---|---|
-| QUEUED | Submitted | The job has been submitted to cjob and is waiting for Dispatcher processing |
+| QUEUED | Submitted | The job has been submitted to cjob and is waiting for Dispatcher processing. Jobs requeued by the DISPATCHED stall guard are also in this state ([watcher.md](watcher.md) §3 Step 10) |
 | DISPATCHING | (not displayed) | A transient state that usually lasts less than a second. Stalls in this state are not a user-facing indicator; they are detected by administrator-facing Prometheus alerts |
 | DISPATCHED | Awaiting Resource Allocation (abbreviated as "Allocation Wait" in the pie chart) | Registered with K8s/Kueue and waiting for admission. Runs as soon as capacity becomes available in the ClusterQueue's nominalQuota |
 | RUNNING | Running | |
@@ -200,6 +202,7 @@ Statuses counted by each panel:
 | Job Status Breakdown pie chart (Row 2) | QUEUED / DISPATCHED / RUNNING / HELD / terminal states | 24-hour overview (only DISPATCHING is excluded) |
 | Queue Usage by Flavor (Row 3) | QUEUED / DISPATCHED / RUNNING / HELD | Breakdown of queue state per flavor |
 | Queue Job Count Over Time (Row 3) | `kueue_admitted_active_workloads` and `kueue_pending_workloads` (≒ DISPATCHED) | Trend of resource contention |
+| Awaiting Placement (Backoff) (Row 3) | QUEUED with `unschedulable_count > 0` and `retry_after > NOW()` | Visibility into jobs requeued because they could not be placed |
 
 **Reason for excluding QUEUED from resource-contention indicators (Row 1 / Row 3 time series)**:
 
@@ -342,6 +345,13 @@ WHERE status IN ('RUNNING', 'DISPATCHED', 'QUEUED', 'HELD')
 GROUP BY flavor
 ORDER BY flavor;
 
+-- Jobs awaiting placement in backoff (requeued by the DISPATCHED stall guard)
+SELECT COUNT(*) AS "In backoff"
+FROM jobs
+WHERE status = 'QUEUED'
+  AND unschedulable_count > 0
+  AND retry_after > NOW();
+
 -- Cluster node count
 SELECT COUNT(*) AS "Node count" FROM node_resources;
 ```
@@ -362,3 +372,4 @@ When importing, the data source UIDs must be configured for your environment. Da
 - Kueue metrics reset immediately after a controller restart, causing temporary data gaps. The impact is minimal if the dashboard time range is set appropriately.
 - PostgreSQL queries make use of indexes (`idx_jobs_namespace_status`). Pay attention to query performance if a large number of jobs have accumulated (hundreds of thousands or more).
 - The `node_resources` table is synced by the Watcher at 300-second intervals, so node additions/removals may take up to 5 minutes to be reflected.
+- If "Awaiting Placement (Backoff)" is persistently non-zero, the per-node bin-packing precheck may be structurally misjudging nodes as free (e.g. nodes occupied by non-cjob Pods). Check it together with the growth rate of `cjob_jobs_unschedulable_requeued_total` (see [dispatcher.md](dispatcher.md) §2.6.5).

@@ -87,6 +87,15 @@ Difference between ResourceQuota and ClusterQueue nominalQuota: ResourceQuota is
 
 See [dispatcher.md](dispatcher.md) §2.4 for details on gap filling.
 
+### Settings Related to the DISPATCHED Stall Guard
+
+| Setting | Location | Value | Owner | Scope | Description |
+|---|---|---|---|---|---|
+| `WATCHER_DISPATCH_TIMEOUT_SEC` | ConfigMap | 1800 (30 min) | Watcher | Per job | A job that has been DISPATCHED for longer than this without reaching RUNNING is treated as unschedulable: its K8s Job is deleted and the job is requeued to QUEUED. Set it well above `GAP_FILLING_STALL_THRESHOLD_SEC` (300 seconds). |
+| `WATCHER_DISPATCH_BACKOFF_MAX_SEC` | ConfigMap | 7200 (2 hours) | Watcher | Per job | Ceiling for the exponential backoff written to `retry_after` on requeue. |
+
+See [watcher.md](watcher.md) §3 Step 10 for details on the DISPATCHED stall guard.
+
 ### Settings Related to per-node bin-packing Pre-check
 
 | Setting | Location | Value | Manager | Scope | Description |

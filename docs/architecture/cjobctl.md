@@ -417,6 +417,8 @@ CLI 側で以下のバリデーションを行う:
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | int | watcher |
 | `WATCHER_K8S_LIST_PAGE_SIZE` | int | watcher |
 | `WATCHER_DISPATCH_GRACE_SEC` | int | watcher |
+| `WATCHER_DISPATCH_TIMEOUT_SEC` | int | watcher |
+| `WATCHER_DISPATCH_BACKOFF_MAX_SEC` | int | watcher |
 | `CLUSTER_QUEUE_NAME` | string | watcher |
 | `RESOURCE_QUOTA_NAME` | string | watcher |
 | `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` | int | watcher |
