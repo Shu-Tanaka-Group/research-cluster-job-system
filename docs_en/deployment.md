@@ -184,12 +184,19 @@ env:
 
 ### 7.1 Image Role
 
-The same image (obtained from the User Pod's environment variable `CJOB_IMAGE` or `JUPYTER_IMAGE`) is used for two purposes. The `cjob` CLI is not included in the image; users install it individually.
+The image is used for two purposes. The `cjob` CLI is not included in the image; users install it individually.
 
-| Purpose | Pod | Notes |
-|---|---|---|
-| User work environment | User Pod (JupyterHub) | User installs cjob CLI separately |
-| Job execution environment | Job Pod (Kubernetes Job) | CLI not required |
+| Purpose | Pod | How the image is determined | Notes |
+|---|---|---|---|
+| User work environment | User Pod (JupyterHub) | JupyterHub profile configuration | User installs cjob CLI separately |
+| Job execution environment | Job Pod (Kubernetes Job) | `--image` > flavor default image > same as the submitting User Pod ([api.md](architecture/api.md) section 2.2) | CLI not required |
+
+By default, Job Pods run with the same image as the submitting User Pod. Setting a flavor default image (`image` in `RESOURCE_FLAVORS`, see [resources.md](architecture/resources.md)) lets only that flavor's jobs run with a different image. This is used, for example, to run jobs requiring the CUDA runtime from a lightweight submitting Pod.
+
+When setting a flavor default image, satisfy the following two points.
+
+- The image must derive from the same base as the submitting Pod's image, with a matching Python version and installation path ([prerequisites.md](architecture/prerequisites.md) section 2.1)
+- The image name must match the Kyverno allowed pattern in section 14
 
 ### 7.2 Image Contents
 
@@ -369,7 +376,7 @@ hub:
 
 ### Job Pod Image Environment Variable
 
-The `cjob` CLI obtains the image name for Job Pods from User Pod environment variables in the following priority order:
+The `cjob` CLI obtains **the submitting Pod's image name** from User Pod environment variables in the following priority order and sends it as `fallback_image` to the Submit API:
 
 1. `CJOB_IMAGE` (preferred)
 2. `JUPYTER_IMAGE` (fallback)
@@ -381,6 +388,10 @@ When using in non-JupyterHub environments, set the `CJOB_IMAGE` environment vari
 ```
 CJOB_IMAGE=my-registry/my-image:1.0
 ```
+
+These environment variables exist to tell the Submit API the submitting Pod's image; they are not a means of overriding the Job Pod image. The Submit API gives `--image` (the user's explicit specification) and the flavor default image (administrator-defined) higher priority ([api.md](architecture/api.md) section 2.2). To change the image for an individual job, users use `cjob add --image`.
+
+Even when both are unset, jobs can be submitted as long as the image can be resolved from the flavor default image or `--image`.
 
 ---
 
@@ -482,6 +493,14 @@ spec:
 ```bash
 kubectl apply -f policies/restrict-job-image.yaml
 ```
+
+### 14.3 Relationship with Flavor Default Images
+
+The Job Pod image is resolved in the order `--image` > flavor default image > submitting Pod's image ([api.md](architecture/api.md) section 2.2). The Submit API holds no list of allowed images; enforcement is consolidated into this policy.
+
+Consequently, setting an image outside the allowed pattern in `image` of `RESOURCE_FLAVORS` means that **jobs submitted to that flavor are accepted but then rejected by admission at dispatch time and become FAILED with a `last_error`**. Since no error occurs at submission time, the administrator only finds out when a user reports it.
+
+When adding or changing a flavor default image, always verify that the image name matches this policy's allowed pattern (for the procedure, see [operations.md](operations.md) section 8). The same applies when a user specifies an image outside the allowed pattern with `cjob add --image`: it fails after dispatch.
 
 ---
 

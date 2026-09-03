@@ -28,7 +28,7 @@ The following features are required to realize this system.
 
 - Retrieve current working directory
 - Retrieve exported environment variables (excluding variables specified in the user configuration file's `env.exclude`)
-- Retrieve container image name (obtained from the `CJOB_IMAGE` environment variable, falling back to `JUPYTER_IMAGE` if not set)
+- Resolve the container image (in the order `--image` > flavor default image > submitting Pod's image (`CJOB_IMAGE` → `JUPYTER_IMAGE`). The resolution is performed by the Submit API, which stores the resolved value in `jobs.image`. See [api.md](api.md) section 2.2)
 - Save command string
 - Resolve user namespace (obtained from the ServiceAccount namespace file)
 - Check the total job count limit per namespace (sum of QUEUED / DISPATCHING / DISPATCHED / HELD / CANCELLED; RUNNING is excluded from the count as it is limited by `DISPATCH_BUDGET_PER_NAMESPACE`)
@@ -49,7 +49,7 @@ The following features are required to realize this system.
 
 ### 1.4 Kubernetes Execution Features
 
-- Create a Job using the image obtained at submit time (`CJOB_IMAGE` → `JUPYTER_IMAGE`)
+- Create a Job using the image resolved by the Submit API at submit time (`jobs.image`)
 - Mount PVC at `${WORKSPACE_MOUNT_PATH}` (default `/home/jovyan`)
 - Set `workingDir` to the cwd at submit time
 - Inject environment variables captured at submit time into the container `env`
@@ -207,7 +207,7 @@ Watcher / Reconciler (namespace: cjob-system)
   └─ PostgreSQL
 
 Kubernetes Job Pod (namespace: user-alice)
-  ├─ image = same as User Pod (obtained in order: CJOB_IMAGE → JUPYTER_IMAGE)
+  ├─ image = jobs.image (resolved in order: --image > flavor default > same as User Pod)
   ├─ PVC mounted at ${WORKSPACE_MOUNT_PATH} (default /home/jovyan)
   ├─ workingDir = cwd
   ├─ env = submit-time env

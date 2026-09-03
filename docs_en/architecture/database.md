@@ -12,7 +12,7 @@ CREATE TABLE jobs (
     job_id        INTEGER NOT NULL,
     "user"        TEXT NOT NULL,
     namespace     TEXT NOT NULL,
-    image         TEXT NOT NULL,           -- CLI fetches from CJOB_IMAGE env var (falls back to JUPYTER_IMAGE if not set)
+    image         TEXT NOT NULL,           -- Resolved image determined by the Submit API (--image > flavor default > submitting Pod)
     command       TEXT NOT NULL,
     cwd           TEXT NOT NULL,
     env_json      JSONB NOT NULL DEFAULT '{}',
@@ -125,7 +125,7 @@ The following values are treated as canonical for `event_type`. When adding a ne
 | `CANCELLED`  | When the API accepts a cancel request, or when the Watcher finalizes a CANCELLED job | API / Watcher | `{}` |
 | `HELD`       | When the API accepts a hold operation | API | `{}` |
 | `RELEASED`   | When the API accepts a release operation | API | `{}` |
-| `SET`        | When the API changes parameters via a set operation | API | Change content (e.g., `{"cpu": "2"}`) |
+| `SET`        | When the API changes parameters via a set operation | API | Change content (e.g., `{"cpu": {"old": "1", "new": "2"}}`). Also includes `image` when the image was re-resolved due to a flavor change (see [api.md](api.md) section 11.1) |
 
 The `events` field of the `GET /v1/jobs/{job_id}` response returns these in chronological order, up to 10 entries (see [api.md](api.md) §4). Since the CLI displays the same strings as-is, new event types should use short uppercase tokens, and renaming existing event types must be avoided (it would break CLI backward compatibility).
 

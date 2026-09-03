@@ -76,7 +76,7 @@ An "Awaiting Placement (Backoff)" panel was added to Row 3 of `k8s/base/grafana/
 
 > Related: issue #209
 
-`extra="forbid"` has been introduced on the server-side `FlavorDefinition`, so if a flavor definition in `RESOURCE_FLAVORS` contains an unknown field, **Submit API / Dispatcher / Watcher fail to start** (previously such a field was silently ignored). Only three fields are allowed: `name` / `label_selector` / `gpu_resource_name` (see "Schema Constraints for `RESOURCE_FLAVORS`" in [resources.md](../architecture/resources.md)).
+`extra="forbid"` has been introduced on the server-side `FlavorDefinition`, so if a flavor definition in `RESOURCE_FLAVORS` contains an unknown field, **Submit API / Dispatcher / Watcher fail to start** (previously such a field was silently ignored). Only four fields are allowed: `name` / `label_selector` / `gpu_resource_name` / `image` (see "Schema Constraints for `RESOURCE_FLAVORS`" in [resources.md](../architecture/resources.md)).
 
 **Before Step 4 (applying K8s resources)**, verify that no unknown field has crept into the current configuration.
 
@@ -92,3 +92,48 @@ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
 ```
 
 Note that the new `cjobctl config set RESOURCE_FLAVORS` performs a structural check (unknown fields, duplicate `name`, `key=value` form of `label_selector`, consistency with `DEFAULT_FLAVOR`), so any error is rejected on the spot. Since `cjobctl` is built in Step 3 of the standard migration procedures, this correction can be made between Step 3 and Step 4.
+
+## Role Change of `CJOB_IMAGE` (Updating `cjob` / `cjobctl` Is Required)
+
+> Related: issue #210
+
+With the introduction of a per-flavor default container image (`image` in `RESOURCE_FLAVORS`), the resolution order for the Job Pod image has changed ([api.md](../architecture/api.md) section 2.2).
+
+```
+--image  >  flavor image  >  CJOB_IMAGE / JUPYTER_IMAGE
+└ user explicit ┘  └ administrator ┘  └── submitting Pod's image ──┘
+```
+
+`CJOB_IMAGE` has changed roles from "the user's means of overriding the image" to "an environment variable that tells the CLI the submitting Pod's image name." **For flavors that have a default image set, overriding via `CJOB_IMAGE` no longer takes effect.** User overrides are consolidated into `cjob add --image` / `cjob sweep --image` / `cjob set --image`.
+
+The only operation affected is one that overrode the image via `CJOB_IMAGE` for a flavor with a default image set. As long as no default image is set, the behavior is unchanged, so these migration procedures are relevant only when introducing default images.
+
+### Required Work
+
+1. **Update the `cjob` CLI (required)**
+
+   An old CLI always sends `image`, so it is always adopted with the highest priority by the Submit API and **the flavor default image is never applied**. Job submission itself still succeeds, so this does not surface as a failure; it surfaces as "the default image was set but has no effect." Following the CLI distribution procedure in the [standard migration procedures](../migration.md), instruct users to run `cjob update`.
+
+2. **Update `cjobctl` (required when setting `image`)**
+
+   The `RESOURCE_FLAVORS` structural validation in `cjobctl config set` keeps the allowed fields as a whitelist. An old `cjobctl` rejects `image` as an unknown field, so a definition containing `image` cannot be applied. The build is completed in Step 3 of the standard migration procedures.
+
+3. **Set flavor default images (optional)**
+
+   Perform this only when using default images. Before setting them, verify that the checks in [operations.md](../operations.md) section 8.4.1 (matching the Kyverno allowed pattern, deriving from the same base as the submitting Pod) are satisfied.
+
+   ```bash
+   cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+   cjobctl system restart submit-api
+   ```
+
+   ```json
+   [
+     {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+     {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu", "image": "your-registry/cjob-cuda:2.1.0"}
+   ]
+   ```
+
+   Only the Submit API performs image resolution, so submit-api is the only component that needs a restart to reflect this setting (the Dispatcher uses the resolved value in `jobs.image` as is).
+
+There is no DB schema change (`jobs.image` remains NOT NULL, now holding the resolved value). The `jobs.image` of existing jobs is also unchanged.

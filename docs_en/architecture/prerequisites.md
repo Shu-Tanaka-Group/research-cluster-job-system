@@ -18,9 +18,8 @@ This system is built on the following assumptions.
 
 ## 2. Execution Environment Prerequisites
 
-- **The Pod that submits jobs and the Pod that executes jobs use the same image**
-- The image is automatically obtained from the User Pod's environment variable `CJOB_IMAGE` (without explicit user specification)
-- If `CJOB_IMAGE` is not set, it falls back to `JUPYTER_IMAGE` (for backward compatibility with JupyterHub environments). If both are unset, the CLI returns an error
+- **By default, the Pod that executes jobs uses the same image as the Pod that submits them.** When the flavor has a default image set, or when the user specifies one explicitly with `cjob add --image`, that takes precedence (see §2.1)
+- The submitting Pod's image is automatically obtained from the User Pod's environment variable `CJOB_IMAGE`, falling back to `JUPYTER_IMAGE` if it is not set (for backward compatibility with JupyterHub environments). Even when both are unset, jobs can be submitted as long as the image can be resolved from the flavor default image or `--image`
 - JupyterHub User Pods have `JUPYTER_IMAGE` set to the current container image name
 - The `cjob` CLI is implemented in Rust as a single binary and distributed via GitHub Releases
 - Users place the CLI binary in their own home directory (e.g., `/home/jovyan/.local/bin/`)
@@ -32,7 +31,19 @@ This system is built on the following assumptions.
 - Only exported environment variables are reproduced (including `PATH` / `VIRTUAL_ENV` for virtual environments, excluding variables specified in the user's `env.exclude` configuration)
 - Shell functions, aliases, and shell options are not reproduced
 - Users create and manage Python virtual environments under `${WORKSPACE_MOUNT_PATH}`
-- Since the Job Pod and User Pod use the same image, compatibility of C extension libraries inside venv is maintained
+- As long as the Job Pod and User Pod use the same image, compatibility of C extension libraries inside venv is maintained. When a different image is used, the prerequisites in §2.1 must be satisfied
+
+### 2.1 Prerequisites When the Job Pod and Submitting Pod Use Different Images
+
+Using a flavor default image (`RESOURCE_FLAVORS` in [resources.md](resources.md)) or `cjob add --image` can make the Job Pod's image differ from the submitting Pod's. In that case, only images satisfying the following condition may be used.
+
+- **The image must derive from the same base as the submitting Pod's image, with a matching Python version and installation path**
+
+The venv on the PVC is built in the submitting User Pod, and the `VIRTUAL_ENV` / `PATH` collected at submit time are reproduced in the Job Pod. The venv's `pyvenv.cfg` points to the system Python path via `home`, so unless that path is valid in both images, the venv breaks on the Job Pod side. ABI compatibility of C extension libraries likewise depends on the bases matching.
+
+Typical cases that break this premise are setting a flavor default image whose base OS or distribution differs (e.g., an Alpine-based execution image against an Ubuntu-based submitting Pod), or whose Python minor version differs. An image that merely adds libraries on top of the same base, such as one with or without the CUDA runtime, satisfies this condition.
+
+For the operational procedure when setting a flavor default image, see [operations.md](../operations.md) §8.
 
 ## 3. Scheduling Prerequisites
 

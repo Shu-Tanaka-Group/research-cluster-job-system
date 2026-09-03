@@ -36,7 +36,8 @@ Submit a single job.
 ```json
 {
   "command": "python main.py --alpha 0.1 --beta 16",
-  "image": "your-registry/cjob-jupyter:2.1.0",
+  "image": "your-registry/cjob-cuda:2.1.0",
+  "fallback_image": "your-registry/cjob-jupyter:2.1.0",
   "cwd": "/home/jovyan/project-a/exp1",
   "env": {
     "OMP_NUM_THREADS": "4",
@@ -51,6 +52,13 @@ Submit a single job.
   "time_limit_seconds": 3600
 }
 ```
+
+Both `image` and `fallback_image` are optional; the Job Pod image is resolved from these two and the flavor definition in the order given in §2.2.
+
+| Field | Source | Description |
+|---|---|---|
+| `image` | `cjob add --image` | The user's explicit specification. Takes the highest priority. |
+| `fallback_image` | The submitting Pod's `CJOB_IMAGE` → `JUPYTER_IMAGE` | The submitting User Pod's image. Lower priority than the flavor default image. |
 
 Each field within `resources` is optional. Default values when omitted:
 
@@ -135,10 +143,10 @@ If `command` is an empty string, returns 400.
 { "detail": "command cannot be empty" }
 ```
 
-If `image` is an empty string, returns 400.
+If the Job Pod image cannot be resolved from `image`, the flavor default image, or `fallback_image`, returns 400 (see §2.2).
 
 ```json
-{ "detail": "image cannot be empty" }
+{ "detail": "Cannot resolve image. Specify it with --image, set a default image on flavor 'cpu', or set CJOB_IMAGE / JUPYTER_IMAGE" }
 ```
 
 If the total number of jobs in the namespace (sum of QUEUED / DISPATCHING / DISPATCHED / HELD / CANCELLED) reaches
@@ -170,7 +178,8 @@ The `_INDEX_` placeholder accepted by the CLI is replaced with `$CJOB_INDEX` on 
 ```json
 {
   "command": "python main.py --trial $CJOB_INDEX",
-  "image": "your-registry/cjob-jupyter:2.1.0",
+  "image": "your-registry/cjob-cuda:2.1.0",
+  "fallback_image": "your-registry/cjob-jupyter:2.1.0",
   "cwd": "/home/jovyan/project-a",
   "env": {
     "OMP_NUM_THREADS": "4"
@@ -198,7 +207,7 @@ The `_INDEX_` placeholder accepted by the CLI is replaced with `$CJOB_INDEX` on 
 
 ### Validation
 
-In addition to the validation shared with `POST /v1/jobs` (single node resource excess, GPU validation, time_limit, job count limit, DELETING check), the following sweep-specific validation is performed.
+In addition to the validation shared with `POST /v1/jobs` (single node resource excess, GPU validation, time_limit, image resolution, job count limit, DELETING check), the following sweep-specific validation is performed.
 
 - `completions` is less than 1 → 400
 - `completions` exceeds `MAX_SWEEP_COMPLETIONS` (default 1000) → 400
@@ -221,6 +230,33 @@ In addition to the validation shared with `POST /v1/jobs` (single node resource 
 ```json
 { "detail": "parallelism × requested GPU (8) exceeds the total GPU (4) for flavor 'gpu-a100'" }
 ```
+
+## 2.2 Image Resolution Order
+
+`POST /v1/jobs` and `POST /v1/sweep` resolve the image used by the Job Pod in the following priority order and store the resolved value in `jobs.image`.
+
+```
+--image  >  flavor image  >  fallback_image
+└ user explicit ┘  └ administrator ┘  └ submitting Pod's image ┘
+```
+
+| # | Source | Content |
+|---|---|---|
+| 1 | The request's `image` | The value the user specified explicitly with `cjob add --image` / `cjob sweep --image` |
+| 2 | The flavor definition's `image` | The default image of the resolved flavor (`DEFAULT_FLAVOR` when `resources.flavor` is omitted); see `RESOURCE_FLAVORS` in [resources.md](resources.md) |
+| 3 | The request's `fallback_image` | The value the CLI obtained from the submitting Pod's `CJOB_IMAGE` → `JUPYTER_IMAGE` |
+
+If resolution fails at every stage, returns 400. An empty string is treated as unspecified and falls back to the next candidate.
+
+The resolution is performed by the Submit API rather than the CLI for the following reasons.
+
+- Flavor resolution (applying `DEFAULT_FLAVOR`) does not have to be implemented twice, in both the CLI and the Submit API
+- Because the resolved value is stored in `jobs.image`, `cjob status` shows the actual image, and the value does not shift across retries or re-dispatch
+- Changes to `RESOURCE_FLAVORS` do not apply retroactively to already-submitted jobs
+
+**Backward compatibility**: An old CLI always sends `image`, so it is always adopted at priority 1 and behaves as before. However, an old CLI never applies the flavor default image, so using this feature requires updating the CLI (see [migration/unreleased.md](../migration/unreleased.md)).
+
+The Submit API holds no list of allowed images. Restricting the usable images is delegated to the Kyverno `restrict-job-image` policy ([deployment.md](../deployment.md) §14), keeping enforcement in a single layer. Consequently, specifying a disallowed image or a nonexistent tag still gets the job accepted, and it fails at admission rejection after dispatch or with `ImagePullBackOff`.
 
 ## 3. GET /v1/jobs
 
@@ -293,6 +329,7 @@ Retrieve the details of an individual job.
   "namespace": "user-alice",
   "command": "python main.py --alpha 0.1 --beta 16",
   "cwd": "/home/jovyan/project-a/exp1",
+  "image": "your-registry/cjob-jupyter:2.1.0",
   "cpu": "2",
   "memory": "4Gi",
   "gpu": 0,
@@ -548,6 +585,7 @@ All fields are optional. However, at least one field must be specified. If all f
 | `memory` | `string \| null` | Memory resource (e.g., `"4Gi"`, `"500Mi"`) |
 | `gpu` | `int \| null` | Number of GPUs |
 | `flavor` | `string \| null` | ResourceFlavor name |
+| `image` | `string \| null` | Job Pod image (see §11.1) |
 | `time_limit_seconds` | `int \| null` | Execution time limit (seconds) |
 
 ### response
@@ -555,11 +593,30 @@ All fields are optional. However, at least one field must be specified. If all f
 ```json
 {
   "job_id": 1,
-  "status": "QUEUED"
+  "status": "QUEUED",
+  "image": "your-registry/cjob-cuda:2.1.0"
 }
 ```
 
 `status` is the current status of the job. On successful modification, returns `QUEUED` or `HELD`; when `skipped`, returns the actual status.
+
+`image` returns the new value only when the image changed. It returns `null` when the image did not change and when `skipped`.
+
+### 11.1 Image Re-resolution Rules
+
+Because changing `flavor` can implicitly change the Job Pod image, it is re-resolved by the following rules.
+
+| `image` | `flavor` | Handling of image |
+|---|---|---|
+| Present | Present / absent | Updated to the specified value. No automatic re-resolution is performed |
+| Absent | Present | Updated to the new flavor's default image if it has one; otherwise kept |
+| Absent | Absent | Kept |
+
+The simple rule "re-resolve unconditionally if the new flavor has a default image" is adopted. Inferring whether the current image came from a flavor default or from the user's explicit specification was also considered, but when the previous flavor has no default (a change from a flavor without a default to one with a default) there is nothing to base the inference on, which misses exactly the case where a flavor default image is most needed. Holding the information needed for such inference would require adding a column to `jobs`.
+
+As a result, changing the flavor of a job whose image was specified explicitly with `cjob add --image` loses that explicit specification. This can be avoided by specifying `--image` at the same time.
+
+When the image changes, the before/after values of `image` are also recorded in the `payload_json` of the `SET` event (see [database.md](database.md) §3).
 
 ### Validation
 
@@ -595,15 +652,20 @@ Modify parameters of multiple jobs at once. The same change is applied to all jo
 }
 ```
 
+The specifiable fields are the same as in §11 (including `image`). The image re-resolution rules are also the same as in §11.1.
+
 ### response
 
 ```json
 {
   "modified":  [1, 2],
   "skipped":   [3],
-  "not_found": []
+  "not_found": [],
+  "image":     "your-registry/cjob-cuda:2.1.0"
 }
 ```
+
+`image` returns the new value only when the image changed. Since the same `flavor` / `image` is applied to all jobs, when the image changes its value is identical for every job. It returns `null` when no change occurred.
 
 `skipped` applies when the target job is in a state other than QUEUED / HELD. Validation errors occur independently for each job, so some jobs may succeed while others fail. However, since the same parameters are applied to all jobs, if a validation error occurs, it typically occurs for all jobs.
 
@@ -779,6 +841,7 @@ Returns the list of available ResourceFlavors and their resource information. No
     {
       "name": "cpu",
       "has_gpu": false,
+      "image": null,
       "nodes": [
         {"node_name": "worker07", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0},
         {"node_name": "worker08", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0}
@@ -788,6 +851,7 @@ Returns the list of available ResourceFlavors and their resource information. No
     {
       "name": "gpu-a100",
       "has_gpu": true,
+      "image": "your-registry/cjob-cuda:2.1.0",
       "nodes": [
         {"node_name": "gworker02", "cpu_millicores": 128000, "memory_mib": 515686, "gpu": 4}
       ],
@@ -801,6 +865,8 @@ Returns the list of available ResourceFlavors and their resource information. No
 The `nodes` for each flavor contains the list of nodes belonging to that flavor from the `node_resources` table. Flavors without node information (Watcher not running) have `nodes` as an empty array.
 
 `quota` contains the ClusterQueue nominalQuota retrieved from the `flavor_quotas` table. Flavors without quota information (Watcher not yet synced) have `quota` as `null`.
+
+`image` is the flavor default image defined in `RESOURCE_FLAVORS` (see [resources.md](resources.md)). It is `null` for flavors where it is not set, and jobs on such a flavor use the submitting Pod's image at submission time (see §2.2).
 
 `default_flavor` is the value of the ConfigMap `DEFAULT_FLAVOR`.
 

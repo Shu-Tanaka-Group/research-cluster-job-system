@@ -170,10 +170,12 @@ Use `cjob flavor list` to check available node types. The type marked with `*` i
 
 ```
 $ cjob flavor list
-NAME             GPU    NODES    DEFAULT
-cpu              -      2          *
-gpu              yes    1
+NAME             GPU    NODES    IMAGE                              DEFAULT
+cpu              -      2        -                                    *
+gpu              yes    1        your-registry/cjob-cuda:2.1.0
 ```
+
+For the IMAGE column, see 3.6.
 
 To check resource limits for each type, use `cjob flavor info`.
 
@@ -221,6 +223,7 @@ job_id:        1
 status:        RUNNING
 command:       python train.py --epochs 100
 cwd:           /home/jovyan/project-a
+image:         your-registry/cjob-cuda:2.1.0
 flavor:        gpu
 cpu:           1
 memory:        1Gi
@@ -228,6 +231,34 @@ gpu:           1
 time_limit:    24h (23h 50m remaining)
 ...
 ```
+
+### 3.6 The Image Your Job Runs With
+
+Jobs normally run with **the same container image as the Pod where you ran the command** (your JupyterHub Notebook). That is why a command that worked at hand also works as a job.
+
+In addition, the administrator may have set a default image for each node type (flavor). For example, GPU nodes may have an image containing the CUDA runtime, so GPU jobs run with the CUDA image even when submitted from a lightweight Notebook. You can check whether a default image is set in the IMAGE column of `cjob flavor list` (`-` means it is not set, i.e., the same image as the submitting environment is used).
+
+You can check which image is actually used in the `image` line of `cjob status`.
+
+To specify the image yourself, use `--image`.
+
+```bash
+# Submit with an explicitly specified image
+cjob add --image your-registry/cjob-cuda:2.2.0 -- python train.py
+
+# The same option is available for sweep
+cjob sweep -n 10 --image your-registry/cjob-cuda:2.2.0 -- python train.py --trial _INDEX_
+```
+
+`--image` takes precedence over every default. The priority order is as follows.
+
+1. The image specified with `--image`
+2. The flavor's default image (set by the administrator)
+3. The same image as the Pod where you ran the command
+
+The images you can specify are limited to those the administrator allows. If you specify a disallowed image or a nonexistent tag, job submission itself succeeds but the job fails when execution starts. The reason for the failure can be checked in `last_error` of `cjob status`.
+
+> **Note**: When running a job with an image different from the submitting environment, a Python virtual environment (venv) created under `${WORKSPACE_MOUNT_PATH}` is usable only if that image is built from the same base as the submitting environment. Flavor default images set by the administrator are chosen to satisfy this condition. When you specify an image yourself with `--image`, you may need to rebuild the venv.
 
 ## 4. Holding Job Execution (`cjob hold` / `cjob release`)
 
@@ -328,9 +359,26 @@ cjob set 5 --time-limit 12h
 
 # Change multiple parameters at once
 cjob set 5 --flavor cpu-sub --cpu 4 --memory 16Gi --time-limit 12h
+
+# Change the image of job 5
+cjob set 5 --image your-registry/cjob-cuda:2.2.0
 ```
 
 Only the specified options are updated; unspecified items retain their original values. An error occurs if no options are specified.
+
+**Changing `--flavor` may also change the image.** If the new flavor has a default image set, the job's image is updated to that default image (see 3.6). When the image changes, the new image is displayed.
+
+```
+$ cjob set 5 --flavor gpu
+Job 5: QUEUED
+image: your-registry/cjob-cuda:2.1.0
+```
+
+To change only the flavor while keeping the image you specified with `--image` at submission, specify `--image` at the same time.
+
+```bash
+cjob set 5 --flavor gpu --image your-registry/cjob-cuda:2.2.0
+```
 
 ### 5.2 Modifying Multiple Jobs at Once
 

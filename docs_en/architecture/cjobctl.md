@@ -402,16 +402,19 @@ After the type check passes, the structure of the value is validated for certain
 - Each element must be a JSON object
 - The required fields `name` / `label_selector` must be present, be strings, and not be empty
 - If `gpu_resource_name` is specified, it must be a string and not be empty (`null` is equivalent to omission)
+- If `image` is specified, it must be a string and not be empty (`null` is equivalent to omission)
 - No unknown field may be present (detects typos such as `gpu_resouce_name`)
 - `name` must not be duplicated
 - `label_selector` must be in `key=value` form (exactly one `=`, both sides non-empty)
+
+Whether the `image` value matches the Kyverno allowed pattern ([deployment.md](../deployment.md) section 14) is not validated. The allowed pattern is managed on the ClusterPolicy side and is not read by cjobctl, so this verification is ensured by the operational procedure ([operations.md](../operations.md) section 8.4.1).
 
 Validation does not stop at the first violation; all violations are collected and reported together. Element positions are given as 0-based indices.
 
 ```bash
 $ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
 Error: 'RESOURCE_FLAVORS' has invalid flavor definitions:
-  - flavors[1]: unknown field 'gpu_resouce_name' (allowed: name, label_selector, gpu_resource_name)
+  - flavors[1]: unknown field 'gpu_resouce_name' (allowed: name, label_selector, gpu_resource_name, image)
   - flavors[2]: 'label_selector' must be in 'key=value' form, got 'cjob.io/flavor'
   - flavors[2]: duplicate 'name' value 'gpu'
 ```

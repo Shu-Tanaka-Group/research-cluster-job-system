@@ -396,17 +396,38 @@ Add a new flavor entry to `spec.resourceGroups[0].flavors`. For flavors without 
 cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
 ```
 
-Add the new flavor definition to the `RESOURCE_FLAVORS` JSON array. For flavors with GPU, specify `gpu_resource_name`.
+Add the new flavor definition to the `RESOURCE_FLAVORS` JSON array. For flavors with GPU, specify `gpu_resource_name`. To run that flavor's jobs with an image different from the submitting Pod's, specify `image` (see section 8.4.1).
 
 ```json
 [
   {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
-  {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu"},
+  {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu", "image": "your-registry/cjob-cuda:2.1.0"},
   {"name": "<new-flavor-name>", "label_selector": "cjob.io/flavor=<new-flavor-name>"}
 ]
 ```
 
 `cjobctl config set` performs a structural check (required fields, unknown fields, duplicate `name`, `label_selector` form, consistency with `DEFAULT_FLAVOR`), so typos are detected before they are applied. For the list of checks, see "Schema Constraints for `RESOURCE_FLAVORS`" in [resources.md](architecture/resources.md).
+
+#### 8.4.1 Checks When Setting a Flavor Default Image
+
+For a flavor with `image` omitted, jobs run with the same image as the submitting User Pod (the existing behavior). When `image` is specified, jobs submitted to that flavor run with the specified image (except when the user specifies one explicitly with `cjob add --image`; see [api.md](architecture/api.md) section 2.2).
+
+Before setting or changing `image`, always verify the following two points. **Neither can be detected by the structural check in `cjobctl config set`.**
+
+1. **It matches the Kyverno allowed pattern** ([deployment.md](deployment.md) section 14)
+
+   ```bash
+   # Check the current allowed pattern
+   kubectl get clusterpolicy restrict-job-image -o jsonpath='{.spec.rules[0].validate.pattern.spec.template.spec.containers[0].image}'
+   ```
+
+   Setting an image outside the allowed pattern means job submission to that flavor succeeds, but the job is rejected by admission at dispatch time and becomes FAILED. Since the administrator cannot notice this until a user reports it, verification before setting is important.
+
+2. **It derives from the same base as the submitting Pod's image, with a matching Python version and installation path** ([prerequisites.md](architecture/prerequisites.md) section 2.1)
+
+   The venv on the PVC is built in the submitting User Pod, and the `VIRTUAL_ENV` / `PATH` from submit time are reproduced in the Job Pod. If the bases differ, the venv breaks on the Job Pod side.
+
+After setting, perform the restart in section 8.5 and confirm that the change is reflected in the IMAGE column of `cjob flavor list` and that jobs actually start.
 
 ### 8.5 Restart Components
 
