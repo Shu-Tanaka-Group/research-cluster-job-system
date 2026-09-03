@@ -145,6 +145,25 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 
 flavor の `name` は Kueue ResourceFlavor の `metadata.name` と一致させる。これにより `cjobctl cluster set-quota --flavor <name>` で指定する名前と DB の flavor 値が統一され、変換処理が不要になる。
 
+#### `RESOURCE_FLAVORS` のスキーマ制約
+
+本節の表が `RESOURCE_FLAVORS` スキーマの正本である。`cjobctl config set`（Rust、[cjobctl.md](cjobctl.md) §5.5）とサーバ側の `FlavorDefinition`（Python）はいずれもこの定義に従う。スキーマを変更する場合は本節を先に更新し、両方の実装を同期させる。
+
+| # | 制約 | 検証箇所 |
+|---|---|---|
+| 1 | トップレベルが JSON 配列であり、1 つ以上の要素を持つこと | `cjobctl config set` / サーバ起動時（配列であること） |
+| 2 | 各要素が JSON オブジェクトであること | `cjobctl config set` / サーバ起動時 |
+| 3 | `name` / `label_selector` が存在し、文字列かつ空文字でないこと | `cjobctl config set` / サーバ起動時（存在と型のみ） |
+| 4 | `gpu_resource_name` を指定する場合、文字列かつ空文字でないこと（`null` は省略と同義） | `cjobctl config set` / サーバ起動時（型のみ） |
+| 5 | 上表にないフィールドを含まないこと | `cjobctl config set` / サーバ起動時 |
+| 6 | `name` が重複していないこと | `cjobctl config set` |
+| 7 | `label_selector` が `key=value` 形式であること（`=` はちょうど 1 個、両辺が非空） | `cjobctl config set` |
+| 8 | `DEFAULT_FLAVOR` がいずれかの `name` と一致すること | `cjobctl config set`（`RESOURCE_FLAVORS` 設定時・`DEFAULT_FLAVOR` 設定時の両方） |
+
+**未知フィールドの拒否**: サーバ側の `FlavorDefinition` は `extra="forbid"` を設定しており、上表にないフィールドを含む定義では Submit API / Dispatcher / Watcher が起動に失敗する。これは `gpu_resouce_name` のような任意フィールドのタイポが黙って無視され、GPU flavor が GPU 非対応として扱われる事故を防ぐためである。
+
+制約 6・7・8 は起動時に検出されない（pydantic のモデル単体では表現できない）ため、`cjobctl config set` 側での検証が唯一の防御線となる。ConfigMap を `cjobctl` を経由せず `kubectl` で直接編集した場合はこれらの検証を通らない点に注意する。
+
 ノードリソース同期の詳細は [watcher.md](watcher.md) §1.1、DB テーブル定義は [database.md](database.md) §6 を参照。
 
 ### sweep に関する制限

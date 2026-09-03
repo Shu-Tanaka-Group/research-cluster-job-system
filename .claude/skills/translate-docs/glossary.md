@@ -77,6 +77,10 @@
 | 冪等 | idempotent | |
 | ユーザー namespace | user namespace | 修飾語は `user-namespace` |
 | dispatch budget | dispatch budget | ハイフンなし |
+| 未知フィールド | unknown field | **`unrecognized field` は使わない** |
+| 構造バリデーション / 構造チェック | structural validation / structural check | 日本語側の使い分けに従う。`structure validation` とは綴らない |
+| 突き合わせる | cross-check | 他キーの現在値との照合 |
+| 整合（設定値どうしの） | consistency | 「整合チェック」は `consistency check` |
 
 ## コンポーネントと運用
 

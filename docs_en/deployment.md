@@ -682,10 +682,14 @@ Add a new flavor entry to `spec.resourceGroups[0].flavors`. For flavors without 
 #### 4. Add Definition to ConfigMap `RESOURCE_FLAVORS`
 
 ```bash
+# Preferred when cjobctl is available (structural validation applies)
+cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+
+# When not using cjobctl
 kubectl edit configmap cjob-config -n cjob-system
 ```
 
-Add the new flavor definition to the `RESOURCE_FLAVORS` JSON array. For flavors with GPU, specify `gpu_resource_name`.
+Add the new flavor definition to the `RESOURCE_FLAVORS` JSON array. For flavors with GPU, specify `gpu_resource_name`. When editing directly with `kubectl edit`, the structural validation of `cjobctl config set` ("Schema Constraints for `RESOURCE_FLAVORS`" in [resources.md](architecture/resources.md)) is bypassed, so a definition containing an unknown field only surfaces as a startup failure when the components are restarted.
 
 ```json
 {"name": "gpu-h100", "label_selector": "cjob.io/flavor=gpu-h100", "gpu_resource_name": "nvidia.com/gpu"}

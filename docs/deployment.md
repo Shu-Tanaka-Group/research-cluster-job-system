@@ -684,10 +684,14 @@ kubectl edit clusterqueue cjob-cluster-queue
 #### 4. ConfigMap `RESOURCE_FLAVORS` に定義を追加する
 
 ```bash
+# cjobctl が利用できる場合はこちらを推奨（構造バリデーションが働く）
+cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+
+# cjobctl を使わない場合
 kubectl edit configmap cjob-config -n cjob-system
 ```
 
-`RESOURCE_FLAVORS` の JSON 配列に新しい flavor 定義を追加する。GPU を持つ flavor は `gpu_resource_name` を指定する。
+`RESOURCE_FLAVORS` の JSON 配列に新しい flavor 定義を追加する。GPU を持つ flavor は `gpu_resource_name` を指定する。`kubectl edit` で直接編集した場合は `cjobctl config set` の構造バリデーション（[resources.md](architecture/resources.md) の「`RESOURCE_FLAVORS` のスキーマ制約」）を通らないため、未知フィールドを含む定義はコンポーネントの再起動時に初めて起動失敗として表面化する。
 
 ```json
 {"name": "gpu-h100", "label_selector": "cjob.io/flavor=gpu-h100", "gpu_resource_name": "nvidia.com/gpu"}

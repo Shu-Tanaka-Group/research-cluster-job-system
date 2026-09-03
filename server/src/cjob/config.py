@@ -1,11 +1,16 @@
 import json
 from functools import cached_property, lru_cache
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from pydantic_settings import BaseSettings
 
 
 class FlavorDefinition(BaseModel):
+    # Unknown fields are rejected so that a typo in an optional field
+    # (e.g. "gpu_resouce_name") fails at startup instead of being silently
+    # dropped. See docs/architecture/resources.md.
+    model_config = ConfigDict(extra="forbid")
+
     name: str
     label_selector: str
     gpu_resource_name: str | None = None

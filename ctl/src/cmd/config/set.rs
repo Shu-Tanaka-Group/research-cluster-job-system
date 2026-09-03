@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use k8s_openapi::api::core::v1::ConfigMap;
 use kube::api::{Api, Patch, PatchParams};
+use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 #[derive(Clone, Copy)]
@@ -103,6 +104,171 @@ fn validate_value(meta: &ConfigKeyMeta, value: &str) -> Result<String> {
     }
 }
 
+/// Fields allowed in a `RESOURCE_FLAVORS` entry.
+///
+/// This list is the CLI-side mirror of the schema in
+/// `docs/architecture/resources.md`; keep both in sync with the server-side
+/// `FlavorDefinition` (which sets `extra="forbid"`).
+const FLAVOR_FIELDS: &[&str] = &["name", "label_selector", "gpu_resource_name"];
+
+/// Structurally validate a `RESOURCE_FLAVORS` value and return the flavor
+/// names in definition order.
+///
+/// All violations are collected and reported together rather than failing on
+/// the first one, so an administrator can fix the whole file in one pass.
+fn validate_resource_flavors(value: &str) -> Result<Vec<String>> {
+    let parsed: serde_json::Value = serde_json::from_str(value)
+        .context("'RESOURCE_FLAVORS' expects valid JSON, got invalid input")?;
+
+    let items = parsed.as_array().ok_or_else(|| {
+        anyhow::anyhow!("'RESOURCE_FLAVORS' must be a JSON array of flavor definitions")
+    })?;
+
+    if items.is_empty() {
+        bail!("'RESOURCE_FLAVORS' must define at least one flavor");
+    }
+
+    let mut errors: Vec<String> = Vec::new();
+    let mut names: Vec<String> = Vec::new();
+
+    for (i, item) in items.iter().enumerate() {
+        let Some(obj) = item.as_object() else {
+            errors.push(format!("flavors[{}]: must be a JSON object", i));
+            continue;
+        };
+
+        for field in ["name", "label_selector"] {
+            match obj.get(field) {
+                None => errors.push(format!("flavors[{}]: missing required field '{}'", i, field)),
+                Some(v) => match v.as_str() {
+                    None => errors.push(format!("flavors[{}]: '{}' must be a string", i, field)),
+                    Some("") => errors.push(format!("flavors[{}]: '{}' must not be empty", i, field)),
+                    Some(_) => {}
+                },
+            }
+        }
+
+        match obj.get("gpu_resource_name") {
+            None => {}
+            Some(v) if v.is_null() => {}
+            Some(v) => match v.as_str() {
+                None => errors.push(format!("flavors[{}]: 'gpu_resource_name' must be a string", i)),
+                Some("") => {
+                    errors.push(format!("flavors[{}]: 'gpu_resource_name' must not be empty", i))
+                }
+                Some(_) => {}
+            },
+        }
+
+        for key in obj.keys() {
+            if !FLAVOR_FIELDS.contains(&key.as_str()) {
+                errors.push(format!(
+                    "flavors[{}]: unknown field '{}' (allowed: {})",
+                    i,
+                    key,
+                    FLAVOR_FIELDS.join(", ")
+                ));
+            }
+        }
+
+        if let Some(sel) = obj.get("label_selector").and_then(|v| v.as_str()) {
+            if !sel.is_empty() {
+                let parts: Vec<&str> = sel.split('=').collect();
+                if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+                    errors.push(format!(
+                        "flavors[{}]: 'label_selector' must be in 'key=value' form, got '{}'",
+                        i, sel
+                    ));
+                }
+            }
+        }
+
+        if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+            if !name.is_empty() {
+                if names.iter().any(|n| n == name) {
+                    errors.push(format!("flavors[{}]: duplicate 'name' value '{}'", i, name));
+                } else {
+                    names.push(name.to_string());
+                }
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        bail!(
+            "'RESOURCE_FLAVORS' has invalid flavor definitions:\n  - {}",
+            errors.join("\n  - ")
+        );
+    }
+
+    Ok(names)
+}
+
+/// Validate a value against the rest of the ConfigMap.
+///
+/// `RESOURCE_FLAVORS` and `DEFAULT_FLAVOR` must stay consistent, so both keys
+/// verify the post-update combination. When the counterpart key is missing or
+/// unparsable the check is skipped with a warning instead of failing, so that a
+/// broken `RESOURCE_FLAVORS` cannot block repairing `DEFAULT_FLAVOR` (and vice
+/// versa). Warnings go to stderr; `w` is a parameter so tests can capture them.
+fn validate_against_configmap(
+    key: &str,
+    value: &str,
+    data: &BTreeMap<String, String>,
+    w: &mut dyn Write,
+) -> Result<()> {
+    match key {
+        "RESOURCE_FLAVORS" => {
+            let names = validate_resource_flavors(value)?;
+            match data.get("DEFAULT_FLAVOR") {
+                None => {
+                    writeln!(
+                        w,
+                        "Warning: 'DEFAULT_FLAVOR' is not set in the ConfigMap; skipping the consistency check."
+                    )?;
+                }
+                Some(default) => {
+                    let default = default.trim();
+                    if !names.iter().any(|n| n == default) {
+                        bail!(
+                            "current 'DEFAULT_FLAVOR' value '{}' does not match any flavor name in the new RESOURCE_FLAVORS (available: {})",
+                            default,
+                            names.join(", ")
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+        "DEFAULT_FLAVOR" => {
+            let Some(raw) = data.get("RESOURCE_FLAVORS") else {
+                writeln!(
+                    w,
+                    "Warning: 'RESOURCE_FLAVORS' is not set in the ConfigMap; skipping the consistency check."
+                )?;
+                return Ok(());
+            };
+            let Ok(names) = validate_resource_flavors(raw) else {
+                writeln!(
+                    w,
+                    "Warning: the current 'RESOURCE_FLAVORS' in the ConfigMap is not a valid flavor definition list; skipping the consistency check."
+                )?;
+                return Ok(());
+            };
+            let value = value.trim();
+            if !names.iter().any(|n| n == value) {
+                bail!(
+                    "'DEFAULT_FLAVOR' value '{}' does not match any flavor name in RESOURCE_FLAVORS (available: {})",
+                    value,
+                    names.join(", ")
+                );
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn truncate_display(s: &str, max_len: usize) -> String {
     let single_line = s.replace('\n', "\\n");
     if single_line.len() > max_len {
@@ -147,14 +313,18 @@ pub async fn run(
         );
     }
 
-    // Validate value
+    // Validate value type
     let validated_value = validate_value(meta, &raw_value)?;
 
-    // Fetch current ConfigMap to show old value
+    // Fetch current ConfigMap to show old value and to cross-check related keys
     let cms: Api<ConfigMap> = Api::namespaced(k8s_client.clone(), namespace);
     let cm = cms.get("cjob-config").await
         .context("Failed to get ConfigMap 'cjob-config'")?;
     let data = cm.data.unwrap_or_default();
+
+    // Key-specific structural validation (needs the rest of the ConfigMap)
+    validate_against_configmap(key, &validated_value, &data, &mut io::stderr())?;
+
     let old_value = data.get(key).map(|s| s.as_str()).unwrap_or("<not set>");
 
     // Show change and confirm
@@ -191,4 +361,260 @@ pub async fn run(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const VALID: &str = r#"[
+        {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+        {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu"}
+    ]"#;
+
+    fn errors_of(value: &str) -> String {
+        validate_resource_flavors(value).unwrap_err().to_string()
+    }
+
+    fn cm(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    /// Runs validate_against_configmap capturing warnings, returning
+    /// (result, captured stderr).
+    fn check(key: &str, value: &str, data: &BTreeMap<String, String>) -> (Result<()>, String) {
+        let mut buf: Vec<u8> = Vec::new();
+        let result = validate_against_configmap(key, value, data, &mut buf);
+        (result, String::from_utf8(buf).unwrap())
+    }
+
+    // --- structural validation: happy path ---
+
+    #[test]
+    fn valid_flavors_return_names_in_order() {
+        let names = validate_resource_flavors(VALID).unwrap();
+        assert_eq!(names, vec!["cpu".to_string(), "gpu".to_string()]);
+    }
+
+    #[test]
+    fn gpu_resource_name_may_be_omitted_or_null() {
+        let value = r#"[
+            {"name": "cpu", "label_selector": "k=cpu"},
+            {"name": "gpu", "label_selector": "k=gpu", "gpu_resource_name": null}
+        ]"#;
+        assert_eq!(validate_resource_flavors(value).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn multiline_configmap_style_value_is_accepted() {
+        // ConfigMap block scalars keep the trailing newline
+        let value = format!("{}\n", VALID);
+        assert!(validate_resource_flavors(&value).is_ok());
+    }
+
+    // --- structural validation: errors ---
+
+    #[test]
+    fn invalid_json_is_rejected() {
+        let err = errors_of("[{");
+        assert!(err.contains("expects valid JSON"), "{}", err);
+    }
+
+    #[test]
+    fn top_level_must_be_an_array() {
+        let err = errors_of(r#"{"name": "cpu", "label_selector": "k=cpu"}"#);
+        assert!(err.contains("must be a JSON array"), "{}", err);
+    }
+
+    #[test]
+    fn empty_array_is_rejected() {
+        let err = errors_of("[]");
+        assert!(err.contains("at least one flavor"), "{}", err);
+    }
+
+    #[test]
+    fn element_must_be_an_object() {
+        let err = errors_of(r#"["cpu"]"#);
+        assert!(err.contains("flavors[0]: must be a JSON object"), "{}", err);
+    }
+
+    #[test]
+    fn missing_required_fields_are_reported() {
+        let err = errors_of(r#"[{"gpu_resource_name": "nvidia.com/gpu"}]"#);
+        assert!(err.contains("missing required field 'name'"), "{}", err);
+        assert!(
+            err.contains("missing required field 'label_selector'"),
+            "{}",
+            err
+        );
+    }
+
+    #[test]
+    fn empty_required_fields_are_reported() {
+        let err = errors_of(r#"[{"name": "", "label_selector": ""}]"#);
+        assert!(err.contains("'name' must not be empty"), "{}", err);
+        assert!(err.contains("'label_selector' must not be empty"), "{}", err);
+    }
+
+    #[test]
+    fn non_string_required_fields_are_reported() {
+        let err = errors_of(r#"[{"name": 1, "label_selector": ["k=v"]}]"#);
+        assert!(err.contains("'name' must be a string"), "{}", err);
+        assert!(err.contains("'label_selector' must be a string"), "{}", err);
+    }
+
+    #[test]
+    fn unknown_field_is_rejected() {
+        let err = errors_of(
+            r#"[{"name": "gpu", "label_selector": "k=gpu", "gpu_resouce_name": "nvidia.com/gpu"}]"#,
+        );
+        assert!(
+            err.contains("unknown field 'gpu_resouce_name'"),
+            "{}",
+            err
+        );
+        assert!(
+            err.contains("allowed: name, label_selector, gpu_resource_name"),
+            "{}",
+            err
+        );
+    }
+
+    #[test]
+    fn duplicate_name_is_rejected() {
+        let err = errors_of(
+            r#"[{"name": "gpu", "label_selector": "k=a"}, {"name": "gpu", "label_selector": "k=b"}]"#,
+        );
+        assert!(
+            err.contains("flavors[1]: duplicate 'name' value 'gpu'"),
+            "{}",
+            err
+        );
+    }
+
+    #[test]
+    fn label_selector_without_equals_is_rejected() {
+        let err = errors_of(r#"[{"name": "cpu", "label_selector": "cjob.io/flavor"}]"#);
+        assert!(err.contains("must be in 'key=value' form"), "{}", err);
+    }
+
+    #[test]
+    fn label_selector_with_two_equals_is_rejected() {
+        let err = errors_of(r#"[{"name": "cpu", "label_selector": "a=b=c"}]"#);
+        assert!(err.contains("must be in 'key=value' form"), "{}", err);
+    }
+
+    #[test]
+    fn label_selector_with_empty_side_is_rejected() {
+        let err = errors_of(r#"[{"name": "cpu", "label_selector": "=cpu"}]"#);
+        assert!(err.contains("must be in 'key=value' form"), "{}", err);
+        let err = errors_of(r#"[{"name": "cpu", "label_selector": "cjob.io/flavor="}]"#);
+        assert!(err.contains("must be in 'key=value' form"), "{}", err);
+    }
+
+    #[test]
+    fn empty_gpu_resource_name_is_rejected() {
+        let err = errors_of(r#"[{"name": "gpu", "label_selector": "k=gpu", "gpu_resource_name": ""}]"#);
+        assert!(err.contains("'gpu_resource_name' must not be empty"), "{}", err);
+    }
+
+    #[test]
+    fn all_violations_are_reported_together() {
+        let value = r#"[
+            {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+            {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resouce_name": "nvidia.com/gpu"},
+            {"name": "gpu", "label_selector": "cjob.io/flavor"}
+        ]"#;
+        let err = errors_of(value);
+        assert!(err.contains("flavors[1]: unknown field 'gpu_resouce_name'"), "{}", err);
+        assert!(err.contains("flavors[2]: 'label_selector' must be in 'key=value' form"), "{}", err);
+        assert!(err.contains("flavors[2]: duplicate 'name' value 'gpu'"), "{}", err);
+    }
+
+    // --- DEFAULT_FLAVOR consistency: setting RESOURCE_FLAVORS ---
+
+    #[test]
+    fn setting_flavors_accepts_matching_default() {
+        let data = cm(&[("DEFAULT_FLAVOR", "cpu")]);
+        let (result, warnings) = check("RESOURCE_FLAVORS", VALID, &data);
+        assert!(result.is_ok());
+        assert_eq!(warnings, "");
+    }
+
+    #[test]
+    fn setting_flavors_rejects_orphaned_default() {
+        let data = cm(&[("DEFAULT_FLAVOR", "gpu-a100")]);
+        let (result, _) = check("RESOURCE_FLAVORS", VALID, &data);
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("current 'DEFAULT_FLAVOR' value 'gpu-a100'"), "{}", err);
+        assert!(err.contains("available: cpu, gpu"), "{}", err);
+    }
+
+    #[test]
+    fn setting_flavors_warns_when_default_is_unset() {
+        let data = cm(&[]);
+        let (result, warnings) = check("RESOURCE_FLAVORS", VALID, &data);
+        assert!(result.is_ok());
+        assert!(warnings.contains("'DEFAULT_FLAVOR' is not set"), "{}", warnings);
+    }
+
+    #[test]
+    fn setting_flavors_ignores_surrounding_whitespace_in_default() {
+        let data = cm(&[("DEFAULT_FLAVOR", "cpu\n")]);
+        let (result, _) = check("RESOURCE_FLAVORS", VALID, &data);
+        assert!(result.is_ok());
+    }
+
+    // --- DEFAULT_FLAVOR consistency: setting DEFAULT_FLAVOR ---
+
+    #[test]
+    fn setting_default_accepts_existing_flavor() {
+        let data = cm(&[("RESOURCE_FLAVORS", VALID)]);
+        let (result, warnings) = check("DEFAULT_FLAVOR", "gpu", &data);
+        assert!(result.is_ok());
+        assert_eq!(warnings, "");
+    }
+
+    #[test]
+    fn setting_default_rejects_unknown_flavor() {
+        let data = cm(&[("RESOURCE_FLAVORS", VALID)]);
+        let (result, _) = check("DEFAULT_FLAVOR", "gpu-a100", &data);
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("'DEFAULT_FLAVOR' value 'gpu-a100'"), "{}", err);
+        assert!(err.contains("available: cpu, gpu"), "{}", err);
+    }
+
+    #[test]
+    fn setting_default_warns_when_flavors_are_unset() {
+        let data = cm(&[]);
+        let (result, warnings) = check("DEFAULT_FLAVOR", "gpu-a100", &data);
+        assert!(result.is_ok());
+        assert!(warnings.contains("'RESOURCE_FLAVORS' is not set"), "{}", warnings);
+    }
+
+    #[test]
+    fn setting_default_warns_when_flavors_are_broken() {
+        // A broken RESOURCE_FLAVORS must not block repairing DEFAULT_FLAVOR
+        let data = cm(&[("RESOURCE_FLAVORS", "[{")]);
+        let (result, warnings) = check("DEFAULT_FLAVOR", "cpu", &data);
+        assert!(result.is_ok());
+        assert!(
+            warnings.contains("not a valid flavor definition list"),
+            "{}",
+            warnings
+        );
+    }
+
+    // --- other keys are untouched ---
+
+    #[test]
+    fn unrelated_keys_skip_structural_validation() {
+        let data = cm(&[("RESOURCE_FLAVORS", VALID), ("DEFAULT_FLAVOR", "cpu")]);
+        let (result, warnings) = check("DISPATCH_BATCH_SIZE", "100", &data);
+        assert!(result.is_ok());
+        assert_eq!(warnings, "");
+    }
 }

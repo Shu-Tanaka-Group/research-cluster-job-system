@@ -83,6 +83,7 @@ Docker が利用できない環境では統合テストは自動的にスキッ�
 | `tests/test_quota_sync.py` | `watcher/quota_sync.py::sync_flavor_quotas` | 7 | flavor quota 同期。挿入 / 複数 flavor / 更新 / 削除 / API エラー時のデータ保持 / 空 resourceGroups / ClusterQueue 名設定 |
 | `tests/test_resource_quota_sync.py` | `watcher/resource_quota_sync.py::sync_resource_quotas` | 16 | ResourceQuota 同期。ユーザー namespace への挿入 / 値更新 / ユーザー namespace 除去時の行削除 / ResourceQuota なし時の行削除 / namespace 一覧 API エラー時のデータ保持 / ResourceQuota 一覧 API エラー時のデータ保持 / ユーザー namespace なしの全削除 / CPU・メモリパース / GPU リソース名取得 / field_selector 設定 / USER_NAMESPACE_LABEL 設定 / 非ユーザー namespace の除外 / ジョブなし namespace の追跡 / count/jobs.batch 同期（値あり・値なし NULL・再同期時更新） |
 | `tests/test_cli_endpoints.py` | `api/routes.py` CLI 配布エンドポイント | 17 | `/v1/cli/version`・`/v1/cli/versions`・`/v1/cli/download` の正常系 / 404 / 認証不要 / バージョンソート / バージョン指定ダウンロード / 無効ディレクトリ除外 / 不正バージョン文字列の拒否（パストラバーサル防止）の検証 |
+| `tests/test_config.py` | `config.py::FlavorDefinition` / `Settings.flavors` | 7 | flavor 定義スキーマ。必須のみ / GPU 付き / 未知フィールドの拒否（`extra="forbid"`）/ 必須フィールド欠落 / `RESOURCE_FLAVORS` の JSON パースと `get_flavor_definition` / 未知フィールド時の `flavors` アクセス失敗 / デフォルト値の妥当性 |
 | `tests/test_cluster_totals.py` | `dispatcher/scheduler.py::_fetch_flavor_caps` | 6 | DRF 正規化用 per-flavor 容量取得。空テーブル / 単一ノード / 複数ノード合計 / nominalQuota による容量キャップ（weight は容量に乗じず別フィールド）/ 複数 flavor の個別容量 / quota なし時のデフォルト weight |
 | `tests/test_integration_scheduler.py` | `dispatcher/scheduler.py` 6関数（統合テスト） | 33 | PostgreSQL コンテナを使用した統合テスト。`_cleanup_old_usage`（保持期間外削除・境界日付）/ `increment_retry`（retry_after 設定・retry_count 増分・非 DISPATCHING 無操作）/ `defer_to_queue`（DISPATCHING → QUEUED 遷移・retry_after 未来時刻・retry_count 保持・非 DISPATCHING 無操作・CANCELLED 保持・DEFERRED JobEvent 記録・更新なし時のイベント非発行）/ `fetch_stalled_jobs`（閾値超過検出・最近の dispatch 除外・非 DISPATCHED 除外・滞留ガードで差し戻されバックオフ待機中の QUEUED 検出・unschedulable_count が 0 の backoff 除外・バックオフ経過後の除外・retry_after なし QUEUED の除外）/ `estimate_shortest_remaining`（最短残り時間・RUNNING なし・namespace/flavor スコープ）/ `fetch_dispatchable_jobs`（フォールバック namespace 順・budget 超過・DRF 消費量優先・ラウンドロビン・weight 増幅・flavor budget・weight=0 除外・in-flight スコア反映・in-flight BIGINT オーバーフロー回避・retry_after 除外・古い usage 自動削除） |
 | **Rust** | | | |
@@ -94,8 +95,9 @@ Docker が利用できない環境では統合テストは自動的にスキッ�
 | `src/cmd/cli_deploy.rs` | `run`（バリデーション） | 4 | --release + プレリリースのエラー / 安定版・プレリリース × release フラグのバリデーション順序 |
 | `src/cmd/cli_list.rs` | `parse_versions` / `sort_versions` | 9 | ls 出力パース（latest 除外 / 空入力 / パース不能エントリ）/ ソート（降順 / プレリリース優先 / 設計書出力例の再現） |
 | `src/cmd/cli_set_latest.rs` | `run`（バリデーション） | 2 | プレリリース版の拒否（beta / rc） |
+| `src/cmd/config/set.rs` | `validate_resource_flavors` / `validate_against_configmap` | 26 | `RESOURCE_FLAVORS` の構造バリデーション。正常系（名前順の返却・`gpu_resource_name` 省略/null・ConfigMap の複数行値）/ 不正 JSON / 非配列 / 空配列 / 非オブジェクト要素 / 必須フィールド欠落・空文字・非文字列 / `gpu_resource_name` 空文字 / 未知フィールド / `name` 重複 / `label_selector` 形式（`=` なし・`=` 2 個・片辺が空）/ 全違反のまとめ報告。`DEFAULT_FLAVOR` との整合（`RESOURCE_FLAVORS` 設定時の一致・不一致・未設定時の警告・前後空白の無視、`DEFAULT_FLAVOR` 設定時の一致・不一致・`RESOURCE_FLAVORS` 未設定/破損時の警告スキップ）/ 対象外キーの素通り |
 
-**合計: Python 484 + Python 統合 33 + Rust (cli) 68 + Rust (cjobctl) 28 = 613 テスト**
+**合計: Python 491 + Python 統合 33 + Rust (cli) 68 + Rust (cjobctl) 54 = 646 テスト**
 
 ### 未テスト
 
