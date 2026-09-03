@@ -242,14 +242,20 @@ def post_set_single(
     namespace: str = Depends(get_namespace),
     session: Session = Depends(get_session),
 ):
-    if all(v is None for v in [req.cpu, req.memory, req.gpu, req.flavor, req.time_limit_seconds]):
+    if all(
+        v is None
+        for v in [req.cpu, req.memory, req.gpu, req.flavor, req.image, req.time_limit_seconds]
+    ):
         raise HTTPException(status_code=400, detail="変更するパラメータを1つ以上指定してください")
     result = set_single(
-        session, namespace, job_id, req.cpu, req.memory, req.gpu, req.flavor, req.time_limit_seconds,
+        session, namespace, job_id, req.cpu, req.memory, req.gpu, req.flavor, req.image,
+        req.time_limit_seconds,
     )
     if result.get("not_found"):
         raise HTTPException(status_code=404, detail="Job not found")
-    return SingleSetResponse(job_id=job_id, status=result["status"])
+    return SingleSetResponse(
+        job_id=job_id, status=result["status"], image=result.get("image")
+    )
 
 
 @router.post("/jobs/set", response_model=SetResponse)
@@ -258,10 +264,14 @@ def post_set_bulk(
     namespace: str = Depends(get_namespace),
     session: Session = Depends(get_session),
 ):
-    if all(v is None for v in [req.cpu, req.memory, req.gpu, req.flavor, req.time_limit_seconds]):
+    if all(
+        v is None
+        for v in [req.cpu, req.memory, req.gpu, req.flavor, req.image, req.time_limit_seconds]
+    ):
         raise HTTPException(status_code=400, detail="変更するパラメータを1つ以上指定してください")
     return set_bulk(
-        session, namespace, req.job_ids, req.cpu, req.memory, req.gpu, req.flavor, req.time_limit_seconds,
+        session, namespace, req.job_ids, req.cpu, req.memory, req.gpu, req.flavor, req.image,
+        req.time_limit_seconds,
     )
 
 

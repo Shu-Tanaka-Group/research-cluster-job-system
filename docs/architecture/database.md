@@ -10,7 +10,7 @@ CREATE TABLE jobs (
     job_id        INTEGER NOT NULL,
     "user"        TEXT NOT NULL,
     namespace     TEXT NOT NULL,
-    image         TEXT NOT NULL,           -- CLI が CJOB_IMAGE 環境変数から取得（未設定時は JUPYTER_IMAGE にフォールバック）
+    image         TEXT NOT NULL,           -- Submit API が解決した確定イメージ（--image > flavor 既定 > 投入 Pod）
     command       TEXT NOT NULL,
     cwd           TEXT NOT NULL,
     env_json      JSONB NOT NULL DEFAULT '{}',
@@ -123,7 +123,7 @@ CREATE TABLE job_events (
 | `CANCELLED`  | API がキャンセル要求を受理した時、または Watcher が CANCELLED ジョブを最終確定した時 | API / Watcher | `{}` |
 | `HELD`       | API が hold 操作を受理した時 | API | `{}` |
 | `RELEASED`   | API が release 操作を受理した時 | API | `{}` |
-| `SET`        | API が set 操作でパラメータを変更した時 | API | 変更内容（例: `{"cpu": "2"}`） |
+| `SET`        | API が set 操作でパラメータを変更した時 | API | 変更内容（例: `{"cpu": {"old": "1", "new": "2"}}`）。flavor 変更に伴い image が再解決された場合は `image` も含む（[api.md](api.md) §11.1 参照） |
 
 `GET /v1/jobs/{job_id}` レスポンスの `events` フィールドはこれらを時系列順に最大 10 件返す（[api.md](api.md) §4 参照）。CLI で表示する際も同じ文字列をそのまま表示する前提のため、新しい event_type は英大文字の短いトークンを使い、既存 event_type のリネームは避けること（CLI の後方互換を壊す）。
 

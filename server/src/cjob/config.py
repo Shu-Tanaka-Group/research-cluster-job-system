@@ -14,6 +14,10 @@ class FlavorDefinition(BaseModel):
     name: str
     label_selector: str
     gpu_resource_name: str | None = None
+    # Default container image for jobs on this flavor. When unset, the job
+    # falls back to the submitting pod's image. See docs/architecture/api.md
+    # section 2.2 for the full resolution order.
+    image: str | None = None
 
 
 class Settings(BaseSettings):

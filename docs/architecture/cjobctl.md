@@ -400,16 +400,19 @@ CLI 側で以下のバリデーションを行う:
 - 各要素が JSON オブジェクトであること
 - 必須フィールド `name` / `label_selector` が存在し、文字列かつ空文字でないこと
 - `gpu_resource_name` を指定する場合、文字列かつ空文字でないこと（`null` は省略と同義）
+- `image` を指定する場合、文字列かつ空文字でないこと（`null` は省略と同義）
 - 未知フィールドを含まないこと（`gpu_resouce_name` のようなタイポの検出）
 - `name` が重複していないこと
 - `label_selector` が `key=value` 形式であること（`=` はちょうど 1 個、両辺が非空）
+
+`image` の値が Kyverno の許可パターン（[deployment.md](../deployment.md) §14）に一致するかは検証しない。許可パターンは ClusterPolicy 側で管理されており cjobctl からは参照しないため、この確認は運用手順（[operations.md](../operations.md) §8.4.1）で担保する。
 
 違反は最初の 1 件で打ち切らず、全件を収集してまとめて表示する。要素の位置は 0 起点のインデックスで示す。
 
 ```bash
 $ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
 Error: 'RESOURCE_FLAVORS' has invalid flavor definitions:
-  - flavors[1]: unknown field 'gpu_resouce_name' (allowed: name, label_selector, gpu_resource_name)
+  - flavors[1]: unknown field 'gpu_resouce_name' (allowed: name, label_selector, gpu_resource_name, image)
   - flavors[2]: 'label_selector' must be in 'key=value' form, got 'cjob.io/flavor'
   - flavors[2]: duplicate 'name' value 'gpu'
 ```

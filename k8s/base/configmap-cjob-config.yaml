@@ -21,6 +21,9 @@ data:
   NODE_BIN_PACKING_ENABLED: "true"
   FAIR_SHARE_WINDOW_DAYS: "7"
   USAGE_RETENTION_DAYS: "7"
+  # "image" (optional) sets the default container image for jobs on that
+  # flavor. When omitted, jobs run with the submitting pod's image.
+  # See docs/architecture/resources.md and docs/architecture/api.md section 2.2.
   RESOURCE_FLAVORS: |
     [
       {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},

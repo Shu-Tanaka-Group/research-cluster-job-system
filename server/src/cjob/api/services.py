@@ -217,6 +217,35 @@ def _validate_common(
     return time_limit, flavor
 
 
+def _resolve_image(flavor: str, image: str | None, fallback_image: str | None) -> str:
+    """Resolve the Job Pod image.
+
+    Priority: explicit --image > flavor default > submitting pod's image.
+    Empty strings count as unset so that an old CLI (which always sends
+    ``image``) keeps working while a new CLI can omit the field.
+    See docs/architecture/api.md section 2.2.
+    """
+    from fastapi import HTTPException
+
+    if image:
+        return image
+
+    flavor_def = get_settings().get_flavor_definition(flavor)
+    if flavor_def and flavor_def.image:
+        return flavor_def.image
+
+    if fallback_image:
+        return fallback_image
+
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"image を解決できません。--image で指定するか、flavor '{flavor}' に既定イメージを設定するか、"
+            "CJOB_IMAGE / JUPYTER_IMAGE を設定してください"
+        ),
+    )
+
+
 def submit_job(
     session: Session, namespace: str, username: str, req: JobSubmitRequest
 ) -> JobSubmitResponse:
@@ -225,11 +254,9 @@ def submit_job(
     if not req.command:
         raise HTTPException(status_code=400, detail="command は空にできません")
 
-    if not req.image:
-        raise HTTPException(status_code=400, detail="image は空にできません")
-
     settings = get_settings()
     time_limit, flavor = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
+    image = _resolve_image(flavor, req.image, req.fallback_image)
 
     # Allocate job_id
     job_id = allocate_job_id(session, namespace)
@@ -242,7 +269,7 @@ def submit_job(
         namespace=namespace,
         job_id=job_id,
         user=username,
-        image=req.image,
+        image=image,
         command=req.command,
         cwd=req.cwd,
         env_json=req.env,
@@ -280,11 +307,9 @@ def submit_sweep(
     if not req.command:
         raise HTTPException(status_code=400, detail="command は空にできません")
 
-    if not req.image:
-        raise HTTPException(status_code=400, detail="image は空にできません")
-
     settings = get_settings()
     time_limit, flavor = _validate_common(session, namespace, req.resources, req.time_limit_seconds)
+    image = _resolve_image(flavor, req.image, req.fallback_image)
 
     # Sweep-specific validation
     if req.completions < 1 or req.completions > settings.MAX_SWEEP_COMPLETIONS:
@@ -369,7 +394,7 @@ def submit_sweep(
         namespace=namespace,
         job_id=job_id,
         user=username,
-        image=req.image,
+        image=image,
         command=req.command,
         cwd=req.cwd,
         env_json=req.env,
@@ -498,6 +523,7 @@ def get_job(
         namespace=job.namespace,
         command=job.command,
         cwd=job.cwd,
+        image=job.image,
         cpu=job.cpu,
         memory=job.memory,
         gpu=job.gpu,
@@ -662,10 +688,28 @@ def release_bulk(
     return ReleaseResponse(released=released, skipped=skipped, not_found=not_found)
 
 
+def _resolve_set_image(job: Job, image: str | None, flavor: str | None, new_flavor: str) -> str:
+    """Resolve the image for a set operation.
+
+    An explicit --image always wins. Otherwise a flavor change re-resolves the
+    image to the new flavor's default when it has one; without a flavor change
+    the image is kept. See docs/architecture/api.md section 11.1.
+    """
+    if image:
+        return image
+
+    if flavor is not None:
+        flavor_def = get_settings().get_flavor_definition(new_flavor)
+        if flavor_def and flavor_def.image:
+            return flavor_def.image
+
+    return job.image
+
+
 def set_single(
     session: Session, namespace: str, job_id: int,
     cpu: str | None, memory: str | None, gpu: int | None,
-    flavor: str | None, time_limit_seconds: int | None,
+    flavor: str | None, image: str | None, time_limit_seconds: int | None,
 ) -> dict:
     job = session.get(Job, (namespace, job_id))
     if job is None:
@@ -680,6 +724,7 @@ def set_single(
     new_gpu = gpu if gpu is not None else job.gpu
     new_flavor = flavor if flavor is not None else job.flavor
     new_time_limit = time_limit_seconds if time_limit_seconds is not None else job.time_limit_seconds
+    new_image = _resolve_set_image(job, image, flavor, new_flavor)
 
     # Validate the merged resource set
     _validate_resources(session, new_flavor, new_cpu, new_memory, new_gpu, new_time_limit)
@@ -692,14 +737,14 @@ def set_single(
     result = session.execute(
         text(
             "UPDATE jobs SET cpu = :cpu, memory = :memory, gpu = :gpu, "
-            "flavor = :flavor, time_limit_seconds = :tl, "
+            "flavor = :flavor, image = :image, time_limit_seconds = :tl, "
             "cpu_millicores = :cpu_m, memory_mib = :mem_m "
             "WHERE namespace = :ns AND job_id = :jid "
             "AND status IN ('QUEUED', 'HELD')"
         ),
         {
             "cpu": new_cpu, "memory": new_memory, "gpu": new_gpu,
-            "flavor": new_flavor, "tl": new_time_limit,
+            "flavor": new_flavor, "image": new_image, "tl": new_time_limit,
             "cpu_m": new_cpu_millicores, "mem_m": new_memory_mib,
             "ns": namespace, "jid": job_id,
         },
@@ -720,6 +765,9 @@ def set_single(
         changes["gpu"] = {"old": job.gpu, "new": new_gpu}
     if flavor is not None and flavor != job.flavor:
         changes["flavor"] = {"old": job.flavor, "new": new_flavor}
+    image_changed = new_image != job.image
+    if image_changed:
+        changes["image"] = {"old": job.image, "new": new_image}
     if time_limit_seconds is not None and new_time_limit != job.time_limit_seconds:
         changes["time_limit_seconds"] = {"old": job.time_limit_seconds, "new": new_time_limit}
 
@@ -729,28 +777,43 @@ def set_single(
     session.flush()
 
     # Return current status (job ORM object is stale after raw SQL, but status was not changed)
-    return {"job_id": job_id, "status": job.status}
+    return {
+        "job_id": job_id,
+        "status": job.status,
+        "image": new_image if image_changed else None,
+    }
 
 
 def set_bulk(
     session: Session, namespace: str, job_ids: list[int],
     cpu: str | None, memory: str | None, gpu: int | None,
-    flavor: str | None, time_limit_seconds: int | None,
+    flavor: str | None, image: str | None, time_limit_seconds: int | None,
 ) -> SetResponse:
     modified = []
     skipped = []
     not_found = []
+    new_images: set[str] = set()
 
     for jid in job_ids:
-        result = set_single(session, namespace, jid, cpu, memory, gpu, flavor, time_limit_seconds)
+        result = set_single(
+            session, namespace, jid, cpu, memory, gpu, flavor, image, time_limit_seconds
+        )
         if result.get("not_found"):
             not_found.append(jid)
         elif result.get("skipped"):
             skipped.append(jid)
         else:
             modified.append(jid)
+            if result.get("image"):
+                new_images.add(result["image"])
 
-    return SetResponse(modified=modified, skipped=skipped, not_found=not_found)
+    # Every job receives the same flavor/image, so a change can only produce a
+    # single value. Report nothing if that ever fails to hold.
+    changed_image = new_images.pop() if len(new_images) == 1 else None
+
+    return SetResponse(
+        modified=modified, skipped=skipped, not_found=not_found, image=changed_image
+    )
 
 
 def delete_jobs(
@@ -928,6 +991,7 @@ def list_flavors(session: Session) -> FlavorListResponse:
         flavors.append(FlavorInfo(
             name=flavor_def.name,
             has_gpu=flavor_def.gpu_resource_name is not None,
+            image=flavor_def.image,
             nodes=nodes_by_flavor.get(flavor_def.name, []),
             quota=quotas_by_flavor.get(flavor_def.name),
         ))

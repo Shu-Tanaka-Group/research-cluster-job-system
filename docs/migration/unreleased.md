@@ -75,7 +75,7 @@ cjobctl db migrate
 
 > 関連: issue #209
 
-サーバ側の `FlavorDefinition` に `extra="forbid"` が導入され、`RESOURCE_FLAVORS` の flavor 定義に未知フィールドが含まれていると **Submit API / Dispatcher / Watcher が起動に失敗する**（従来は黙って無視されていた）。許可されるフィールドは `name` / `label_selector` / `gpu_resource_name` の 3 つのみである（[resources.md](../architecture/resources.md) の「`RESOURCE_FLAVORS` のスキーマ制約」参照）。
+サーバ側の `FlavorDefinition` に `extra="forbid"` が導入され、`RESOURCE_FLAVORS` の flavor 定義に未知フィールドが含まれていると **Submit API / Dispatcher / Watcher が起動に失敗する**（従来は黙って無視されていた）。許可されるフィールドは `name` / `label_selector` / `gpu_resource_name` / `image` の 4 つのみである（[resources.md](../architecture/resources.md) の「`RESOURCE_FLAVORS` のスキーマ制約」参照）。
 
 **Step 4（K8s リソースの適用）より前に**、現在の設定に未知フィールドが混入していないか確認すること。
 
@@ -91,3 +91,48 @@ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
 ```
 
 なお、新しい `cjobctl config set RESOURCE_FLAVORS` は構造チェック（未知フィールド・`name` の重複・`label_selector` の `key=value` 形式・`DEFAULT_FLAVOR` との整合）を行うため、修正時点で誤りがあればその場で拒否される。`cjobctl` のビルドは標準移行手順の Step 3 で完了しているため、この修正は Step 3 と Step 4 の間で実施できる。
+
+## `CJOB_IMAGE` の役割変更（`cjob` / `cjobctl` の更新が必須）
+
+> 関連: issue #210
+
+flavor ごとの既定コンテナイメージ（`RESOURCE_FLAVORS` の `image`）を導入したことに伴い、Job Pod のイメージ解決順序が変わった（[api.md](../architecture/api.md) §2.2）。
+
+```
+--image  >  flavor の image  >  CJOB_IMAGE / JUPYTER_IMAGE
+└ ユーザー明示 ┘  └ 管理者定義 ┘  └── 投入 Pod のイメージ ──┘
+```
+
+`CJOB_IMAGE` は「ユーザーによるイメージの上書き手段」ではなく「投入 Pod のイメージ名を CLI に伝える環境変数」に役割が変わった。**既定イメージが設定された flavor では `CJOB_IMAGE` による上書きは効かなくなる**。ユーザーによる上書きは `cjob add --image` / `cjob sweep --image` / `cjob set --image` に一本化された。
+
+影響を受けるのは「既定イメージを設定した flavor に対して `CJOB_IMAGE` で上書きしていた」運用のみである。既定イメージを設定しない限り従来どおりの動作となるため、この移行手順は既定イメージを導入する場合にのみ関係する。
+
+### 必要な作業
+
+1. **`cjob` CLI の更新（必須）**
+
+   旧 CLI は `image` を必ず送るため Submit API 側で最優先に採用され、**flavor 既定イメージが一切適用されない**。ジョブ投入自体は従来どおり成功するため障害としては現れず、「既定イメージを設定したのに効かない」という形で顕在化する。[標準移行手順](../migration.md) の CLI 配布手順に従い、ユーザーに `cjob update` を案内すること。
+
+2. **`cjobctl` の更新（`image` を設定する場合は必須）**
+
+   `cjobctl config set` の `RESOURCE_FLAVORS` 構造バリデーションは許可フィールドをホワイトリストで持つ。旧 `cjobctl` は `image` を未知フィールドとして拒否するため、`image` を含む定義を適用できない。ビルドは標準移行手順の Step 3 で完了する。
+
+3. **flavor 既定イメージの設定（任意）**
+
+   既定イメージを使う場合のみ実施する。設定前に [operations.md](../operations.md) §8.4.1 の確認事項（Kyverno 許可パターンとの一致、投入 Pod と同一 base であること）を満たしているか確認すること。
+
+   ```bash
+   cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+   cjobctl system restart submit-api
+   ```
+
+   ```json
+   [
+     {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+     {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu", "image": "your-registry/cjob-cuda:2.1.0"}
+   ]
+   ```
+
+   image 解決は Submit API のみが行うため、この設定を反映するために再起動が必要なのは submit-api だけである（Dispatcher は `jobs.image` の確定値をそのまま使う）。
+
+DB スキーマの変更はない（`jobs.image` は NOT NULL のまま、確定値が保存される）。既存ジョブの `jobs.image` も変更されない。

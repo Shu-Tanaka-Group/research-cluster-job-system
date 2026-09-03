@@ -168,10 +168,12 @@ cjob add --flavor gpu --gpu 1 -- python train.py --epochs 100
 
 ```
 $ cjob flavor list
-NAME             GPU    NODES    DEFAULT
-cpu              -      2          *
-gpu              yes    1
+NAME             GPU    NODES    IMAGE                              DEFAULT
+cpu              -      2        -                                    *
+gpu              yes    1        your-registry/cjob-cuda:2.1.0
 ```
+
+IMAGE 列については 3.6 を参照してください。
 
 各種類のリソースの上限を確認するには `cjob flavor info` を使います。
 
@@ -219,6 +221,7 @@ job_id:        1
 status:        RUNNING
 command:       python train.py --epochs 100
 cwd:           /home/jovyan/project-a
+image:         your-registry/cjob-cuda:2.1.0
 flavor:        gpu
 cpu:           1
 memory:        1Gi
@@ -226,6 +229,34 @@ gpu:           1
 time_limit:    24h (残り 23h 50m)
 ...
 ```
+
+### 3.6 ジョブを実行するイメージ
+
+ジョブは通常、**コマンドを実行した Pod（JupyterHub の Notebook）と同じコンテナイメージ**で実行されます。手元で動いたコマンドがそのままジョブでも動くのはこのためです。
+
+これに加えて、ノードの種類（flavor）ごとに管理者が既定のイメージを設定している場合があります。たとえば GPU ノードには CUDA ランタイムを含むイメージが設定されており、軽量な Notebook から投入しても GPU ジョブは CUDA 入りのイメージで実行されます。既定イメージが設定されているかは `cjob flavor list` の IMAGE 列で確認できます（`-` は未設定＝投入元と同じイメージが使われる、という意味です）。
+
+実際にどのイメージで実行されるかは `cjob status` の `image` 行で確認できます。
+
+イメージを自分で指定したい場合は `--image` を使います。
+
+```bash
+# イメージを明示的に指定して投入する
+cjob add --image your-registry/cjob-cuda:2.2.0 -- python train.py
+
+# sweep でも同様に指定できる
+cjob sweep -n 10 --image your-registry/cjob-cuda:2.2.0 -- python train.py --trial _INDEX_
+```
+
+`--image` はどの既定よりも優先されます。優先順位は次のとおりです。
+
+1. `--image` で指定したイメージ
+2. flavor の既定イメージ（管理者が設定）
+3. コマンドを実行した Pod と同じイメージ
+
+指定できるイメージは管理者が許可したものに限られます。許可されていないイメージや存在しないタグを指定した場合、ジョブの投入自体は成功しますが、実行開始時に失敗します。失敗の理由は `cjob status` の `last_error` で確認できます。
+
+> **注意**: 投入元とは異なるイメージでジョブを実行する場合、`${WORKSPACE_MOUNT_PATH}` 配下に作成した Python 仮想環境（venv）が使えるのは、そのイメージが投入元と同じ base から作られている場合に限られます。管理者が設定した flavor の既定イメージはこの条件を満たすように選ばれています。`--image` で自分でイメージを指定する場合は、venv を作り直す必要が生じることがあります。
 
 ## 4. ジョブの実行を保留する（`cjob hold` / `cjob release`）
 
@@ -326,9 +357,26 @@ cjob set 5 --time-limit 12h
 
 # 複数のパラメータを同時に変更する
 cjob set 5 --flavor cpu-sub --cpu 4 --memory 16Gi --time-limit 12h
+
+# ジョブ 5 のイメージを変更する
+cjob set 5 --image your-registry/cjob-cuda:2.2.0
 ```
 
 指定したオプションだけが更新され、指定しなかった項目は元の値のまま保持されます。オプションを1つも指定しなかった場合はエラーになります。
+
+**`--flavor` を変更するとイメージも変わることがあります。** 変更後の flavor に既定イメージが設定されている場合、ジョブのイメージはその既定イメージに更新されます（3.6 参照）。イメージが変わった場合は変更後のイメージが表示されます。
+
+```
+$ cjob set 5 --flavor gpu
+Job 5: QUEUED
+image: your-registry/cjob-cuda:2.1.0
+```
+
+投入時に `--image` で指定したイメージを保ったまま flavor だけを変えたい場合は、`--image` を同時に指定してください。
+
+```bash
+cjob set 5 --flavor gpu --image your-registry/cjob-cuda:2.2.0
+```
 
 ### 5.2 複数のジョブをまとめて変更する
 

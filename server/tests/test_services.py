@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch
 
 import pytest
@@ -544,6 +545,12 @@ class TestGetJob:
         assert resp.time_limit_seconds == 3600
         assert resp.started_at is None
         assert resp.last_error is None
+
+    def test_returns_resolved_image(self, db_session):
+        _insert_job(db_session, 1, image="registry/cuda:1.0")
+        resp = get_job(db_session, NS, 1)
+        assert resp is not None
+        assert resp.image == "registry/cuda:1.0"
 
     def test_found_with_last_error(self, db_session):
         _insert_job(
@@ -1231,6 +1238,152 @@ class TestListFlavors:
         assert cpu_flavor.quota is not None
         assert cpu_flavor.quota.cpu == "256"
 
+    def test_returns_flavor_image(self, db_session, settings):
+        """list_flavors should expose the flavor default image, None when unset."""
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            resp = list_flavors(db_session)
+        by_name = {f.name: f for f in resp.flavors}
+        assert by_name["gpu"].image == "registry/cuda:1.0"
+        assert by_name["cpu"].image is None
+
+
+# ── image resolution ──
+
+
+def _settings_with_flavor_images(settings, **flavor_images):
+    """Return test Settings whose flavors carry the given default images."""
+    from cjob.config import Settings
+
+    flavors = [
+        {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
+        {
+            "name": "gpu",
+            "label_selector": "cjob.io/flavor=gpu",
+            "gpu_resource_name": "nvidia.com/gpu",
+        },
+    ]
+    for f in flavors:
+        if f["name"] in flavor_images:
+            f["image"] = flavor_images[f["name"]]
+
+    return Settings(
+        POSTGRES_PASSWORD="test",
+        MAX_QUEUED_JOBS_PER_NAMESPACE=settings.MAX_QUEUED_JOBS_PER_NAMESPACE,
+        DEFAULT_TIME_LIMIT_SECONDS=settings.DEFAULT_TIME_LIMIT_SECONDS,
+        MAX_TIME_LIMIT_SECONDS=settings.MAX_TIME_LIMIT_SECONDS,
+        RESOURCE_FLAVORS=json.dumps(flavors),
+        DEFAULT_FLAVOR=settings.DEFAULT_FLAVOR,
+    )
+
+
+class TestImageResolution:
+    """docs/architecture/api.md section 2.2: --image > flavor image > fallback_image."""
+
+    def test_explicit_image_wins_over_flavor_default(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        req = _make_request(
+            image="registry/explicit:1.0",
+            fallback_image="registry/pod:1.0",
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=0, flavor="gpu"),
+        )
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            resp = submit_job(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.image == "registry/explicit:1.0"
+
+    def test_flavor_default_wins_over_fallback(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        req = _make_request(
+            image=None,
+            fallback_image="registry/pod:1.0",
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=0, flavor="gpu"),
+        )
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            resp = submit_job(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.image == "registry/cuda:1.0"
+
+    def test_fallback_used_when_flavor_has_no_default(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        req = _make_request(
+            image=None,
+            fallback_image="registry/pod:1.0",
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=0, flavor="cpu"),
+        )
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            resp = submit_job(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.image == "registry/pod:1.0"
+
+    def test_default_flavor_image_applies_when_flavor_omitted(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, cpu="registry/cpu-default:1.0")
+        req = _make_request(image=None, fallback_image="registry/pod:1.0")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            resp = submit_job(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.image == "registry/cpu-default:1.0"
+
+    def test_unresolvable_image_rejected(self, db_session):
+        req = _make_request(image=None, fallback_image=None)
+        with pytest.raises(HTTPException) as exc_info:
+            submit_job(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "image を解決できません" in exc_info.value.detail
+
+    def test_empty_strings_treated_as_unset(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, cpu="registry/cpu-default:1.0")
+        req = _make_request(image="", fallback_image="")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            resp = submit_job(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.image == "registry/cpu-default:1.0"
+
+    def test_old_cli_request_keeps_working(self, db_session, settings):
+        """An old CLI sends only `image`, so it always wins (backward compat)."""
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        req = JobSubmitRequest(
+            command="python main.py",
+            image="registry/pod:1.0",
+            cwd="/home/jovyan",
+            env={},
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=0, flavor="gpu"),
+        )
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            resp = submit_job(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.image == "registry/pod:1.0"
+
+    def test_sweep_uses_flavor_default(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        req = SweepSubmitRequest(
+            command="python main.py --trial $CJOB_INDEX",
+            image=None,
+            fallback_image="registry/pod:1.0",
+            cwd="/home/jovyan",
+            env={},
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=0, flavor="gpu"),
+            completions=4,
+            parallelism=2,
+        )
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            resp = submit_sweep(db_session, NS, "alice", req)
+        job = db_session.get(Job, (NS, resp.job_id))
+        assert job.image == "registry/cuda:1.0"
+
+    def test_sweep_unresolvable_image_rejected(self, db_session):
+        req = SweepSubmitRequest(
+            command="python main.py",
+            cwd="/home/jovyan",
+            env={},
+            resources=ResourceSpec(cpu="1", memory="1Gi", gpu=0),
+            completions=4,
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            submit_sweep(db_session, NS, "alice", req)
+        assert exc_info.value.status_code == 400
+        assert "image を解決できません" in exc_info.value.detail
+
 
 # ── Prometheus metrics ──
 
@@ -1267,7 +1420,7 @@ class TestMetrics:
 class TestSetJob:
     def test_set_cpu_on_queued(self, db_session):
         _insert_job(db_session, 1, status="QUEUED", cpu="1", memory="1Gi")
-        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=None)
         assert result["job_id"] == 1
         assert result["status"] == "QUEUED"
         assert "skipped" not in result
@@ -1277,7 +1430,7 @@ class TestSetJob:
 
     def test_set_memory_on_queued(self, db_session):
         _insert_job(db_session, 1, status="QUEUED")
-        result = set_single(db_session, NS, 1, cpu=None, memory="8Gi", gpu=None, flavor=None, time_limit_seconds=None)
+        result = set_single(db_session, NS, 1, cpu=None, memory="8Gi", gpu=None, flavor=None, image=None, time_limit_seconds=None)
         assert result["status"] == "QUEUED"
         job = db_session.get(Job, (NS, 1))
         db_session.refresh(job)
@@ -1285,7 +1438,7 @@ class TestSetJob:
 
     def test_set_flavor_on_queued(self, db_session):
         _insert_job(db_session, 1, status="QUEUED", flavor="cpu")
-        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu", time_limit_seconds=None)
+        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu", image=None, time_limit_seconds=None)
         assert result["status"] == "QUEUED"
         job = db_session.get(Job, (NS, 1))
         db_session.refresh(job)
@@ -1293,7 +1446,7 @@ class TestSetJob:
 
     def test_set_time_limit_on_queued(self, db_session):
         _insert_job(db_session, 1, status="QUEUED", time_limit_seconds=86400)
-        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor=None, time_limit_seconds=3600)
+        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=3600)
         assert result["status"] == "QUEUED"
         job = db_session.get(Job, (NS, 1))
         db_session.refresh(job)
@@ -1308,7 +1461,7 @@ class TestSetJob:
         )
         db_session.flush()
         _insert_job(db_session, 1, status="QUEUED", flavor="gpu", gpu=0)
-        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=2, flavor=None, time_limit_seconds=None)
+        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=2, flavor=None, image=None, time_limit_seconds=None)
         assert result["status"] == "QUEUED"
         job = db_session.get(Job, (NS, 1))
         db_session.refresh(job)
@@ -1316,7 +1469,7 @@ class TestSetJob:
 
     def test_set_on_held(self, db_session):
         _insert_job(db_session, 1, status="HELD", cpu="1")
-        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=None)
         assert result["status"] == "HELD"
         assert "skipped" not in result
         job = db_session.get(Job, (NS, 1))
@@ -1325,28 +1478,28 @@ class TestSetJob:
 
     def test_set_on_running_skipped(self, db_session):
         _insert_job(db_session, 1, status="RUNNING")
-        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=None)
         assert result["skipped"] is True
         assert result["status"] == "RUNNING"
 
     def test_set_on_succeeded_skipped(self, db_session):
         _insert_job(db_session, 1, status="SUCCEEDED")
-        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=None)
         assert result["skipped"] is True
 
     def test_set_on_cancelled_skipped(self, db_session):
         _insert_job(db_session, 1, status="CANCELLED")
-        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        result = set_single(db_session, NS, 1, cpu="4", memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=None)
         assert result["skipped"] is True
 
     def test_set_not_found(self, db_session):
-        result = set_single(db_session, NS, 999, cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        result = set_single(db_session, NS, 999, cpu="4", memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=None)
         assert result["not_found"] is True
 
     def test_set_unknown_flavor_rejected(self, db_session):
         _insert_job(db_session, 1, status="QUEUED")
         with pytest.raises(HTTPException) as exc_info:
-            set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="nonexistent", time_limit_seconds=None)
+            set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="nonexistent", image=None, time_limit_seconds=None)
         assert exc_info.value.status_code == 400
         assert "存在しません" in exc_info.value.detail
 
@@ -1360,7 +1513,7 @@ class TestSetJob:
         db_session.flush()
         _insert_job(db_session, 1, status="QUEUED", flavor="cpu", gpu=0)
         with pytest.raises(HTTPException) as exc_info:
-            set_single(db_session, NS, 1, cpu=None, memory=None, gpu=2, flavor=None, time_limit_seconds=None)
+            set_single(db_session, NS, 1, cpu=None, memory=None, gpu=2, flavor=None, image=None, time_limit_seconds=None)
         assert exc_info.value.status_code == 400
         assert "GPU をサポートしていません" in exc_info.value.detail
 
@@ -1374,20 +1527,20 @@ class TestSetJob:
         db_session.flush()
         _insert_job(db_session, 1, status="QUEUED", flavor="cpu")
         with pytest.raises(HTTPException) as exc_info:
-            set_single(db_session, NS, 1, cpu="16", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+            set_single(db_session, NS, 1, cpu="16", memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=None)
         assert exc_info.value.status_code == 400
         assert "CPU" in exc_info.value.detail
 
     def test_set_time_limit_exceeds_max(self, db_session):
         _insert_job(db_session, 1, status="QUEUED")
         with pytest.raises(HTTPException) as exc_info:
-            set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor=None, time_limit_seconds=999999)
+            set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=999999)
         assert exc_info.value.status_code == 400
         assert "604800" in exc_info.value.detail
 
     def test_set_multiple_fields(self, db_session):
         _insert_job(db_session, 1, status="QUEUED", cpu="1", memory="1Gi", flavor="cpu", time_limit_seconds=86400)
-        result = set_single(db_session, NS, 1, cpu="4", memory="16Gi", gpu=None, flavor=None, time_limit_seconds=3600)
+        result = set_single(db_session, NS, 1, cpu="4", memory="16Gi", gpu=None, flavor=None, image=None, time_limit_seconds=3600)
         assert result["status"] == "QUEUED"
         job = db_session.get(Job, (NS, 1))
         db_session.refresh(job)
@@ -1400,7 +1553,7 @@ class TestSetJob:
 
     def test_set_preserves_unspecified_fields(self, db_session):
         _insert_job(db_session, 1, status="QUEUED", cpu="2", memory="4Gi", gpu=0, flavor="cpu", time_limit_seconds=7200)
-        set_single(db_session, NS, 1, cpu="8", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        set_single(db_session, NS, 1, cpu="8", memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=None)
         job = db_session.get(Job, (NS, 1))
         db_session.refresh(job)
         assert job.cpu == "8"
@@ -1411,7 +1564,7 @@ class TestSetJob:
 
     def test_set_cpu_millicores_updated(self, db_session):
         _insert_job(db_session, 1, status="QUEUED", cpu="1", memory="1Gi")
-        set_single(db_session, NS, 1, cpu="4", memory="8Gi", gpu=None, flavor=None, time_limit_seconds=None)
+        set_single(db_session, NS, 1, cpu="4", memory="8Gi", gpu=None, flavor=None, image=None, time_limit_seconds=None)
         job = db_session.get(Job, (NS, 1))
         db_session.refresh(job)
         assert job.cpu_millicores == 4000
@@ -1420,7 +1573,7 @@ class TestSetJob:
     def test_set_validates_merged_resources(self, db_session):
         """When changing only flavor to gpu, existing gpu=0 should pass validation."""
         _insert_job(db_session, 1, status="QUEUED", flavor="cpu", gpu=0)
-        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu", time_limit_seconds=None)
+        result = set_single(db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu", image=None, time_limit_seconds=None)
         assert result["status"] == "QUEUED"
         job = db_session.get(Job, (NS, 1))
         db_session.refresh(job)
@@ -1431,7 +1584,138 @@ class TestSetJob:
         _insert_job(db_session, 1, status="QUEUED", cpu="1")
         _insert_job(db_session, 2, status="QUEUED", cpu="1")
         _insert_job(db_session, 3, status="RUNNING", cpu="1")
-        result = set_bulk(db_session, NS, [1, 2, 3, 999], cpu="4", memory=None, gpu=None, flavor=None, time_limit_seconds=None)
+        result = set_bulk(db_session, NS, [1, 2, 3, 999], cpu="4", memory=None, gpu=None, flavor=None, image=None, time_limit_seconds=None)
         assert result.modified == [1, 2]
         assert result.skipped == [3]
         assert result.not_found == [999]
+        assert result.image is None
+
+
+# ── set: image re-resolution (docs/architecture/api.md section 11.1) ──
+
+
+class TestSetImage:
+    def test_explicit_image_updates_job(self, db_session):
+        _insert_job(db_session, 1, status="QUEUED", image="registry/pod:1.0")
+        result = set_single(
+            db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor=None,
+            image="registry/explicit:1.0", time_limit_seconds=None,
+        )
+        assert result["image"] == "registry/explicit:1.0"
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.image == "registry/explicit:1.0"
+
+    def test_explicit_image_wins_over_flavor_default(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", image="registry/pod:1.0")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            result = set_single(
+                db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu",
+                image="registry/explicit:1.0", time_limit_seconds=None,
+            )
+        assert result["image"] == "registry/explicit:1.0"
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.image == "registry/explicit:1.0"
+
+    def test_flavor_change_reresolves_to_flavor_default(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", image="registry/pod:1.0")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            result = set_single(
+                db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu",
+                image=None, time_limit_seconds=None,
+            )
+        assert result["image"] == "registry/cuda:1.0"
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.image == "registry/cuda:1.0"
+
+    def test_flavor_change_without_default_keeps_image(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, cpu="registry/cpu-default:1.0")
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", image="registry/pod:1.0")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            result = set_single(
+                db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu",
+                image=None, time_limit_seconds=None,
+            )
+        assert result["image"] is None
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.image == "registry/pod:1.0"
+
+    def test_no_flavor_no_image_keeps_image(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, cpu="registry/cpu-default:1.0")
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", image="registry/pod:1.0")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            result = set_single(
+                db_session, NS, 1, cpu="2", memory=None, gpu=None, flavor=None,
+                image=None, time_limit_seconds=None,
+            )
+        assert result["image"] is None
+        job = db_session.get(Job, (NS, 1))
+        db_session.refresh(job)
+        assert job.image == "registry/pod:1.0"
+
+    def test_same_image_reports_no_change(self, db_session, settings):
+        """Re-resolving to the image the job already has is not a change."""
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", image="registry/cuda:1.0")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            result = set_single(
+                db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu",
+                image=None, time_limit_seconds=None,
+            )
+        assert result["image"] is None
+
+    def test_image_change_recorded_in_set_event(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", image="registry/pod:1.0")
+        captured = []
+        with patch("cjob.api.services.get_settings", return_value=patched), \
+                patch.object(db_session, "add", side_effect=captured.append):
+            set_single(
+                db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor="gpu",
+                image=None, time_limit_seconds=None,
+            )
+        event = next(o for o in captured if isinstance(o, JobEvent))
+        assert event.event_type == "SET"
+        assert event.payload_json["image"] == {
+            "old": "registry/pod:1.0", "new": "registry/cuda:1.0",
+        }
+
+    def test_skipped_job_reports_no_image(self, db_session):
+        _insert_job(db_session, 1, status="RUNNING", image="registry/pod:1.0")
+        result = set_single(
+            db_session, NS, 1, cpu=None, memory=None, gpu=None, flavor=None,
+            image="registry/explicit:1.0", time_limit_seconds=None,
+        )
+        assert result["skipped"] is True
+        assert "image" not in result
+
+    def test_bulk_reports_single_changed_image(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, gpu="registry/cuda:1.0")
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", image="registry/pod:1.0")
+        _insert_job(db_session, 2, status="QUEUED", flavor="cpu", image="registry/other:1.0")
+        _insert_job(db_session, 3, status="RUNNING", flavor="cpu", image="registry/pod:1.0")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            result = set_bulk(
+                db_session, NS, [1, 2, 3], cpu=None, memory=None, gpu=None, flavor="gpu",
+                image=None, time_limit_seconds=None,
+            )
+        assert result.modified == [1, 2]
+        assert result.skipped == [3]
+        assert result.image == "registry/cuda:1.0"
+
+    def test_bulk_reports_none_when_image_unchanged(self, db_session, settings):
+        patched = _settings_with_flavor_images(settings, cpu="registry/cpu-default:1.0")
+        _insert_job(db_session, 1, status="QUEUED", flavor="cpu", image="registry/pod:1.0")
+        _insert_job(db_session, 2, status="QUEUED", flavor="cpu", image="registry/pod:1.0")
+        with patch("cjob.api.services.get_settings", return_value=patched):
+            result = set_bulk(
+                db_session, NS, [1, 2], cpu="2", memory=None, gpu=None, flavor=None,
+                image=None, time_limit_seconds=None,
+            )
+        assert result.modified == [1, 2]
+        assert result.image is None

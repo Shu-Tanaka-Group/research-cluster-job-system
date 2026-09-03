@@ -182,12 +182,19 @@ env:
 
 ### 7.1 image の役割
 
-同一の image（User Pod の環境変数 `CJOB_IMAGE` または `JUPYTER_IMAGE` から取得したもの）が2つの用途で使われる。`cjob` CLI は image には含めず、ユーザーが各自でインストールする。
+image は2つの用途で使われる。`cjob` CLI は image には含めず、ユーザーが各自でインストールする。
 
-| 用途 | Pod | 備考 |
-|---|---|---|
-| ユーザー作業環境 | User Pod（JupyterHub） | ユーザーが cjob CLI を別途インストール |
-| ジョブ実行環境 | Job Pod（Kubernetes Job） | CLI は不要 |
+| 用途 | Pod | image の決まり方 | 備考 |
+|---|---|---|---|
+| ユーザー作業環境 | User Pod（JupyterHub） | JupyterHub のプロファイル設定 | ユーザーが cjob CLI を別途インストール |
+| ジョブ実行環境 | Job Pod（Kubernetes Job） | `--image` > flavor 既定イメージ > 投入 User Pod と同一（[api.md](architecture/api.md) §2.2） | CLI は不要 |
+
+既定では Job Pod は投入元 User Pod と同一の image で実行される。flavor 既定イメージ（`RESOURCE_FLAVORS` の `image`、[resources.md](architecture/resources.md) 参照）を設定すると、その flavor のジョブだけを別のイメージで実行できる。CUDA ランタイムを必要とするジョブを軽量な投入 Pod から実行する場合などに使う。
+
+flavor 既定イメージを設定する場合は次の 2 点を満たすこと。
+
+- 投入 Pod のイメージと同じ base から派生し、Python のバージョンとインストールパスが一致していること（[prerequisites.md](architecture/prerequisites.md) §2.1）
+- §14 の Kyverno 許可パターンに一致するイメージ名であること
 
 ### 7.2 image の内容
 
@@ -367,7 +374,7 @@ hub:
 
 ### Job Pod イメージの環境変数について
 
-`cjob` CLI は Job Pod に使用する image 名を User Pod の環境変数から以下の優先順位で取得する。
+`cjob` CLI は **投入 Pod のイメージ名** を User Pod の環境変数から以下の優先順位で取得し、`fallback_image` として Submit API に送る。
 
 1. `CJOB_IMAGE`（優先）
 2. `JUPYTER_IMAGE`（フォールバック）
@@ -381,6 +388,13 @@ JupyterHub 以外の環境で使用する場合は、User Pod に `CJOB_IMAGE` �
 ```
 CJOB_IMAGE=my-registry/my-image:1.0
 ```
+
+これらの環境変数は「投入 Pod のイメージ」を Submit API に伝えるためのものであり、
+Job Pod のイメージを上書きする手段ではない。Submit API は `--image`（ユーザーの明示指定）と
+flavor 既定イメージ（管理者定義）をこれらより優先する（[api.md](architecture/api.md) §2.2）。
+ユーザーが個別のジョブでイメージを変更する場合は `cjob add --image` を使う。
+
+両方未設定の場合でも、flavor 既定イメージまたは `--image` で解決できればジョブは投入できる。
 
 ---
 
@@ -483,6 +497,14 @@ spec:
 ```bash
 kubectl apply -f policies/restrict-job-image.yaml
 ```
+
+### 14.3 flavor 既定イメージとの関係
+
+Job Pod のイメージは `--image` > flavor 既定イメージ > 投入 Pod のイメージの順で解決される（[api.md](architecture/api.md) §2.2）。Submit API は許可イメージのリストを持たず、enforcement は本ポリシーに一本化されている。
+
+このため、`RESOURCE_FLAVORS` の `image` に許可パターン外のイメージを設定すると、**その flavor に投入されたジョブは受理された後 dispatch 時の admission で拒否され、`last_error` を伴って FAILED になる**。ジョブ投入の時点ではエラーにならないため、管理者が気づくのはユーザーからの報告時になる。
+
+flavor 既定イメージを追加・変更する際は、そのイメージ名が本ポリシーの許可パターンに一致することを必ず確認すること（手順は [operations.md](operations.md) §8）。ユーザーが `cjob add --image` に許可パターン外のイメージを指定した場合も同様に dispatch 後に失敗する。
 
 ---
 

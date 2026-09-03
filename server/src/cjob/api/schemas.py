@@ -12,7 +12,11 @@ class ResourceSpec(BaseModel):
 
 class JobSubmitRequest(BaseModel):
     command: str
-    image: str
+    # Explicit user override (cjob add --image). Wins over the flavor default.
+    image: str | None = None
+    # The submitting pod's own image (CJOB_IMAGE / JUPYTER_IMAGE). Loses to
+    # the flavor default. See docs/architecture/api.md section 2.2.
+    fallback_image: str | None = None
     cwd: str
     env: dict[str, str] = Field(default_factory=dict)
     resources: ResourceSpec = Field(default_factory=ResourceSpec)
@@ -21,7 +25,8 @@ class JobSubmitRequest(BaseModel):
 
 class SweepSubmitRequest(BaseModel):
     command: str
-    image: str
+    image: str | None = None
+    fallback_image: str | None = None
     cwd: str
     env: dict[str, str] = Field(default_factory=dict)
     resources: ResourceSpec = Field(default_factory=ResourceSpec)
@@ -66,6 +71,7 @@ class JobDetailResponse(BaseModel):
     namespace: str
     command: str
     cwd: str
+    image: str
     cpu: str
     memory: str
     gpu: int
@@ -146,6 +152,7 @@ class SetParams(BaseModel):
     memory: str | None = None
     gpu: int | None = None
     flavor: str | None = None
+    image: str | None = None
     time_limit_seconds: int | None = None
 
 
@@ -156,12 +163,17 @@ class SetRequest(SetParams):
 class SingleSetResponse(BaseModel):
     job_id: int
     status: str
+    # New image, set only when the image actually changed.
+    image: str | None = None
 
 
 class SetResponse(BaseModel):
     modified: list[int]
     skipped: list[int]
     not_found: list[int]
+    # New image, set only when the image actually changed. A bulk set applies
+    # the same flavor/image to every job, so at most one value can result.
+    image: str | None = None
 
 
 class DeleteRequest(BaseModel):
@@ -227,6 +239,7 @@ class FlavorQuotaInfo(BaseModel):
 class FlavorInfo(BaseModel):
     name: str
     has_gpu: bool
+    image: str | None = None
     nodes: list[FlavorNodeInfo]
     quota: FlavorQuotaInfo | None = None
 

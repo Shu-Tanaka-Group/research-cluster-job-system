@@ -3,8 +3,8 @@
 ## 1. 基本コマンド
 
 ```bash
-cjob add [--cpu <cpu>] [--memory <memory>] [--flavor <name>] [--gpu <N>] [--time-limit <duration>] -- <command...>
-cjob sweep -n <count> --parallel <n> [--flavor <name>] [--gpu <N>] [--time-limit <duration>] -- <command...>
+cjob add [--cpu <cpu>] [--memory <memory>] [--flavor <name>] [--gpu <N>] [--time-limit <duration>] [--image <image>] -- <command...>
+cjob sweep -n <count> --parallel <n> [--flavor <name>] [--gpu <N>] [--time-limit <duration>] [--image <image>] -- <command...>
 cjob list [--status <status>] [--flavor <name>] [--time-limit <range>] [--format ids] [--limit <n>] [--all] [--reverse]
 cjob status <job-id>
 cjob cancel <job-id>              # 単体指定
@@ -26,7 +26,7 @@ cjob release <start>-<end>        # 範囲指定（例: 1-10）
 cjob release <id>,<id>,...        # 個別複数指定（例: 1,3,5）
 cjob release <start>-<end>,<id>,.. # 組み合わせ（例: 1-5,8,10-12）
 cjob release --all                # HELD 状態のジョブを全て解除
-cjob set <job-ids> [--cpu <cpu>] [--memory <memory>] [--flavor <name>] [--gpu <N>] [--time-limit <duration>]
+cjob set <job-ids> [--cpu <cpu>] [--memory <memory>] [--flavor <name>] [--gpu <N>] [--time-limit <duration>] [--image <image>]
 cjob reset
 cjob logs <job-id>
 cjob logs --follow <job-id>
@@ -154,7 +154,7 @@ cjob delete --all
 
 ## 3. `cjob sweep` の動作
 
-1. `cjob add` と同様に `pwd`、export 済み環境変数、`CJOB_IMAGE` / `JUPYTER_IMAGE` を収集する（両方未設定の場合はエラー終了）
+1. `cjob add` と同様に `pwd`、export 済み環境変数、投入 Pod のイメージ名（`CJOB_IMAGE` → `JUPYTER_IMAGE`）を収集する（両方未設定でもエラーにはしない。§4「image の決まり方」参照）
 2. `--` 以降の argv を shell-safe に連結して command を生成する
 3. `-n` を `completions`、`--parallel` を `parallelism` として `POST /v1/sweep` に送信する
 4. `job_id` とタスク数・並列数を表示する
@@ -170,6 +170,7 @@ cjob delete --all
 | `--memory <memory>` | 任意 | メモリリソース。デフォルト "1Gi" |
 | `--gpu <N>` | 任意 | GPU 数。デフォルト 0（GPU なし） |
 | `--flavor <name>` | 任意 | ResourceFlavor 名（例: "cpu", "gpu-a100"）。省略時はサーバ側デフォルト |
+| `--image <image>` | 任意 | Job Pod のコンテナイメージ。省略時は flavor 既定イメージまたは投入 Pod のイメージ（§4「image の決まり方」参照） |
 | `-- <command>` | 必須 | 各タスクで実行するコマンド |
 
 ### `_INDEX_` プレースホルダー
@@ -215,18 +216,37 @@ cjob sweep -n ${NUM_SEED} -- python train.py --seed _INDEX_       # OK
 | `--gpu <N>` | 任意 | GPU 数。デフォルト 0（GPU なし） |
 | `--flavor <name>` | 任意 | ResourceFlavor 名（例: "cpu", "gpu-a100"）。省略時はサーバ側デフォルト |
 | `--time-limit <duration>` | 任意 | 実行時間上限。省略時はサーバ側デフォルト |
+| `--image <image>` | 任意 | Job Pod のコンテナイメージ。省略時は flavor 既定イメージまたは投入 Pod のイメージ（「image の決まり方」参照） |
 | `-- <command>` | 必須 | 実行するコマンド |
 
 ### 動作
 
 1. `pwd` を取得する
 2. export 済み環境変数を収集する（`PATH` / `VIRTUAL_ENV` を含む）
-3. 環境変数 `CJOB_IMAGE` からコンテナイメージ名を取得する（未設定時は `JUPYTER_IMAGE` にフォールバック。両方未設定の場合はエラー終了する）
+3. 投入 Pod のイメージ名を環境変数 `CJOB_IMAGE` から取得する（未設定時は `JUPYTER_IMAGE` にフォールバック。両方未設定でもエラーにはせず、`fallback_image` を送らない）
 4. `--` 以降の argv を shell-safe に連結して command を生成する
 5. `--time-limit` が指定されていれば秒数に変換する（省略時は API のデフォルト値を使用）
 6. ServiceAccount JWT と namespace を固定パスから読み取る
-7. API にジョブ投入を行う（`image`, `time_limit_seconds` フィールドを含む）
+7. API にジョブ投入を行う（`--image` を指定した場合は `image`、手順 3 で取得できた場合は `fallback_image`、および `time_limit_seconds` フィールドを含む）
 8. `job_id` を表示する
+
+### image の決まり方
+
+Job Pod のイメージは Submit API が次の優先順位で解決する（[api.md](api.md) §2.2）。CLI は「ユーザーの明示指定」と「投入 Pod のイメージ」を区別して送るだけで、解決自体は行わない。
+
+```
+--image  >  flavor の image  >  CJOB_IMAGE / JUPYTER_IMAGE
+└ ユーザー明示 ┘  └ 管理者定義 ┘  └── 投入 Pod のイメージ ──┘
+```
+
+| CLI が送るフィールド | 送信元 |
+|---|---|
+| `image` | `--image` |
+| `fallback_image` | `CJOB_IMAGE` → `JUPYTER_IMAGE` |
+
+`CJOB_IMAGE` / `JUPYTER_IMAGE` が両方未設定でも CLI はエラー終了しない。flavor 既定イメージで解決できる場合があるためである。いずれからも解決できない場合は Submit API が 400 を返し、CLI はそのメッセージを表示する。
+
+実際に使用されるイメージは `cjob status <job-id>` の `image` 行で確認できる（§7）。flavor ごとの既定イメージは `cjob flavor list` の IMAGE 列で確認できる（§17）。
 
 ### `--time-limit` オプション
 
@@ -356,6 +376,7 @@ type:         job
 status:       RUNNING
 command:      python main.py --alpha 0.2 --beta 16
 cwd:          /home/jovyan/project-a/exp1
+image:        your-registry/cjob-jupyter:2.1.0
 flavor:       cpu
 cpu:          2
 memory:       4Gi
@@ -370,6 +391,8 @@ node_name:    worker07
 log_dir:      /home/jovyan/.cjob/logs/2
 ```
 
+`image` は Submit API が投入時に解決した確定イメージ（`jobs.image`）。`--image` の明示指定・flavor 既定イメージ・投入 Pod のイメージのいずれで解決されたかによらず、実際に Job Pod で使われる値が表示される（§4「image の決まり方」参照）。
+
 `time_limit` は `time_limit_seconds` を人間が読みやすい形式で表示する。ジョブが RUNNING の場合は残り時間も併記する。
 
 sweep ジョブの場合は追加フィールドを表示する。
@@ -381,6 +404,7 @@ type:           sweep
 status:         RUNNING
 command:        python main.py --trial $CJOB_INDEX
 cwd:            /home/jovyan/project-a
+image:          your-registry/cjob-jupyter:2.1.0
 flavor:         cpu
 cpu:            2
 memory:         4Gi
@@ -727,7 +751,7 @@ cjob release --all
 
 ## 13. `cjob set` の動作
 
-QUEUED または HELD 状態のジョブについて、Dispatcher に渡すリソース要求・flavor・time limit を事後的に上書きする。1 つ以上のフィールドが指定されていない場合はエラーで終了する。
+QUEUED または HELD 状態のジョブについて、Dispatcher に渡すリソース要求・flavor・image・time limit を事後的に上書きする。1 つ以上のフィールドが指定されていない場合はエラーで終了する。
 
 job_id の指定形式は `cjob cancel` と同じく単体・範囲・複数組み合わせに対応する。単体指定時は `POST /v1/jobs/{job_id}/set`、複数指定時は `POST /v1/jobs/set` を呼ぶ。
 
@@ -739,9 +763,26 @@ job_id の指定形式は `cjob cancel` と同じく単体・範囲・複数組�
 | `--memory <memory>` | 文字列 | メモリ要求量（例: `16Gi`, `16384Mi`） |
 | `--gpu <N>` | 整数 | GPU 個数 |
 | `--flavor <name>` | 文字列 | ResourceFlavor 名 |
+| `--image <image>` | 文字列 | Job Pod のコンテナイメージ |
 | `--time-limit <duration>` | 文字列 | 実行時間上限（例: `12h`, `30m`）。API には秒に換算して送る |
 
 指定されなかったフィールドは元の値を保持する。値のパース（`parse_duration` など）は `cjob add` と同じユーティリティを共用する。
+
+ただし image だけは例外で、`--flavor` の変更に伴って暗黙に変わりうる。詳細は「image の再解決」を参照。
+
+### image の再解決
+
+flavor を変更すると実行に適したイメージも変わるため、Submit API は次の規則で image を再解決する（[api.md](api.md) §11.1）。
+
+| `--image` | `--flavor` | image の扱い |
+|---|---|---|
+| あり | あり / なし | 指定された値に更新する |
+| なし | あり | 変更後 flavor に既定イメージがあればそれに更新し、なければ据え置く |
+| なし | なし | 据え置く |
+
+`cjob add --image` で明示指定したジョブの flavor を変更すると明示指定が失われる。維持したい場合は `--image` を同時に指定する。
+
+image が変更された場合、CLI は単体指定・複数指定のいずれでも変更後のイメージを 1 行表示する。複数指定でも全ジョブに同じ `--flavor` / `--image` を適用するため、変更後のイメージは 1 種類に決まる。
 
 ### 対象ジョブの条件
 
@@ -755,9 +796,9 @@ API 側で以下の状態チェックを行う。
 ```
 # ※ CLI の実装は Rust で行う。以下は概念説明のための擬似コードである。
 
-fn cmd_set(expr, cpu, memory, gpu, flavor, time_limit):
+fn cmd_set(expr, cpu, memory, gpu, flavor, image, time_limit):
     if すべてのパラメータが None:
-        エラー終了: "specify at least one parameter to modify (--cpu, --memory, --gpu, --flavor, --time-limit)"
+        エラー終了: "specify at least one parameter to modify (--cpu, --memory, --gpu, --flavor, --image, --time-limit)"
 
     time_limit_seconds = time_limit を秒に変換（指定時のみ）
 
@@ -765,12 +806,26 @@ fn cmd_set(expr, cpu, memory, gpu, flavor, time_limit):
     if len(job_ids) == 1:
         POST /v1/jobs/{job_id}/set にパラメータを送る
         "Job {job_id}: {status}" を表示する
+        レスポンスの image が非 null なら "image: {image}" を表示する
     else:
         POST /v1/jobs/set に job_ids とパラメータを送る
         result を受け取り:
             modified があれば "Modified: [job_ids]" を表示する
             skipped があれば "Skipped (not QUEUED / HELD): [job_ids]" を表示する
             not_found があれば "Not found: [job_ids]" を表示する
+            image が非 null なら "image: {image}" を表示する
+```
+
+image が変更されなかった場合、レスポンスの `image` は `null` となり表示は行われない。
+
+```
+$ cjob set 5 --flavor gpu
+Job 5: QUEUED
+image: your-registry/cjob-cuda:2.1.0
+
+$ cjob set 10-20 --flavor gpu
+Modified: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+image: your-registry/cjob-cuda:2.1.0
 ```
 
 ### 使用例
@@ -787,6 +842,12 @@ cjob set 10-20,25,30 --cpu 8
 
 # cjob list からの ID 注入（QUEUED のまま flavor を切り替える）
 cjob set $(cjob list --status QUEUED --flavor cpu --format ids) --flavor cpu-sub
+
+# flavor を変えつつイメージは明示指定したものに固定する
+cjob set 5 --flavor gpu --image your-registry/cjob-cuda:2.1.0
+
+# イメージだけ差し替える
+cjob set 5 --image your-registry/cjob-cuda:2.2.0
 ```
 
 ## 14. `cjob reset` の動作
@@ -971,10 +1032,12 @@ $ cjob update --version 1.3.1-beta.1
 
 ```
 $ cjob flavor list
-NAME             GPU    NODES    DEFAULT
-cpu              -      2          *
-gpu-a100         yes    1
+NAME             GPU    NODES    IMAGE                              DEFAULT
+cpu              -      2        -                                    *
+gpu-a100         yes    1        your-registry/cjob-cuda:2.1.0
 ```
+
+IMAGE 列はその flavor の既定イメージ（`RESOURCE_FLAVORS` の `image`）。設定されていない flavor では `-` を表示し、その flavor ではジョブ投入時に投入 Pod のイメージが使われる（§4「image の決まり方」参照）。
 
 ### `cjob flavor info <name>`
 
@@ -986,6 +1049,7 @@ QUOTA は ClusterQueue の nominalQuota（flavor 全体で共有するリソー�
 $ cjob flavor info cpu
 name:   cpu
 GPU:    非対応
+image:  -
 
 RESOURCE      QUOTA    TASK LIMIT
 CPU             256           128
@@ -998,6 +1062,7 @@ GPU 対応 flavor の場合は GPU 行も表示する。
 $ cjob flavor info gpu-a100
 name:   gpu-a100
 GPU:    対応
+image:  your-registry/cjob-cuda:2.1.0
 
 RESOURCE      QUOTA    TASK LIMIT
 CPU              64            64
@@ -1005,12 +1070,15 @@ Memory        500Gi         500Gi
 GPU               4             4
 ```
 
+`image` 行はその flavor の既定イメージ。設定されていない flavor では `-` を表示する。
+
 Watcher 未同期で quota 情報がない場合はメッセージを表示する。
 
 ```
 $ cjob flavor info cpu
 name:   cpu
 GPU:    非対応
+image:  -
 
 （リソース情報がまだ取得されていません）
 ```
