@@ -303,7 +303,7 @@ class Dispatcher:
 
         # Proceed after DISPATCHING update is confirmed
         try:
-            k8s.create_job(job)  # sets job.time_limit_seconds as activeDeadlineSeconds
+            k8s.create_job(job)
             # AND status='DISPATCHING' condition prevents overwriting CANCELLED
             # If updated_rows == 0, status remains CANCELLED and
             # Watcher deletes the CANCELLED job's K8s Job in the next cycle (watcher.md §3 Step 5)
@@ -718,7 +718,6 @@ spec:
   completions: <completions>
   parallelism: <parallelism>
   backoffLimitPerIndex: 0
-  activeDeadlineSeconds: <time_limit_seconds>
 ```
 
 With `backoffLimitPerIndex: 0`, a task that fails once is immediately added to `failedIndexes` without retry. In sweep jobs, retrying failed tasks occupies parallelism slots and prevents other tasks from running, so the slot must be immediately freed.

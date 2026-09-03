@@ -190,8 +190,11 @@ def build_k8s_job(job: Job, settings: Settings) -> k8s_client.V1Job:
         ],
     )
 
+    # activeDeadlineSeconds は設定しない。K8s は .status.startTime (Kueue の
+    # unsuspend 時点) から計測するため、admit 後にノードの空き待ちで Pod が
+    # Pending のまま滞留した時間まで制限時間に算入されてしまう。制限時間は
+    # Watcher が started_at 起点で強制する (watcher.md §3 ステップ 9)。
     job_spec_kwargs = {
-        "active_deadline_seconds": job.time_limit_seconds,
         "ttl_seconds_after_finished": settings.TTL_SECONDS_AFTER_FINISHED,
         "backoff_limit": 0,
         "template": k8s_client.V1PodTemplateSpec(spec=pod_spec),

@@ -70,19 +70,20 @@ class TestBuildK8sJob:
         assert labels["cjob.io/job-id"] == "1"
         assert labels["cjob.io/namespace"] == "user-alice"
 
-    def test_active_deadline_seconds(self):
+    def test_no_active_deadline_seconds(self):
+        """Time limits are enforced by the Watcher, not by K8s (#207)."""
         job = _make_job(time_limit_seconds=3600)
         settings = _make_settings()
         manifest = build_k8s_job(job, settings)
 
-        assert manifest.spec.active_deadline_seconds == 3600
+        assert manifest.spec.active_deadline_seconds is None
 
-    def test_active_deadline_seconds_default(self):
-        job = _make_job(time_limit_seconds=86400)
+    def test_no_active_deadline_seconds_sweep(self):
+        job = _make_job(time_limit_seconds=3600, completions=10, parallelism=5)
         settings = _make_settings()
         manifest = build_k8s_job(job, settings)
 
-        assert manifest.spec.active_deadline_seconds == 86400
+        assert manifest.spec.active_deadline_seconds is None
 
     def test_ttl_seconds(self):
         job = _make_job()

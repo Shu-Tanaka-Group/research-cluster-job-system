@@ -186,7 +186,6 @@ metadata:
     cjob.io/job-id: "1"          # job_id (dynamically set by Dispatcher)
     cjob.io/namespace: user-alice  # namespace (dynamically set by Dispatcher)
 spec:
-  activeDeadlineSeconds: 86400      # Sets DB's time_limit_seconds as-is (dynamically set by Dispatcher)
   ttlSecondsAfterFinished: 300      # Deletes Job / Pod 5 minutes after completion
   template:
     spec:

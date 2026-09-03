@@ -150,5 +150,5 @@ flavor の `name` は Kueue ResourceFlavor の `metadata.name` と一致させ�
 |---|---|---|---|---|---|
 | `DEFAULT_TIME_LIMIT_SECONDS` | ConfigMap | 86400 (24h) | Submit API | ジョブごと | `time_limit_seconds` 省略時に適用されるデフォルト実行時間上限 |
 | `MAX_TIME_LIMIT_SECONDS` | ConfigMap | 604800 (7d) | Submit API | ジョブごと | ユーザーが指定できる `time_limit_seconds` の最大値 |
-| `activeDeadlineSeconds` | K8s Job spec | DB の `time_limit_seconds` | Kubernetes | ジョブごと | Job の `.status.startTime` からの実行時間上限。Kueue が suspend を解除して Job が開始された時点から計測されるため、Kueue の admission 待ち時間（suspend 期間）は含まれない。超過時に K8s が Job を終了し、Watcher が FAILED（`time limit exceeded`）に遷移させる |
+| 制限時間の強制 | Watcher（reconcile サイクル） | DB の `time_limit_seconds` | Watcher | ジョブごと | ジョブの `started_at`（Watcher が RUNNING を観測した時刻）からの実行時間上限。超過を検知すると Watcher が K8s Job を削除し、FAILED（`time limit exceeded`）に遷移させる（[watcher.md](watcher.md) §3 ステップ 9 参照）。Kueue の admission 待ち時間（suspend 期間）も、admit 後にノードの空き待ちで Pod が Pending のまま滞留した時間も含まれない |
 

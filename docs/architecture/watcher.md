@@ -7,6 +7,7 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - Job 状態の監視
 - Pod 状態の監視
 - `RUNNING` / `SUCCEEDED` / `FAILED` への遷移
+- 制限時間（`time_limit_seconds`）の強制
 - `CANCELLED` ジョブの K8s Job 削除
 - `DELETING` ジョブの K8s Job 削除・DB レコード削除・カウンターリセット
 - orphan Job 検出
@@ -58,13 +59,13 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 
 ## 3. 最小アルゴリズム
 
-1. Kubernetes Job 一覧を `WATCHER_K8S_LIST_PAGE_SIZE`（§5.5）で定期監視し、ページごとに軽量 dataclass（§5.1）に変換する。**API 呼び出しがいずれかのページで失敗した場合は reconcile サイクル全体をスキップする**（ステップ 2〜8 および DELETING Phase 2 は K8s Job 一覧が完全であることを前提としており、不完全な一覧で処理を続行するとステップ 8 が正常なジョブを FAILED に誤遷移させ、DELETING Phase 2 が K8s Job 残存のまま DB をクリーンアップする危険がある）
+1. Kubernetes Job 一覧を `WATCHER_K8S_LIST_PAGE_SIZE`（§5.5）で定期監視し、ページごとに軽量 dataclass（§5.1）に変換する。**API 呼び出しがいずれかのページで失敗した場合は reconcile サイクル全体をスキップする**（ステップ 2〜9 および DELETING Phase 2 は K8s Job 一覧が完全であることを前提としており、不完全な一覧で処理を続行するとステップ 8 が正常なジョブを FAILED に誤遷移させ、DELETING Phase 2 が K8s Job 残存のまま DB をクリーンアップする危険がある）
 2. Job の `status.conditions` を以下のルールで解釈する
 
    | K8s Job の `status.conditions` | DB status | 備考 |
    |---|---|---|
    | `type: Complete, status: True` | `SUCCEEDED` | |
-   | `type: Failed, status: True, reason: DeadlineExceeded` | `FAILED` | `last_error` に `"time limit exceeded"` を設定 |
+   | `type: Failed, status: True, reason: DeadlineExceeded` | `FAILED` | `last_error` に `"time limit exceeded"` を設定。cjob は K8s Job に `activeDeadlineSeconds` を設定しないため（制限時間は §3 ステップ 9 で強制する）、この条件が出現するのは本変更以前に作成された Job か、手動で `activeDeadlineSeconds` を付与された Job に限られる |
    | `type: Failed, status: True` | `FAILED` | Pod の exit code 非0・起動失敗を含む |
    | 条件なし・`status.active > 0` かつ `status.ready > 0` | `RUNNING` | 初回 RUNNING 遷移時に `started_at` を記録し、全 Pod の `spec.nodeName` から `node_name` を取得して記録し、`namespace_daily_usage` に累計消費量を加算する（[database.md](database.md) §5.2 参照） |
 
@@ -94,6 +95,27 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
 8. DB 上で DISPATCHED / RUNNING だが、対応する K8s Job が K8s 上に存在しないジョブを FAILED に遷移させる（`last_error` に `"K8s Job not found (TTL expired or manually deleted)"` を設定し、`finished_at` を現在時刻に設定する）。これにより `ttlSecondsAfterFinished` による K8s Job の自動削除や、手動削除によって DB と K8s の状態が乖離した場合に自動修復される
 
    **Dispatcher grace period:** DISPATCHED ジョブのうち `dispatched_at` が `NOW() - WATCHER_DISPATCH_GRACE_SEC` より新しいものは対象外とする。Dispatcher がジョブを投入した直後に Watcher が reconcile サイクルを回すと、そのサイクルの先頭で取得した K8s Job 一覧には新しく作成された Job がまだ含まれない race が発生し、この保護が無いと新規ジョブが即座に FAILED として誤記録される。RUNNING ジョブには grace period を適用しない（1 度でも K8s Job を観測できていれば次サイクルでも観測できるため、消失は実際の削除を意味する）
+
+9. 実行時間が制限時間を超えたジョブを終了させる（制限時間の強制）
+
+   K8s Job の `activeDeadlineSeconds` は使用せず、Watcher が `started_at` 起点で制限時間を強制する。K8s の `.status.startTime` は Kueue が suspend を解除した時点で確定するため、その後 kube-scheduler が Pod をノードに配置するまでの Pending 滞留時間が制限時間に算入されてしまう。これを避けるため、実際に実行が始まった時刻（`started_at`）を起点とする。
+
+   **対象:** `status = 'RUNNING'` かつ `started_at IS NOT NULL` かつ `started_at + time_limit_seconds < NOW()` のジョブ
+
+   **処理順序:** K8s Job を `propagation_policy="Background"` で削除し（Pod も連動削除され、SIGTERM 後 grace period で終了する）、**削除成功（404 を含む）を確認してから** DB を更新する。`status` を `FAILED`、`last_error` を `"time limit exceeded"`、`finished_at` を現在時刻に設定し、`job_events` に `FAILED` を追加し、`cjob_jobs_completed_total{status="failed"}` をインクリメントする。使用量（`namespace_daily_usage`）は RUNNING 遷移時に計上済みのため加算しない
+
+   削除を先に行うのは、逆順にすると削除失敗時に K8s Job が生き残り、そのジョブが完走した際にステップ 4 が `SUCCEEDED` で DB を上書きしてしまうためである（terminal 状態復帰ガードは RUNNING への遷移しか防いでいない）。削除先行であれば、削除に失敗したジョブは RUNNING のまま次サイクルで再試行される。
+
+   削除成功後・DB commit 前に Watcher がクラッシュした場合、次サイクルのステップ 8 がこのジョブを拾い `last_error` が `"K8s Job not found (TTL expired or manually deleted)"` になる。ウィンドウはミリ秒オーダーであり、最終状態（FAILED）は正しいため許容する。
+
+   **実行位置:** ステップ 4 の状態同期をすべて終えた後、ステップ 8 の消失チェックより前に実行する。ステップ 4 より後にすることで、当該サイクルで自然に SUCCEEDED / FAILED へ遷移したジョブを誤って削除しない。ステップ 8 より前にすることで、本ステップで FAILED にしたジョブがステップ 8 に二重に拾われない
+
+   **想定される制約:**
+
+   - 検知の粒度はスキャンサイクル間隔（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`、デフォルト 10 秒）になる。24 時間の制限時間に対して無視できる誤差である
+   - Watcher が長時間停止した場合、制限時間を超えたジョブが走り続ける。liveness probe によりループ停止は自動復帰するが、crash loop 等は復帰しない。影響はリソース占有に限られ、データ損失は発生しない
+   - `started_at` は Watcher が RUNNING を観測した時刻であり、コンテナの実際の起動時刻より最大 1 スキャンサイクル遅れる。ユーザーに有利に働くため許容する
+   - 本変更以前に作成された K8s Job は `activeDeadlineSeconds` を保持したまま実行を継続するため、ロールアウト時点で実行中のジョブには旧挙動が残る（[migration](../migration.md) 参照）
 
 **Grace period とスキャンサイクル間隔の関係:**
 
@@ -128,7 +150,9 @@ WHERE namespace = :namespace
 K8s Job の `status.conditions` に従う（通常ジョブと同じロジック）。`Complete` または `Failed` の condition が出現した時点で最終ステータスを決定する。
 
 - K8s が `Complete` を返した場合: `failed_count > 0` なら **FAILED**、`failed_count == 0` なら **SUCCEEDED**
-- K8s が `Failed` を返した場合（`activeDeadlineSeconds` 超過等）: **FAILED**
+- K8s が `Failed` を返した場合（Pod の exit code 非0・起動失敗等）: **FAILED**
+
+制限時間の超過は K8s の `activeDeadlineSeconds` ではなく Watcher が強制する（§3 ステップ 9）。sweep ジョブも通常ジョブと同じ扱いで、`started_at`（最初の Pod が RUNNING になった時刻）を起点に Job 全体へ 1 つの制限時間が適用される。
 
 これにより、部分的に失敗したタスクがある sweep は常に FAILED として扱われる。
 

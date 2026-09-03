@@ -20,7 +20,7 @@ CREATE TABLE jobs (
     memory        TEXT NOT NULL,
     gpu           INTEGER NOT NULL DEFAULT 0,
     flavor        TEXT NOT NULL DEFAULT 'cpu', -- ResourceFlavor name for job execution destination (e.g., 'cpu', 'gpu-a100')
-    time_limit_seconds INTEGER NOT NULL,   -- Execution time limit (seconds). Set as K8s Job activeDeadlineSeconds
+    time_limit_seconds INTEGER NOT NULL,   -- Execution time limit (seconds). Enforced by the Watcher from started_at
     status        TEXT NOT NULL,
     retry_count   INTEGER NOT NULL DEFAULT 0,
     retry_after   TIMESTAMPTZ,              -- Retry unlock time for K8s transient failures (NULL = eligible immediately)
