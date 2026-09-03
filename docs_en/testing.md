@@ -8,11 +8,20 @@
 
 ```bash
 cd server
-uv run python -m pytest tests/ -v
+uv run --extra test --extra api --with httpx python -m pytest tests/ -v
 ```
 
-On the first run, `uv` automatically creates a virtual environment and installs dependencies.
-`fastapi` is also required because some tests use FastAPI's HTTPException (`uv pip install fastapi`).
+On the first run, `uv` automatically creates a virtual environment and installs dependencies. Running the tests requires the following in addition to the base dependencies.
+
+| Dependency | How to specify | Why it is needed |
+|---|---|---|
+| `pytest` | `--extra test` | Test runner |
+| `fastapi` | `--extra api` | Some tests use FastAPI's HTTPException |
+| `httpx` | `--with httpx` | Required by Starlette's `TestClient`, which `tests/test_cli_endpoints.py` uses. It is not included in any `pyproject.toml` extra |
+
+Without `httpx`, the whole run aborts at collection time with `RuntimeError: The starlette.testclient module requires the httpx package to be installed.`
+
+> **Note**: Installing packages individually with `uv pip install` does not persist; they are lost when `uv run` re-syncs the virtual environment. Specify them with `--extra` / `--with` as shown above.
 
 > **Note**: `uv run pytest` may fail with a `Failed to spawn: pytest` error because the entry point script cannot be found. Use `uv run python -m pytest` instead.
 
@@ -42,10 +51,10 @@ No additional dependency installation is required.
 cd server
 
 # Integration tests only
-uv run --extra integration python -m pytest -m integration -v
+uv run --extra integration --extra api --with httpx python -m pytest -m integration -v
 
 # Unit tests + integration tests
-uv run --extra integration python -m pytest -v
+uv run --extra integration --extra api --with httpx python -m pytest -v
 ```
 
 Integration tests are automatically skipped in environments where Docker is not available.

@@ -6,11 +6,20 @@
 
 ```bash
 cd server
-uv run python -m pytest tests/ -v
+uv run --extra test --extra api --with httpx python -m pytest tests/ -v
 ```
 
-初回実行時、`uv` が仮想環境の作成と依存インストールを自動で行う。
-FastAPI の HTTPException を使うテストがあるため `fastapi` も必要（`uv pip install fastapi`）。
+初回実行時、`uv` が仮想環境の作成と依存インストールを自動で行う。テストの実行には基本依存に加えて以下が必要である。
+
+| 依存 | 指定方法 | 必要な理由 |
+|---|---|---|
+| `pytest` | `--extra test` | テストランナー |
+| `fastapi` | `--extra api` | FastAPI の HTTPException を使うテストがあるため |
+| `httpx` | `--with httpx` | `tests/test_cli_endpoints.py` が使う Starlette の `TestClient` が要求するため。`pyproject.toml` の extra には含まれていない |
+
+`httpx` が無い場合、collection 時点で `RuntimeError: The starlette.testclient module requires the httpx package to be installed.` となりテスト全体が中断する。
+
+> **注意**: `uv pip install` で個別にインストールしても、`uv run` が仮想環境を再同期した際に失われる。上記のように `--extra` / `--with` で指定すること。
 
 > **注意**: `uv run pytest` はエントリポイントスクリプトが見つからず `Failed to spawn: pytest` エラーになることがある。`uv run python -m pytest` を使うこと。
 
@@ -40,10 +49,10 @@ cargo test
 cd server
 
 # 統合テストのみ
-uv run --extra integration python -m pytest -m integration -v
+uv run --extra integration --extra api --with httpx python -m pytest -m integration -v
 
 # ユニットテスト + 統合テスト
-uv run --extra integration python -m pytest -v
+uv run --extra integration --extra api --with httpx python -m pytest -v
 ```
 
 Docker が利用できない環境では統合テストは自動的にスキップされる。

@@ -21,8 +21,9 @@
 
 ### Python (server)
 
-- 通常実行: `cd server && uv run python -m pytest tests/ -v`
-- 統合テスト込み（Docker 必須）: `cd server && uv run --extra integration python -m pytest -v`
+- 通常実行: `cd server && uv run --extra test --extra api --with httpx python -m pytest tests/ -v`
+- 統合テスト込み（Docker 必須）: `cd server && uv run --extra integration --extra api --with httpx python -m pytest -v`
+- `--extra test`（pytest）/ `--extra api`（fastapi）/ `--with httpx`（Starlette TestClient）はいずれも省略不可
 - `uv run pytest` ではなくエントリポイント問題を避けるため `uv run python -m pytest` を使う
 
 ### Rust (cli)
