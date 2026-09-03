@@ -57,9 +57,9 @@ cd ctl/ && cargo generate-lockfile && cd ..
 cd server/ && uv lock && cd ..
 ```
 
-### Step 4: Check for Missing Migration Steps
+### Step 4: Check for Missing Migration Procedures
 
-Review the diff from the previous version tag and verify that no migration steps are missing from `docs/migration/unreleased.md`.
+Review the diff from the previous version tag and verify that no migration procedures are missing from `docs/migration/unreleased.md`.
 
 The `/deploy-runbook` skill automates these checks (deriving required work from the diff, cross-checking it against `unreleased.md`, and reporting omissions).
 
@@ -74,7 +74,7 @@ git diff <old-tag>..HEAD -- docs/architecture/kueue.md           # Kueue resourc
 git diff <old-tag>..HEAD -- docs/deployment.md                   # Deployment procedure changes
 ```
 
-If any of the following changes are present, add migration steps to `docs/migration/unreleased.md` (create the file if it does not exist):
+If any of the following changes are present, add migration procedures to `docs/migration/unreleased.md` (create the file if it does not exist):
 
 - ConfigMap key additions or default value changes (need to be reflected in overlay)
 - DB schema changes (requires running `cjobctl db migrate`)
@@ -95,7 +95,7 @@ The deployment cross-check (`/deploy-runbook` skill) uses this to map each secti
 
 ### Step 5: Rename the Migration Guide
 
-If `docs/migration/unreleased.md` contains specific migration steps, update the title at the top of the file, remove the instructions about creating `unreleased.md`, and rename the file to the version name.
+If `docs/migration/unreleased.md` contains specific migration procedures, update the title at the top of the file, remove the instructions about creating `unreleased.md`, and rename the file to the version name.
 
 ```bash
 mv docs/migration/unreleased.md docs/migration/vX.Y.Z.md
@@ -104,16 +104,16 @@ mv docs_en/migration/unreleased.md docs_en/migration/vX.Y.Z.md
 
 **Process the Japanese and English versions the same way.** Dropping the `docs_en/` side leaves the previous version's content sitting in the English `unreleased.md` indefinitely.
 
-Add a `vX.Y.Z` row to the "version-specific migration steps" link list at the end of both `docs/migration.md` and `docs_en/migration.md` (there is no link to `unreleased` to begin with, so this is an addition rather than a replacement). Summarize that version's main migration work in one line.
+Add a `vX.Y.Z` row to the "version-specific migration procedures" link list at the end of both `docs/migration.md` and `docs_en/migration.md` (there is no link to `unreleased` to begin with, so this is an addition rather than a replacement). Summarize that version's main migration work in one line.
 
 After renaming, create a new `docs/migration/unreleased.md` and `docs_en/migration/unreleased.md` using the following template.
 
 ````markdown
-# Unreleased Migration Steps
+# Unreleased Migration Procedures
 
-This file is a working file for migration steps intended for the **next release**. At release time, rename it to the version name (e.g., `v1.11.0.md`) and create a new `unreleased.md` (see [versioning.md](../versioning.md)).
+This file is a working file for migration procedures intended for the **next release**. At release time, rename it to the version name (e.g., `v1.11.0.md`) and create a new `unreleased.md` (see [versioning.md](../versioning.md)).
 
-If there are migration steps specific to the next release in addition to the [standard migration steps](../migration.md), add them below.
+If there are migration procedures specific to the next release in addition to the [standard migration procedures](../migration.md), add them below.
 ````
 
 For the English template, reuse the existing header of `docs_en/migration/unreleased.md` as-is (including the auto-translation notice).

@@ -67,7 +67,7 @@ A job that stays DISPATCHED beyond `WATCHER_DISPATCH_TIMEOUT_SEC` (default 1800 
 - **Rate of requeues**: the Prometheus counter `cjob_jobs_unschedulable_requeued_total` (Watcher's `/metrics`)
 - **Reason for an individual job**: `cjob status <job_id>` records `UNSCHEDULABLE` in `events` and shows the re-dispatch unlock time in `retry_after`
 
-If "Awaiting Placement (Backoff)" is persistently non-zero, suspect a structural reason the per-node bin-packing precheck keeps judging nodes as free (nodes occupied by non-cjob Pods, PVC node affinity, etc.; see [dispatcher.md](architecture/dispatcher.md) §2.6.5).
+If "Awaiting Placement (Backoff)" is persistently non-zero, suspect a structural reason the per-node bin-packing pre-check keeps judging nodes as free (nodes occupied by non-cjob Pods, PVC node affinity, etc.; see [dispatcher.md](architecture/dispatcher.md) §2.6.5).
 
 ### 1.6 Remaining Time for RUNNING Jobs
 

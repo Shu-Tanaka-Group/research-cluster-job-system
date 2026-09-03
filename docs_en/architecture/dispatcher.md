@@ -511,7 +511,7 @@ def apply_gap_filling(
                         ns, c.job_id, c.flavor,
                     )
                     continue
-                # Cumulative tracking: deduct passed job resources
+                # Cumulative tracking: subtract passed job resources
                 flavor_avail["cpu"] -= job_cpu
                 flavor_avail["mem"] -= job_mem
                 flavor_avail["gpu"] -= job_gpu
@@ -597,7 +597,7 @@ For each candidate job, attempt bin-packing against the node remaining capacitie
 1. For the candidate's per-pod resource request (1 pod for normal jobs, `parallelism` pods for sweep jobs), attempt **whether all pods can be placed using least-loaded**
 2. **Normal jobs**: pass if there is a node that can fit 1 pod, otherwise exclude (held in QUEUED)
 3. **Sweep jobs**: pass only if all `parallelism` pods can be placed; exclude if even one cannot be placed. This decision prevents a partial-launch new sweep from conflicting with already-running sweep pod placements
-4. The resources consumed by passed candidates are deducted from the selected node's remaining capacity and reflected in subsequent candidate decisions (intra-cycle cumulative tracking prevents over-dispatch)
+4. The resources consumed by passed candidates are subtracted from the selected node's remaining capacity and reflected in subsequent candidate decisions (intra-cycle cumulative tracking prevents over-dispatch)
 5. If no node corresponding to the candidate's `flavor` exists in `node_resources`, pass through without restriction (e.g., immediately after flavor configuration changes)
 
 #### 2.6.3 Design Decisions

@@ -323,7 +323,7 @@ cjobctl cluster set-quota --flavor gpu-a100 --gpu 4
 
 The specified values are validated against the allocatable totals of the `node_resources` table (only for nodes of the specified flavor). If they exceed the allocatable amount, an error is raised, but it can be overridden with `--force`. The name passed to `--flavor` must match the `metadata.name` of the Kueue ResourceFlavor (also consistent with the value of the DB `node_resources.flavor` column).
 
-The CPU allocatable total is calculated by flooring each node's `cpu_millicores` to integer cores before summing (`SUM((cpu_millicores / 1000) * 1000)`). This is based on the idea that since fractional cores per node (e.g., 0.633 cores left over after deducting DaemonSet Pods) cannot be used due to bin-packing constraints of integer-core jobs, the nominalQuota must be kept at or below "the sum of integer-core portions of each node". Memory and GPU are summed without flooring.
+The CPU allocatable total is calculated by flooring each node's `cpu_millicores` to integer cores before summing (`SUM((cpu_millicores / 1000) * 1000)`). This is based on the idea that since fractional cores per node (e.g., 0.633 cores left over after subtracting DaemonSet Pods) cannot be used due to bin-packing constraints of integer-core jobs, the nominalQuota must be kept at or below "the sum of integer-core portions of each node". Memory and GPU are summed without flooring.
 
 #### `cjobctl cluster set-drf-weight`
 
