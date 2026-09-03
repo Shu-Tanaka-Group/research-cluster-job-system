@@ -42,6 +42,10 @@ enum Commands {
         /// Time limit (e.g. 3600, 1h, 6h, 1d, 3d)
         #[arg(long = "time-limit")]
         time_limit: Option<String>,
+
+        /// Container image for the Job Pod (overrides the flavor default)
+        #[arg(long)]
+        image: Option<String>,
     },
     /// Submit a parameter sweep
     Sweep {
@@ -72,6 +76,10 @@ enum Commands {
         /// ResourceFlavor name (e.g. "cpu", "gpu-a100")
         #[arg(long)]
         flavor: Option<String>,
+
+        /// Container image for the Job Pod (overrides the flavor default)
+        #[arg(long)]
+        image: Option<String>,
 
         /// Command (specify after --)
         #[arg(trailing_var_arg = true, required = true)]
@@ -155,6 +163,10 @@ enum Commands {
         /// ResourceFlavor name (e.g. "cpu-sub", "gpu-a100")
         #[arg(long)]
         flavor: Option<String>,
+
+        /// Container image for the Job Pod
+        #[arg(long)]
+        image: Option<String>,
 
         /// Time limit (e.g. 3600, 1h, 6h, 1d, 3d)
         #[arg(long = "time-limit")]
@@ -305,7 +317,8 @@ async fn main() -> Result<()> {
             gpu,
             flavor,
             time_limit,
-        } => cmd_add(&api_client, command, cpu, memory, gpu, flavor, time_limit).await,
+            image,
+        } => cmd_add(&api_client, command, cpu, memory, gpu, flavor, time_limit, image).await,
         Commands::Sweep {
             count,
             parallel,
@@ -314,8 +327,9 @@ async fn main() -> Result<()> {
             memory,
             gpu,
             flavor,
+            image,
             command,
-        } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, gpu, flavor, time_limit).await,
+        } => cmd_sweep(&api_client, command, count, parallel, cpu, memory, gpu, flavor, time_limit, image).await,
         Commands::List { status, flavor, time_limit, format, limit, reverse, all } => {
             let (time_limit_ge, time_limit_lt) = match time_limit {
                 Some(ref s) => parse_time_limit_range(s)?,
@@ -327,8 +341,8 @@ async fn main() -> Result<()> {
         Commands::Cancel { job_ids } => cmd_cancel(&api_client, &job_ids).await,
         Commands::Hold { job_ids, all } => cmd_hold(&api_client, job_ids, all).await,
         Commands::Release { job_ids, all } => cmd_release(&api_client, job_ids, all).await,
-        Commands::Set { job_ids, cpu, memory, gpu, flavor, time_limit } => {
-            cmd_set(&api_client, &job_ids, cpu, memory, gpu, flavor, time_limit).await
+        Commands::Set { job_ids, cpu, memory, gpu, flavor, image, time_limit } => {
+            cmd_set(&api_client, &job_ids, cpu, memory, gpu, flavor, image, time_limit).await
         },
         Commands::Delete { job_ids, all } => cmd_delete(&api_client, job_ids, all).await,
         Commands::Usage => cmd_usage(&api_client).await,
@@ -418,6 +432,30 @@ fn parse_time_limit_range(s: &str) -> Result<(Option<u32>, Option<u32>)> {
     Ok((ge, lt))
 }
 
+/// Pick the submitting pod's image from the two environment variables.
+///
+/// `CJOB_IMAGE` wins; `JUPYTER_IMAGE` is the JupyterHub-injected fallback.
+/// An empty value counts as unset.
+fn pick_fallback_image(cjob_image: Option<String>, jupyter_image: Option<String>) -> Option<String> {
+    let non_empty = |v: String| if v.is_empty() { None } else { Some(v) };
+    cjob_image
+        .and_then(non_empty)
+        .or_else(|| jupyter_image.and_then(non_empty))
+}
+
+/// Read the submitting pod's own image from the environment.
+///
+/// This is sent as `fallback_image` and is the lowest-priority source: the
+/// Submit API prefers `--image` and the flavor default over it. Returning None
+/// is not an error, because the flavor default may still resolve the image.
+/// See docs/architecture/cli.md section 4.
+fn submitting_pod_image() -> Option<String> {
+    pick_fallback_image(
+        std::env::var("CJOB_IMAGE").ok(),
+        std::env::var("JUPYTER_IMAGE").ok(),
+    )
+}
+
 async fn cmd_add(
     client: &client::CjobClient,
     command: Vec<String>,
@@ -426,18 +464,13 @@ async fn cmd_add(
     gpu: u32,
     flavor: Option<String>,
     time_limit: Option<String>,
+    image: Option<String>,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?
         .to_string_lossy()
         .to_string();
 
-    let image = std::env::var("CJOB_IMAGE")
-        .or_else(|_| std::env::var("JUPYTER_IMAGE"))
-        .unwrap_or_default();
-
-    if image.is_empty() {
-        anyhow::bail!("CJOB_IMAGE or JUPYTER_IMAGE environment variable is not set");
-    }
+    let fallback_image = submitting_pod_image();
 
     // Collect exported environment variables, filtering by user config
     let user_config = config::load()?;
@@ -453,6 +486,7 @@ async fn cmd_add(
     let req = client::JobSubmitRequest {
         command: cmd_str,
         image,
+        fallback_image,
         cwd,
         env,
         resources: client::ResourceSpec {
@@ -479,18 +513,13 @@ async fn cmd_sweep(
     gpu: u32,
     flavor: Option<String>,
     time_limit: Option<String>,
+    image: Option<String>,
 ) -> Result<()> {
     let cwd = std::env::current_dir()?
         .to_string_lossy()
         .to_string();
 
-    let image = std::env::var("CJOB_IMAGE")
-        .or_else(|_| std::env::var("JUPYTER_IMAGE"))
-        .unwrap_or_default();
-
-    if image.is_empty() {
-        anyhow::bail!("CJOB_IMAGE or JUPYTER_IMAGE environment variable is not set");
-    }
+    let fallback_image = submitting_pod_image();
 
     // Collect exported environment variables, filtering by user config
     let user_config = config::load()?;
@@ -512,6 +541,7 @@ async fn cmd_sweep(
     let req = client::SweepSubmitRequest {
         command: cmd_str,
         image,
+        fallback_image,
         cwd,
         env,
         resources: client::ResourceSpec {
@@ -698,11 +728,18 @@ async fn cmd_set(
     memory: Option<String>,
     gpu: Option<u32>,
     flavor: Option<String>,
+    image: Option<String>,
     time_limit: Option<String>,
 ) -> Result<()> {
-    if cpu.is_none() && memory.is_none() && gpu.is_none() && flavor.is_none() && time_limit.is_none() {
+    if cpu.is_none()
+        && memory.is_none()
+        && gpu.is_none()
+        && flavor.is_none()
+        && image.is_none()
+        && time_limit.is_none()
+    {
         anyhow::bail!(
-            "specify at least one parameter to modify (--cpu, --memory, --gpu, --flavor, --time-limit)"
+            "specify at least one parameter to modify (--cpu, --memory, --gpu, --flavor, --image, --time-limit)"
         );
     }
 
@@ -719,6 +756,7 @@ async fn cmd_set(
             memory,
             gpu,
             flavor,
+            image,
             time_limit_seconds,
         };
         let resp = client.set_single(ids[0], &params).await?;
@@ -727,6 +765,11 @@ async fn cmd_set(
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
         println!("Job {}: {}", ids[0], status);
+        // Only present when the image actually changed (e.g. a --flavor change
+        // re-resolved it to the new flavor's default).
+        if let Some(new_image) = resp.get("image").and_then(|v| v.as_str()) {
+            println!("image: {}", new_image);
+        }
     } else {
         let req = client::SetRequest {
             job_ids: ids,
@@ -734,6 +777,7 @@ async fn cmd_set(
             memory,
             gpu,
             flavor,
+            image,
             time_limit_seconds,
         };
         let resp = client.set_bulk(&req).await?;
@@ -745,6 +789,9 @@ async fn cmd_set(
         }
         if !resp.not_found.is_empty() {
             println!("Not found: {:?}", resp.not_found);
+        }
+        if let Some(ref new_image) = resp.image {
+            println!("image: {}", new_image);
         }
     }
     Ok(())
@@ -1051,11 +1098,22 @@ async fn cmd_update_list(
 async fn cmd_flavor_list(client: &client::CjobClient) -> Result<()> {
     let resp = client.get_flavors().await?;
 
-    println!("{:<16} {:<6} {:<8} {}", "NAME", "GPU", "NODES", "DEFAULT");
+    println!(
+        "{:<16} {:<6} {:<8} {:<34} {}",
+        "NAME", "GPU", "NODES", "IMAGE", "DEFAULT"
+    );
     for f in &resp.flavors {
         let gpu = if f.has_gpu { "yes" } else { "-" };
+        let image = f.image.as_deref().unwrap_or("-");
         let default_marker = if f.name == resp.default_flavor { "  *" } else { "" };
-        println!("{:<16} {:<6} {:<8} {}", f.name, gpu, f.nodes.len(), default_marker);
+        println!(
+            "{:<16} {:<6} {:<8} {:<34} {}",
+            f.name,
+            gpu,
+            f.nodes.len(),
+            image,
+            default_marker
+        );
     }
     Ok(())
 }
@@ -1104,6 +1162,7 @@ async fn cmd_flavor_info(client: &client::CjobClient, name: &str) -> Result<()> 
 
     println!("name:   {}", flavor.name);
     println!("GPU:    {}", if flavor.has_gpu { "yes" } else { "no" });
+    println!("image:  {}", flavor.image.as_deref().unwrap_or("-"));
 
     let quota = match &flavor.quota {
         Some(q) => q,
@@ -1267,6 +1326,42 @@ fn replace_binary(binary: &[u8]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::pick_fallback_image;
+
+    #[test]
+    fn test_pick_fallback_image_prefers_cjob_image() {
+        assert_eq!(
+            pick_fallback_image(Some("a:1".to_string()), Some("b:1".to_string())),
+            Some("a:1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_pick_fallback_image_falls_back_to_jupyter_image() {
+        assert_eq!(
+            pick_fallback_image(None, Some("b:1".to_string())),
+            Some("b:1".to_string())
+        );
+    }
+
+    #[test]
+    fn test_pick_fallback_image_treats_empty_as_unset() {
+        assert_eq!(
+            pick_fallback_image(Some(String::new()), Some("b:1".to_string())),
+            Some("b:1".to_string())
+        );
+        assert_eq!(
+            pick_fallback_image(Some(String::new()), Some(String::new())),
+            None
+        );
+    }
+
+    #[test]
+    fn test_pick_fallback_image_none_when_both_unset() {
+        // Not an error: the flavor default may still resolve the image.
+        assert_eq!(pick_fallback_image(None, None), None);
+    }
+
     use super::*;
 
     #[test]

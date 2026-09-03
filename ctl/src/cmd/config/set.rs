@@ -109,7 +109,7 @@ fn validate_value(meta: &ConfigKeyMeta, value: &str) -> Result<String> {
 /// This list is the CLI-side mirror of the schema in
 /// `docs/architecture/resources.md`; keep both in sync with the server-side
 /// `FlavorDefinition` (which sets `extra="forbid"`).
-const FLAVOR_FIELDS: &[&str] = &["name", "label_selector", "gpu_resource_name"];
+const FLAVOR_FIELDS: &[&str] = &["name", "label_selector", "gpu_resource_name", "image"];
 
 /// Structurally validate a `RESOURCE_FLAVORS` value and return the flavor
 /// names in definition order.
@@ -148,16 +148,18 @@ fn validate_resource_flavors(value: &str) -> Result<Vec<String>> {
             }
         }
 
-        match obj.get("gpu_resource_name") {
-            None => {}
-            Some(v) if v.is_null() => {}
-            Some(v) => match v.as_str() {
-                None => errors.push(format!("flavors[{}]: 'gpu_resource_name' must be a string", i)),
-                Some("") => {
-                    errors.push(format!("flavors[{}]: 'gpu_resource_name' must not be empty", i))
-                }
-                Some(_) => {}
-            },
+        for field in ["gpu_resource_name", "image"] {
+            match obj.get(field) {
+                None => {}
+                Some(v) if v.is_null() => {}
+                Some(v) => match v.as_str() {
+                    None => errors.push(format!("flavors[{}]: '{}' must be a string", i, field)),
+                    Some("") => {
+                        errors.push(format!("flavors[{}]: '{}' must not be empty", i, field))
+                    }
+                    Some(_) => {}
+                },
+            }
         }
 
         for key in obj.keys() {
@@ -519,6 +521,36 @@ mod tests {
     fn empty_gpu_resource_name_is_rejected() {
         let err = errors_of(r#"[{"name": "gpu", "label_selector": "k=gpu", "gpu_resource_name": ""}]"#);
         assert!(err.contains("'gpu_resource_name' must not be empty"), "{}", err);
+    }
+
+    #[test]
+    fn image_is_accepted() {
+        let value = r#"[
+            {"name": "cpu", "label_selector": "k=cpu"},
+            {"name": "gpu", "label_selector": "k=gpu", "image": "registry/cuda:1.0"}
+        ]"#;
+        assert_eq!(validate_resource_flavors(value).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn image_may_be_omitted_or_null() {
+        let value = r#"[
+            {"name": "cpu", "label_selector": "k=cpu"},
+            {"name": "gpu", "label_selector": "k=gpu", "image": null}
+        ]"#;
+        assert_eq!(validate_resource_flavors(value).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn empty_image_is_rejected() {
+        let err = errors_of(r#"[{"name": "gpu", "label_selector": "k=gpu", "image": ""}]"#);
+        assert!(err.contains("'image' must not be empty"), "{}", err);
+    }
+
+    #[test]
+    fn non_string_image_is_rejected() {
+        let err = errors_of(r#"[{"name": "gpu", "label_selector": "k=gpu", "image": 42}]"#);
+        assert!(err.contains("'image' must be a string"), "{}", err);
     }
 
     #[test]

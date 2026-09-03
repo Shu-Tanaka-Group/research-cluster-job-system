@@ -117,6 +117,7 @@ pub fn print_job_detail(job: &JobDetailResponse) {
     println!("status:        {}", job.status);
     println!("command:       {}", job.command);
     println!("cwd:           {}", job.cwd);
+    println!("image:         {}", job.image);
     println!("flavor:        {}", job.flavor);
     println!("cpu:           {}", job.cpu);
     println!("memory:        {}", job.memory);
@@ -210,6 +211,7 @@ mod tests {
             namespace: "user-test".to_string(),
             command: "echo hello".to_string(),
             cwd: "/home/jovyan".to_string(),
+            image: "test:1.0".to_string(),
             cpu: "1".to_string(),
             memory: "1Gi".to_string(),
             gpu: 0,
@@ -288,6 +290,7 @@ mod tests {
             namespace: "user-test".to_string(),
             command: "python main.py --trial $CJOB_INDEX".to_string(),
             cwd: "/home/jovyan/project-a".to_string(),
+            image: "test:1.0".to_string(),
             cpu: "2".to_string(),
             memory: "4Gi".to_string(),
             gpu: 0,

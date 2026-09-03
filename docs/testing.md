@@ -89,15 +89,15 @@ Docker が利用できない環境では統合テストは自動的にスキッ�
 | **Rust** | | | |
 | `src/job_ids.rs` | `parse_job_ids` | 7 | ジョブ ID 式のパース（単体 / 範囲 / リスト / 組み合わせ / 重複除去 / エラー） |
 | `src/config.rs` | ユーザー設定ファイル | 10 | 設定ファイルの読み書き・環境変数除外リストの操作 |
-| `src/main.rs` | `parse_duration` / `parse_time_limit_range` / `shell_quote` 等 | 35 | 時間指定のパース（秒数 / s / m / h / d サフィックス / 空白 / 不正値 / オーバーフロー）/ time_limit 範囲指定のパース（h / m / d / 混合単位 / 秒数 / 片端省略 / コロンなし / 空範囲 / 不正値 / 下限≧上限エラー） |
+| `src/main.rs` | `parse_duration` / `parse_time_limit_range` / `shell_quote` / `pick_fallback_image` 等 | 39 | 時間指定のパース（秒数 / s / m / h / d サフィックス / 空白 / 不正値 / オーバーフロー）/ time_limit 範囲指定のパース（h / m / d / 混合単位 / 秒数 / 片端省略 / コロンなし / 空範囲 / 不正値 / 下限≧上限エラー）/ 投入 Pod イメージの取得（`CJOB_IMAGE` 優先 / `JUPYTER_IMAGE` フォールバック / 空文字の未設定扱い / 両方未設定時の None） |
 | `src/display.rs` | `format_duration` / `format_time_limit` | 16 | 時間表示フォーマット（日 / 時間 / 分）/ RUNNING 時の残り時間計算 / 非 RUNNING / 不正日付のフォールバック |
 | **Rust (cjobctl)** | | | |
 | `src/cmd/cli_deploy.rs` | `run`（バリデーション） | 4 | --release + プレリリースのエラー / 安定版・プレリリース × release フラグのバリデーション順序 |
 | `src/cmd/cli_list.rs` | `parse_versions` / `sort_versions` | 9 | ls 出力パース（latest 除外 / 空入力 / パース不能エントリ）/ ソート（降順 / プレリリース優先 / 設計書出力例の再現） |
 | `src/cmd/cli_set_latest.rs` | `run`（バリデーション） | 2 | プレリリース版の拒否（beta / rc） |
-| `src/cmd/config/set.rs` | `validate_resource_flavors` / `validate_against_configmap` | 26 | `RESOURCE_FLAVORS` の構造バリデーション。正常系（名前順の返却・`gpu_resource_name` 省略/null・ConfigMap の複数行値）/ 不正 JSON / 非配列 / 空配列 / 非オブジェクト要素 / 必須フィールド欠落・空文字・非文字列 / `gpu_resource_name` 空文字 / 未知フィールド / `name` 重複 / `label_selector` 形式（`=` なし・`=` 2 個・片辺が空）/ 全違反のまとめ報告。`DEFAULT_FLAVOR` との整合（`RESOURCE_FLAVORS` 設定時の一致・不一致・未設定時の警告・前後空白の無視、`DEFAULT_FLAVOR` 設定時の一致・不一致・`RESOURCE_FLAVORS` 未設定/破損時の警告スキップ）/ 対象外キーの素通り |
+| `src/cmd/config/set.rs` | `validate_resource_flavors` / `validate_against_configmap` | 30 | `RESOURCE_FLAVORS` の構造バリデーション。正常系（名前順の返却・`gpu_resource_name` 省略/null・`image` 指定/省略/null・ConfigMap の複数行値）/ 不正 JSON / 非配列 / 空配列 / 非オブジェクト要素 / 必須フィールド欠落・空文字・非文字列 / `gpu_resource_name` 空文字 / `image` 空文字・非文字列 / 未知フィールド / `name` 重複 / `label_selector` 形式（`=` なし・`=` 2 個・片辺が空）/ 全違反のまとめ報告。`DEFAULT_FLAVOR` との整合（`RESOURCE_FLAVORS` 設定時の一致・不一致・未設定時の警告・前後空白の無視、`DEFAULT_FLAVOR` 設定時の一致・不一致・`RESOURCE_FLAVORS` 未設定/破損時の警告スキップ）/ 対象外キーの素通り |
 
-**合計: Python 515 + Python 統合 33 + Rust (cli) 68 + Rust (cjobctl) 54 = 670 テスト**
+**合計: Python 515 + Python 統合 33 + Rust (cli) 72 + Rust (cjobctl) 58 = 678 テスト**
 
 ### 未テスト
 
