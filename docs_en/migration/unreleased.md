@@ -6,6 +6,14 @@ This file is a working document describing migration procedures for the **next r
 
 If there are migration procedures specific to the next release in addition to the [standard migration procedures](../migration.md), append them below.
 
+## Deployment Order (Watcher Before Dispatcher)
+
+Time limit enforcement moved from the Dispatcher (setting `activeDeadlineSeconds`) to the Watcher (enforcement measured from `started_at`), so **the Watcher must be deployed before the Dispatcher**.
+
+In the reverse order, the Dispatcher would create Jobs without `activeDeadlineSeconds` while the Watcher-side enforcement is not yet active, leaving jobs submitted during that window with no time limit at all.
+
+Following the deployment order in the [standard migration procedures](../migration.md) (`watcher` → `dispatcher` → `submit-api`) is sufficient.
+
 ## Old Behavior Remaining for Jobs Running at Rollout Time
 
 The time limit enforcement mechanism changed from the K8s Job's `activeDeadlineSeconds` to Watcher-side enforcement measured from `started_at` (see [watcher.md](../architecture/watcher.md) §3 Step 9).

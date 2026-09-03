@@ -4,6 +4,14 @@
 
 [標準移行手順](../migration.md) に加えて次回リリース固有の移行手順がある場合は以下に追記する。
 
+## デプロイ順序（Watcher を Dispatcher より先に）
+
+制限時間の強制が Dispatcher（`activeDeadlineSeconds` の付与）から Watcher（`started_at` 起点の強制）へ移ったため、**Watcher を Dispatcher より先にデプロイすること**。
+
+逆順にすると、Dispatcher が `activeDeadlineSeconds` を付けない Job を作成する一方で Watcher 側の強制がまだ有効になっておらず、その間に投入されたジョブは制限時間が一切効かない状態になる。
+
+[標準移行手順](../migration.md) のデプロイ順序（`watcher` → `dispatcher` → `submit-api`）どおりに実施すれば問題ない。
+
 ## ロールアウト時に実行中のジョブに残る旧挙動
 
 制限時間の強制方式が K8s Job の `activeDeadlineSeconds` から Watcher による `started_at` 起点の強制に変更された（[watcher.md](../architecture/watcher.md) §3 ステップ 9 参照）。
