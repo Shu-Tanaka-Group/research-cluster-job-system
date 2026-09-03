@@ -85,6 +85,15 @@ ResourceQuota と ClusterQueue nominalQuota の違い：ResourceQuota は User P
 
 隙間充填の詳細は [dispatcher.md](dispatcher.md) §2.4 を参照。
 
+### DISPATCHED 滞留ガードに関する設定
+
+| 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
+|---|---|---|---|---|---|
+| `WATCHER_DISPATCH_TIMEOUT_SEC` | ConfigMap | 1800 (30分) | Watcher | ジョブごと | DISPATCHED からの経過秒数がこの値を超えても RUNNING に遷移しないジョブを配置不能とみなし、K8s Job を削除して QUEUED に差し戻す。`GAP_FILLING_STALL_THRESHOLD_SEC`（300 秒）より十分に長く設定する |
+| `WATCHER_DISPATCH_BACKOFF_MAX_SEC` | ConfigMap | 7200 (2時間) | Watcher | ジョブごと | 差し戻し時に設定する `retry_after` の指数バックオフの上限秒数 |
+
+DISPATCHED 滞留ガードの詳細は [watcher.md](watcher.md) §3 ステップ 10 を参照。
+
 ### per-node bin-packing プレチェックに関する設定
 
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |

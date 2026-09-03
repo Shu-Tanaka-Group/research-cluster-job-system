@@ -259,6 +259,7 @@ In the current configuration (2 nodes, ~10 users), the polling approach provides
 | Large jobs stall in Kueue (starvation) | Gap-filling feature handles this automatically (already implemented, see [dispatcher.md](dispatcher.md) §2.4). Adjust the detection threshold via `GAP_FILLING_STALL_THRESHOLD_SEC` |
 | Jobs stagnate in DISPATCHED due to insufficient ResourceQuota | ResourceQuota precheck handles this automatically (already implemented, see [dispatcher.md](dispatcher.md) §2.5). Adjust the sync interval via `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` |
 | Jobs stagnate in DISPATCHED because they fit total quota but cannot be placed on any single node | per-node bin-packing precheck handles this automatically (already implemented, see [dispatcher.md](dispatcher.md) §2.6). Toggle on/off via `NODE_BIN_PACKING_ENABLED` |
+| A job that slipped past the prechecks stagnates in DISPATCHED for a long time and holds quota | The Watcher's DISPATCHED stall guard handles this automatically (already implemented, see [watcher.md](watcher.md) §3 Step 10). Tune the stall tolerance via `WATCHER_DISPATCH_TIMEOUT_SEC` and the backoff ceiling via `WATCHER_DISPATCH_BACKOFF_MAX_SEC` |
 | K8s API load becomes a problem | Consider adopting the Informer pattern (§3.3) |
 | Want to understand cluster utilization | Grafana monitoring dashboard (see [monitoring.md](monitoring.md), already implemented). Visualizes CPU/GPU reservation rates, count of jobs waiting for resource allocation, and estimated wait times |
 
@@ -281,6 +282,7 @@ In the current configuration (2 nodes, ~10 users), the polling approach provides
 | count/jobs.batch (ResourceQuota) | 50 |
 | FAIR_SHARE_WINDOW_DAYS | 7 days |
 | GAP_FILLING_STALL_THRESHOLD_SEC | 300 seconds (5 minutes) |
+| WATCHER_DISPATCH_TIMEOUT_SEC | 1800 seconds (30 minutes) |
 | NODE_RESOURCE_SYNC_INTERVAL_SEC | 300 seconds (5 minutes) |
 | RESOURCE_QUOTA_SYNC_INTERVAL_SEC | 10 seconds |
 

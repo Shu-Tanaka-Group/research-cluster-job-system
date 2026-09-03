@@ -70,6 +70,7 @@ Submit API と Watcher は Prometheus カウンターメトリクスを提供す
 |---|---|---|---|---|
 | `cjob_jobs_submitted_total` | Counter | — | Submit API | ジョブ投入数（`submit_job` / `submit_sweep` 成功時に increment） |
 | `cjob_jobs_completed_total` | Counter | `status` | Watcher / Submit API | ジョブ完了数。`status` は `succeeded` / `failed` / `cancelled` |
+| `cjob_jobs_unschedulable_requeued_total` | Counter | — | Watcher | DISPATCHED 滞留ガードがジョブを QUEUED に差し戻した回数（[watcher.md](watcher.md) §3 ステップ 10）。増加が続く場合はクラスタ側に配置不能の構造的要因がある |
 
 `cjob_jobs_completed_total` の計装箇所:
 - `succeeded` / `failed`: Watcher の `reconcile_cycle()` でステータス遷移時
@@ -127,6 +128,7 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
 | Flavor 別キュー使用状況 | Table | PostgreSQL | flavor ごとの実行中・リソース割当待ち・投入済み・保留中ジョブ数 |
+| 配置待ちバックオフ中 | Stat | PostgreSQL | DISPATCHED 滞留ガードで差し戻され `retry_after` が未来のジョブ数 |
 | キュー内ジョブ数の推移 | Time series | Prometheus | 実行中（admitted_active）とリソース割当待ち（pending）の推移 |
 | ジョブ投入・完了の推移 | Time series (line) | Prometheus | 時間帯別の投入数と完了数 |
 
@@ -183,7 +185,7 @@ Kueue v0.16.4 では `resource.Quantity.AsApproximateFloat64()` で変換され�
 
 | 内部状態 | UI 表記 | 備考 |
 |---|---|---|
-| QUEUED | 投入済み | cjob に投入済みで Dispatcher の処理を待っている状態 |
+| QUEUED | 投入済み | cjob に投入済みで Dispatcher の処理を待っている状態。DISPATCHED 滞留ガードで差し戻されたジョブもこの状態に含まれる（[watcher.md](watcher.md) §3 ステップ 10） |
 | DISPATCHING | （表示しない） | 通常 1 秒未満の過渡状態。滞留はユーザー向けの指標ではなく、管理者向け Prometheus アラートで検知する |
 | DISPATCHED | リソース割当待ち（piechart では「割当待ち」と短縮） | K8s/Kueue に登録済みで admission を待っている状態。ClusterQueue の nominalQuota に空きができ次第実行される |
 | RUNNING | 実行中 | |
@@ -198,6 +200,7 @@ Kueue v0.16.4 では `resource.Quantity.AsApproximateFloat64()` で変換され�
 | ジョブ状態の内訳 piechart（Row 2） | QUEUED / DISPATCHED / RUNNING / HELD / 終了系 | 直近 24 時間の全体俯瞰（DISPATCHING のみ除外） |
 | Flavor 別キュー使用状況（Row 3） | QUEUED / DISPATCHED / RUNNING / HELD | Flavor ごとのキュー状態の内訳 |
 | キュー内ジョブ数の推移（Row 3） | `kueue_admitted_active_workloads` と `kueue_pending_workloads`（≒ DISPATCHED） | リソース競合の推移 |
+| 配置待ちバックオフ中（Row 3） | QUEUED かつ `unschedulable_count > 0` かつ `retry_after > NOW()` | 配置不能で差し戻されたジョブの滞留把握 |
 
 **リソース競合指標（Row 1 / Row 3 時系列）で QUEUED を除外する理由**:
 
@@ -340,6 +343,13 @@ WHERE status IN ('RUNNING', 'DISPATCHED', 'QUEUED', 'HELD')
 GROUP BY flavor
 ORDER BY flavor;
 
+-- 配置待ちバックオフ中のジョブ数（DISPATCHED 滞留ガードで差し戻されたジョブ）
+SELECT COUNT(*) AS "バックオフ中"
+FROM jobs
+WHERE status = 'QUEUED'
+  AND unschedulable_count > 0
+  AND retry_after > NOW();
+
 -- クラスタノード数
 SELECT COUNT(*) AS "ノード数" FROM node_resources;
 ```
@@ -360,3 +370,4 @@ Import 時にデータソースの UID を環境に合わせて設定する必�
 - Kueue メトリクスはコントローラの再起動直後にリセットされるため、一時的にデータが欠落する。ダッシュボードの time range を適切に設定すれば影響は軽微
 - PostgreSQL クエリはインデックスを活用している（`idx_jobs_namespace_status`）。大量のジョブ蓄積（数十万件以上）がある場合はクエリパフォーマンスに注意
 - `node_resources` テーブルは Watcher が 300 秒間隔で同期するため、ノード追加/削除の反映に最大 5 分の遅延がある
+- 「配置待ちバックオフ中」が常時 0 でない場合、per-node bin-packing プレチェックの誤判定が構造的に続いている可能性がある（cjob 以外の Pod によるノード占有等）。`cjob_jobs_unschedulable_requeued_total` の増加率と併せて確認する（[dispatcher.md](dispatcher.md) §2.6.5 参照）

@@ -66,6 +66,10 @@ def run():
                 session,
                 k8s_jobs,
                 dispatch_grace_sec=settings.WATCHER_DISPATCH_GRACE_SEC,
+                dispatch_timeout_sec=settings.WATCHER_DISPATCH_TIMEOUT_SEC,
+                dispatch_backoff_max_sec=(
+                    settings.WATCHER_DISPATCH_BACKOFF_MAX_SEC
+                ),
             )
             session.commit()
         except Exception:

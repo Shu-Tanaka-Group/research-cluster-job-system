@@ -46,6 +46,8 @@ const CONFIG_KEYS: &[ConfigKeyMeta] = &[
     // Watcher
     ConfigKeyMeta { key: "WATCHER_K8S_LIST_PAGE_SIZE", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "WATCHER_DISPATCH_GRACE_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
+    ConfigKeyMeta { key: "WATCHER_DISPATCH_TIMEOUT_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
+    ConfigKeyMeta { key: "WATCHER_DISPATCH_BACKOFF_MAX_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "CLUSTER_QUEUE_NAME", value_type: ValueType::String, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "RESOURCE_QUOTA_NAME", value_type: ValueType::String, components: &["watcher"], updatable: true },
     ConfigKeyMeta { key: "RESOURCE_QUOTA_SYNC_INTERVAL_SEC", value_type: ValueType::Integer, components: &["watcher"], updatable: true },

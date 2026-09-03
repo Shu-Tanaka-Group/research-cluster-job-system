@@ -497,3 +497,31 @@ exclude = [
 ```
 
 If the configuration file does not exist or nothing has been configured, default values (empty list) are displayed.
+
+## 9. When a Job Does Not Start
+
+A job may stay in `QUEUED` (waiting) or `DISPATCHED` (awaiting resource allocation) for a long time. Usually the cluster is simply busy, but the history shown by `cjob status` helps narrow down the reason.
+
+```bash
+cjob status 12
+```
+
+```
+job_id:        12
+status:        QUEUED
+...
+retry_count:   0
+retry_after:   2026-04-14 12:05:30
+events:
+  2026-04-14 11:20:25  DISPATCHED
+  2026-04-14 11:50:30  UNSCHEDULABLE
+```
+
+`UNSCHEDULABLE` means that no free node could be found on the cluster side, the job kept waiting without starting, and the system therefore put it back in the queue. The job has not been lost: once the time shown in `retry_after` passes, execution is attempted again automatically.
+
+- You do not need to do anything; execution starts as soon as the cluster has room
+- If `UNSCHEDULABLE` is recorded repeatedly, the resources you requested (`--cpu` / `--memory` / `--gpu`) may be too large to fit on a single node. Reducing the request can make execution start sooner
+- If you no longer want to wait, cancel the job with `cjob cancel <job_id>`
+
+If `retry_after` is shown but the history says `RETRY` or `DEFERRED`, it is a transient wait of tens of seconds and the job will run if you simply wait.
+

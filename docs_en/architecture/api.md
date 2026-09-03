@@ -326,7 +326,7 @@ Retrieve the details of an individual job.
 
 `node_name` is a list of node names used for job execution (`list[str] | null`). The Watcher cumulatively records these when transitioning to RUNNING and when sweep progress changes. For unstarted jobs such as QUEUED / DISPATCHED, this is `null`. For normal jobs, it is a single-element list; for sweep jobs, it is a list of all nodes used.
 
-`retry_count` is the dispatcher's transient K8s API retry count ([dispatcher.md](dispatcher.md) §2.4). `retry_after` is the timestamp when the next dispatch attempt becomes eligible (`str | null`, RFC3339). Either a K8s transient error retry or a ResourceQuota DEFERRED event may set it.
+`retry_count` is the dispatcher's transient K8s API retry count ([dispatcher.md](dispatcher.md) §2.4). `retry_after` is the timestamp when the next dispatch attempt becomes eligible (`str | null`, RFC3339). A K8s transient error retry, a ResourceQuota DEFERRED event, or a requeue by the DISPATCHED stall guard ([watcher.md](watcher.md) §3 Step 10) may all set it. A requeue by the stall guard appears in `events` as `UNSCHEDULABLE`, so the reason a job with a future `retry_after` has not started yet can be read from its most recent events.
 
 `events` returns the most recent job_events in chronological ascending order (old → new), up to 10 entries. Each element contains only `event_type` and `created_at`; `payload_json` is not included in the response. `earlier_events_count` is "the number of older events not included in the response"; a value of 0 means no truncation has occurred. If the job has no events at all, `events=[]` and `earlier_events_count=0` are returned.
 

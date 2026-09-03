@@ -335,16 +335,23 @@ Kueue の `BestEffortFIFO` は、先頭のジョブが admit できない場合�
 
 #### 2.4.2 滞留ジョブの検知
 
-DISPATCHED 状態のまま `GAP_FILLING_STALL_THRESHOLD_SEC`（デフォルト 300 秒 = 5 分）以上経過したジョブを「滞留ジョブ」とみなす。
+DISPATCHED 状態のまま `GAP_FILLING_STALL_THRESHOLD_SEC`（デフォルト 300 秒 = 5 分）以上経過したジョブ、および DISPATCHED 滞留ガードで差し戻されバックオフ待機中のジョブを「滞留ジョブ」とみなす。
 
 ```sql
 SELECT namespace, job_id
 FROM jobs
-WHERE status = 'DISPATCHED'
-  AND dispatched_at <= NOW() - MAKE_INTERVAL(secs => :threshold)
+WHERE (status = 'DISPATCHED'
+       AND dispatched_at <= NOW() - MAKE_INTERVAL(secs => :threshold))
+   OR (status = 'QUEUED'
+       AND unschedulable_count > 0
+       AND retry_after > NOW())
 ```
 
 滞留ジョブは「Kueue に渡されたがリソース不足で admit されていないジョブ」を意味する。通常のジョブは DISPATCHED から数秒〜数十秒で RUNNING に遷移するため、閾値を超えた場合はリソース不足で待機していると判断できる。
+
+**バックオフ待機中のジョブを含める理由:** Watcher の DISPATCHED 滞留ガード（[watcher.md](watcher.md) §3 ステップ 10）は、`WATCHER_DISPATCH_TIMEOUT_SEC` を超えて DISPATCHED に留まったジョブを K8s Job 削除の上で `QUEUED` に差し戻し、`retry_after` に指数バックオフを設定する。差し戻されたジョブは `status = 'DISPATCHED'` の条件から外れるため、第 1 の条件だけでは滞留の検知が途切れる。その結果、バックオフ待機中は隙間充填が発動せず、同一 `(namespace, flavor)` の小さいジョブが大型ジョブを追い越し続ける（§2.4.1 で対策した starvation の退行）。第 2 の条件により、滞留の実体が続いている間は差し戻し後も隙間充填が継続する。
+
+`unschedulable_count > 0` を条件に含めるのは、`retry_after` が K8s API 一時障害の `RETRY` や ResourceQuota race の `DEFERRED` でも設定されるためである（[database.md](database.md) §1 参照）。これらは数十秒で解消する一時的な差し戻しであり、リソース不足による滞留とは意味が異なるため、隙間充填のトリガーには含めない。
 
 閾値が短すぎると Kueue の通常処理中のジョブも滞留扱いになる。閾値が長すぎると対策の発動が遅れる。5 分はクラスタの通常動作を考慮した保守的な値である。
 
@@ -521,7 +528,7 @@ def apply_gap_filling(
 
 ### 2.5 ResourceQuota プレチェック
 
-Dispatcher は dispatch 候補に対して namespace の ResourceQuota 残リソースを確認し、不足しているジョブを候補から除外する（QUEUED に留める）。これにより、JupyterHub 等の User Pod が ResourceQuota を圧迫している場合に、ジョブが DISPATCHED のまま滞留して最終的に時間切れで FAILED になることを防ぐ。
+Dispatcher は dispatch 候補に対して namespace の ResourceQuota 残リソースを確認し、不足しているジョブを候補から除外する（QUEUED に留める）。これにより、JupyterHub 等の User Pod が ResourceQuota を圧迫している場合に、ジョブが DISPATCHED のまま滞留して quota を占有し続けることを防ぐ。プレチェックをすり抜けた滞留は Watcher の DISPATCHED 滞留ガードが最終防衛線として差し戻す（[watcher.md](watcher.md) §3 ステップ 10 参照）。
 
 ```python
 # ※ 概念説明のための擬似コードである。
@@ -539,7 +546,7 @@ candidates = filter_by_resource_quota(session, candidates)  # 追加
 4. 同一サイクル内で通過させたジョブのリソースを累計し、後続ジョブの残リソース計算に反映する（同一サイクルでの過剰 dispatch を防止）
 5. `hard_count` が NULL でない場合、残りジョブ数（hard_count - used_count - サイクル内累計 dispatch 数）が 1 以上であることを確認する。sweep ジョブも K8s Job 1 つとしてカウントする（parallelism による倍算なし）
 
-**前提:** ResourceQuota の使用状況は Watcher が定期同期するため、`RESOURCE_QUOTA_SYNC_INTERVAL_SEC`（デフォルト 10 秒）分の遅延がある。このチェックは best-effort であり、チェック通過後に Kueue が admit するまでの間に ResourceQuota の使用状況が変わる可能性がある。ただし、チェックなしの場合（DISPATCHED 滞留 → 時間切れ FAILED）と比較して大幅に改善される。
+**前提:** ResourceQuota の使用状況は Watcher が定期同期するため、`RESOURCE_QUOTA_SYNC_INTERVAL_SEC`（デフォルト 10 秒）分の遅延がある。このチェックは best-effort であり、チェック通過後に Kueue が admit するまでの間に ResourceQuota の使用状況が変わる可能性がある。ただし、チェックなしの場合（DISPATCHED 滞留 → 滞留ガードによる差し戻しとバックオフ待機）と比較して大幅に改善される。
 
 **ResourceQuota race の回復:** プレチェックが best-effort である以上、キャッシュが古い状態で候補を通過させてしまい、K8s API Server の ResourceQuota admission controller に 403 で弾かれるケースが残る。この場合 dispatcher は以下の回復処理を行う。
 
@@ -555,7 +562,7 @@ candidates = filter_by_resource_quota(session, candidates)  # 追加
 
 ### 2.6 per-node bin-packing プレチェック
 
-Dispatcher は dispatch 候補に対してノード単位の残量を確認し、どのノードにも配置できないジョブを候補から除外する（QUEUED に留める）。これにより、Kueue の ClusterQueue が flavor 単位の合計 nominalQuota でのみ admit を判定する制約を補い、「合計値では収まるが個々のノードに配置できないジョブが DISPATCHED のまま滞留する」事象を防ぐ。
+Dispatcher は dispatch 候補に対してノード単位の残量を確認し、どのノードにも配置できないジョブを候補から除外する（QUEUED に留める）。これにより、Kueue の ClusterQueue が flavor 単位の合計 nominalQuota でのみ admit を判定する制約を補い、「合計値では収まるが個々のノードに配置できないジョブが DISPATCHED のまま滞留する」事象を防ぐ。本プレチェックは滞留の発生確率を下げるものであり、§2.6.5 の限界によってすり抜けた滞留は Watcher の DISPATCHED 滞留ガードが差し戻す（[watcher.md](watcher.md) §3 ステップ 10 参照）。両者は相補的である。
 
 ```python
 # ※ 概念説明のための擬似コードである。
@@ -612,6 +619,7 @@ candidates = filter_by_node_capacity(session, candidates, settings)  # 追加
 - **sweep RUNNING の per-node 推定誤差**: 均等分配は近似であり、実際の pod 配置が偏っている場合に誤差が生じる。誤差は cluster-wide では相殺されるが、特定ノードの判定が緩く/厳しくなる可能性がある。誤差の影響は小さく、次サイクルで状態が更新されれば自然に補正される
 - **node_resources の同期遅延**: Watcher が 300 秒間隔でしか同期しないため、ノード追加・撤去の検知に最大 5 分の遅延がある。新ノード追加時は古い情報で判定するため候補が誤って除外されるが、5 分後に補正される
 - **node_name が DB に未記録の RUNNING ジョブ**: §2 完了フォールバック等で `node_name` が NULL のまま RUNNING になっているジョブは per-node 控除に反映されない。in-flight 控除と同じ best-fit 仮配置で扱う
+- **すり抜けた滞留の後始末**: 上記の限界により候補が通過しても実 admit で配置できないケースは残る。この滞留は Watcher の DISPATCHED 滞留ガードが `WATCHER_DISPATCH_TIMEOUT_SEC` 経過後に `QUEUED` へ差し戻し、指数バックオフを設定する（[watcher.md](watcher.md) §3 ステップ 10 参照）。プレチェックが「空いている」と誤判定し続ける構造的なケース（cjob 以外の Pod による占有等）では dispatch → 差し戻し のループになるが、バックオフにより浪費は減衰する
 
 #### 2.6.6 擬似コード
 

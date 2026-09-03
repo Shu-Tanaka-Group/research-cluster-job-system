@@ -257,6 +257,7 @@ sweep 機能の導入後、`MAX_QUEUED_JOBS_PER_NAMESPACE` や `DISPATCH_BUDGET_
 | 大きなジョブが Kueue で滞留する（starvation） | 隙間充填機能が自動で対処（実装済み、[dispatcher.md](dispatcher.md) §2.4 参照）。`GAP_FILLING_STALL_THRESHOLD_SEC` で検知閾値を調整 |
 | ResourceQuota 枠不足でジョブが DISPATCHED のまま滞留する | ResourceQuota プレチェックが自動で対処（実装済み、[dispatcher.md](dispatcher.md) §2.5 参照）。`RESOURCE_QUOTA_SYNC_INTERVAL_SEC` で同期間隔を調整 |
 | 合計 quota では収まるが個別ノードに配置できずジョブが DISPATCHED のまま滞留する | per-node bin-packing プレチェックが自動で対処（実装済み、[dispatcher.md](dispatcher.md) §2.6 参照）。`NODE_BIN_PACKING_ENABLED` で有効/無効を切り替え |
+| プレチェックをすり抜けたジョブが DISPATCHED のまま長時間滞留し quota を占有する | Watcher の DISPATCHED 滞留ガードが自動で対処（実装済み、[watcher.md](watcher.md) §3 ステップ 10 参照）。`WATCHER_DISPATCH_TIMEOUT_SEC` で滞留許容時間、`WATCHER_DISPATCH_BACKOFF_MAX_SEC` でバックオフ上限を調整 |
 | K8s API への負荷が問題になる | Informer パターンの採用を検討（§3.3） |
 | クラスタの利用状況を把握したい | Grafana モニタリングダッシュボード（[monitoring.md](monitoring.md) 参照、実装済み）。CPU/GPU 予約率・リソース割当待ちジョブ数・推定待ち時間を可視化 |
 
@@ -279,6 +280,7 @@ sweep 機能の導入後、`MAX_QUEUED_JOBS_PER_NAMESPACE` や `DISPATCH_BUDGET_
 | count/jobs.batch（ResourceQuota） | 50 |
 | FAIR_SHARE_WINDOW_DAYS | 7 日 |
 | GAP_FILLING_STALL_THRESHOLD_SEC | 300 秒（5 分） |
+| WATCHER_DISPATCH_TIMEOUT_SEC | 1800 秒（30 分） |
 | NODE_RESOURCE_SYNC_INTERVAL_SEC | 300 秒（5 分） |
 | RESOURCE_QUOTA_SYNC_INTERVAL_SEC | 10 秒 |
 

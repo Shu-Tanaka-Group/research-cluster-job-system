@@ -8,11 +8,12 @@ Watcher / Reconciler は Kubernetes 側の実行状態を DB に反映する。
 - Pod 状態の監視
 - `RUNNING` / `SUCCEEDED` / `FAILED` への遷移
 - 制限時間（`time_limit_seconds`）の強制
+- `DISPATCHED` のまま滞留したジョブの `QUEUED` 差し戻し（配置不能ジョブのガード）
 - `CANCELLED` ジョブの K8s Job 削除
 - `DELETING` ジョブの K8s Job 削除・DB レコード削除・カウンターリセット
 - orphan Job 検出
 - DB と Kubernetes のズレ修正
-- Prometheus カウンターメトリクス（`cjob_jobs_completed_total`）の提供（`WATCHER_METRICS_PORT` で `/metrics` エンドポイント）
+- Prometheus カウンターメトリクス（`cjob_jobs_completed_total` / `cjob_jobs_unschedulable_requeued_total`）の提供（`WATCHER_METRICS_PORT` で `/metrics` エンドポイント）
 
 Watcher のメインループは各スキャンサイクル完了時に `/tmp/liveness` ファイルをタッチする。Kubernetes の Liveness probe がこのファイルの最終更新時刻を確認し、ループ停止を検知して再起動できるようにする（[deployment.md](../deployment.md) §13.5 参照）。
 
@@ -117,6 +118,52 @@ Dispatcher だけでは K8s Job の完了・失敗を検知できないため、
    - `started_at` は Watcher が RUNNING を観測した時刻であり、コンテナの実際の起動時刻より最大 1 スキャンサイクル遅れる。ユーザーに有利に働くため許容する
    - 本変更以前に作成された K8s Job は `activeDeadlineSeconds` を保持したまま実行を継続するため、ロールアウト時点で実行中のジョブには旧挙動が残る（[migration](../migration.md) 参照）
 
+10. `DISPATCHED` のまま滞留したジョブを `QUEUED` に差し戻す（配置不能ジョブのガード）
+
+    cjob は K8s Job に `activeDeadlineSeconds` を設定しない（ステップ 9）ため、どのノードにも配置できないまま `DISPATCHED` に張り付いたジョブを終了させる仕組みが存在しない。放置すると ClusterQueue の quota と namespace の ResourceQuota を無期限に占有し、他ユーザーのジョブの admit を妨げる。Dispatcher の per-node bin-packing プレチェック（[dispatcher.md](dispatcher.md) §2.6）は滞留の発生確率を下げるが、kube-scheduler の選択予測との乖離や `node_resources` の同期遅延により滞留は残り得る（§2.6.5）。本ステップはその最終防衛線である。
+
+    **対象:** 以下をすべて満たすジョブ
+
+    - `status = 'DISPATCHED'`
+    - `dispatched_at IS NOT NULL` かつ `dispatched_at + WATCHER_DISPATCH_TIMEOUT_SEC < NOW()`
+    - 当該サイクルで取得した K8s Job 一覧に対応する K8s Job が存在する
+
+    K8s Job が存在するものに限定するのは、K8s Job が消失しているジョブはステップ 8 の管轄（`FAILED` 遷移）であり、本ステップが差し戻してしまうとステップ 8 の自動修復が働かなくなるためである。
+
+    **判定は経過時間のみで行う。** Pod の `status.conditions`（`PodScheduled=False` / reason `Unschedulable`）は参照しない。理由は次のとおり。
+
+    - Pod 取得の追加 API コストが発生しない
+    - Kueue が admit していない（Pod がまだ存在しない）滞留も同じ経路で救済できる。最終防衛線としては原因を問わず拾えるほうが堅い
+    - 差し戻しはジョブを失わない無害な操作であり、判定精度への要求が低い。閾値を十分に長く取ることで、イメージ pull や PVC の attach 待ちのような正常な起動遅延を巻き込まないようにする
+
+    **処理順序:** ステップ 9 と同様に K8s Job を `propagation_policy="Background"` で削除し、**削除成功（404 を含む）を確認してから** DB を更新する。削除に失敗したジョブは `DISPATCHED` のまま次サイクルで再試行する。逆順にすると、削除失敗で生き残った K8s Job が後から `RUNNING` / `SUCCEEDED` に遷移し、`QUEUED` に戻したはずのジョブが二重に実行される。
+
+    **DB 更新の内容:**
+
+    - `status` を `QUEUED` に戻す
+    - `unschedulable_count` を 1 増やす（[database.md](database.md) §1 参照）
+    - `retry_after` を `NOW() + min(WATCHER_DISPATCH_TIMEOUT_SEC × 2^(unschedulable_count - 1), WATCHER_DISPATCH_BACKOFF_MAX_SEC)` に設定する（指数バックオフ）
+    - `job_events` に `UNSCHEDULABLE` を追加する（`payload_json` に待機秒数と差し戻し回数を記録する、[database.md](database.md) §3.1 参照）
+    - `cjob_jobs_unschedulable_requeued_total` をインクリメントする
+
+    `retry_count` は増やさない。滞留はジョブ自身の失敗ではなくクラスタ側の空き不足に起因するため、`DISPATCH_MAX_RETRIES` の retry budget を消費すべきではない（ResourceQuota race の `DEFERRED` と同じ思想、[dispatcher.md](dispatcher.md) §2.5 参照）。`k8s_job_name` / `dispatched_at` はそのまま残す（再 dispatch 時に Dispatcher が上書きする）。使用量（`namespace_daily_usage`）はジョブが実行されていないため加算しない。
+
+    **無限ループの抑制:** 差し戻したジョブは次サイクルで Dispatcher の候補取得クエリの対象になるが、`retry_after` によりバックオフ期間中は候補から除外される（[dispatcher.md](dispatcher.md) §1.2）。per-node bin-packing プレチェックが「空いている」と誤判定し続ける構造的なケース（cjob 以外の Pod による占有、PVC の node affinity、max-pods 等）では dispatch → タイムアウト → 差し戻し のループになるが、バックオフが指数的に伸びるためサイクルとリソースの浪費は減衰し、事実上「クラスタが空くまで待つ」挙動になる。ジョブは `QUEUED` として生き続けるため、放置されて失われることはない。
+
+    **新しい状態を追加しない理由:** 専用状態（例 `BLOCKED`）や `HELD` への遷移も選択肢だが、どちらも「ジョブを止める」方向であり、原因がクラスタ側にあることと釣り合わない。`QUEUED` + `retry_after` であれば Dispatcher / CLI / cjobctl / Grafana への波及がなく、状態を列挙する全レイヤの追従も不要である。運用の結果「バックオフで待ち続けるジョブが実際に溜まり、専用の可視化が必要」と判明した時点で改めて検討する。
+
+    **実行位置:** ステップ 9 の後、ステップ 8 の消失チェックより前に実行する。ステップ 8 より前にすることで、本ステップで `QUEUED` に戻したジョブがステップ 8 の `DISPATCHED` 突合に拾われない。
+
+    **想定される制約:**
+
+    - 検知の粒度はスキャンサイクル間隔（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`、デフォルト 10 秒）になる。30 分の閾値に対して無視できる誤差である
+    - イメージ pull や PVC の attach に閾値を超える時間がかかるジョブは差し戻される。差し戻しによってジョブが失われることはなく、ノード上のイメージレイヤキャッシュも残るため再 dispatch は速い。ただしバックオフ分の待機は発生する
+    - `WATCHER_DISPATCH_TIMEOUT_SEC` は隙間充填の滞留閾値（`GAP_FILLING_STALL_THRESHOLD_SEC`、デフォルト 300 秒）より十分に長く設定する必要がある。隙間充填が本来の救済（時間方向の隙間充填による大型ジョブの起動）を試みる時間を確保してから、最終防衛線として発動させるためである
+
+**滞留ガードと隙間充填の関係:**
+
+本ステップが滞留ジョブを `QUEUED` に差し戻すと、Dispatcher の滞留ジョブ検知（`status = 'DISPATCHED'` かつ `dispatched_at` が閾値より古い）から当該ジョブが外れる。そのままでは、バックオフ待機中は隙間充填が発動せず、同一 `(namespace, flavor)` の小さいジョブが大型ジョブを追い越し続ける（starvation 対策の退行）。これを防ぐため、Dispatcher の滞留ジョブ検知は本ステップで差し戻されバックオフ待機中のジョブ（`status = 'QUEUED'` かつ `unschedulable_count > 0` かつ `retry_after > NOW()`）も滞留ジョブとして扱う（[dispatcher.md](dispatcher.md) §2.4.2 参照）
+
 **Grace period とスキャンサイクル間隔の関係:**
 
 `WATCHER_DISPATCH_GRACE_SEC` は Watcher のスキャンサイクル間隔（`DISPATCH_BUDGET_CHECK_INTERVAL_SEC`）の 2 倍以上に設定する必要がある。これにより、Dispatcher がサイクル中に K8s Job を作成した場合でも、次サイクルの先頭で取得する K8s Job 一覧に必ず含まれるようになる。現在の設定（grace 30 秒 vs サイクル間隔 10 秒）で 3 倍の余裕を確保している
@@ -215,6 +262,7 @@ reconcile サイクルの DB 読み込みは以下の方針でメモリ常駐量
 - **K8s Job に対応する DB Job の取得**: `k8s_map` のキー `(namespace, job_id)` の集合に限定して取得する（`tuple_(Job.namespace, Job.job_id).in_(...)`）。namespace 単位で全 Job を取得する従来方式と比べ、HELD / QUEUED / CANCELLED など reconcile で使わない Job のロードを回避できる
 - **DELETING ジョブの取得**: DELETING Phase 2 の namespace 単位のクリーンアップ判定で必要なため、namespace 指定の全件取得を維持する（DELETING ジョブ数は通常少ないためメモリ影響は小さい）
 - **ステップ 8 の DISPATCHED / RUNNING 突合**: 存在チェックのために `(namespace, job_id)` の tuple だけを SELECT する。`k8s_map` に存在しない Job についてのみ、対象を絞った ORM クエリで行を読み込み FAILED 遷移とイベント挿入を行う
+- **ステップ 10 の DISPATCHED 滞留判定**: 対象は「K8s Job を観測できた DISPATCHED ジョブ」に限られるため、上記で取得済みの `(namespace, job_id) -> Job` マップをそのまま走査する。専用の DB クエリは発行しない
 
 ### 5.4 Pod 取得の namespace 単位バッチング
 
@@ -232,5 +280,7 @@ reconcile 中の `node_name` 記録に使用する `CoreV1Api.list_namespaced_po
 |---|---|---|
 | `WATCHER_K8S_LIST_PAGE_SIZE` | 500 | `list_job_for_all_namespaces()` と `list_pod_for_all_namespaces()` のページサイズ。値を大きくするとページ数が減り API 往復コストが下がるが、1 ページのレスポンスサイズが増える |
 | `WATCHER_DISPATCH_GRACE_SEC` | 30 | ステップ 8 で DISPATCHED ジョブを FAILED に遷移させるまでの猶予秒数。`dispatched_at` からこの時間が経過するまでは K8s Job 不在でも FAILED に遷移しない。Dispatcher と Watcher の reconcile サイクル間 race の保護用。`DISPATCH_BUDGET_CHECK_INTERVAL_SEC` の 2 倍以上を推奨 |
+| `WATCHER_DISPATCH_TIMEOUT_SEC` | 1800 (30分) | ステップ 10 で DISPATCHED ジョブを QUEUED に差し戻すまでの滞留許容秒数。`dispatched_at` からこの時間が経過しても RUNNING に遷移しないジョブは配置不能とみなす。`GAP_FILLING_STALL_THRESHOLD_SEC`（デフォルト 300 秒）より十分に長く設定する |
+| `WATCHER_DISPATCH_BACKOFF_MAX_SEC` | 7200 (2時間) | ステップ 10 の指数バックオフの上限秒数。差し戻し回数が増えても `retry_after` はこの値以上先には設定されない |
 
 これらの設定は `cjob-config` ConfigMap の標準キーとして登録されており、`cjobctl config set <key> <value>` で更新できる（[cjobctl.md](cjobctl.md) §`cjobctl config set` 参照）。更新後は `cjobctl system restart watcher` で反映する。

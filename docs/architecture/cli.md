@@ -431,6 +431,8 @@ last_error:    K8s API permanent error 403: admission webhook "validate-image.ky
 
 `events` は直近の job_events を時系列昇順で最大 10 件表示する（[api.md](api.md) §4 参照）。events が 1 件もない場合はセクションごと省略する。表示可能な最大件数を超える古い events が存在する場合は、先頭に `... N earlier events` マーカーを出力する。
 
+`retry_after` が未来の時刻になっている QUEUED ジョブは、直近イベントを見ることで理由を判別できる。`UNSCHEDULABLE` は「ノードに配置できないまま滞留したため Watcher が差し戻した」ことを意味し（[watcher.md](watcher.md) §3 ステップ 10 参照）、`retry_after` はそのバックオフの解除時刻である。`RETRY` / `DEFERRED` は数十秒で解消する一時的な差し戻しである。CLI 側の表示ロジックは event_type の文字列をそのまま出力するため、イベント種別の追加に伴う変更は不要である。
+
 ```
 $ cjob status 7
 job_id:        7

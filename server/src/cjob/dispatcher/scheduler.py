@@ -381,12 +381,29 @@ def defer_to_queue(
 
 
 def fetch_stalled_jobs(session: Session, threshold_sec: int) -> list[Job]:
-    """Fetch DISPATCHED jobs that have been waiting longer than threshold_sec."""
+    """Fetch jobs stalled for want of resources (dispatcher.md §2.4.2).
+
+    Two shapes of stall count:
+
+    1. Still DISPATCHED and waiting longer than ``threshold_sec``.
+    2. Requeued by the Watcher's DISPATCHED stall guard and waiting out its
+       backoff (``unschedulable_count > 0`` and ``retry_after`` in the
+       future). Without this clause the stall signal would vanish the moment
+       the guard requeues a job, pausing gap filling for that
+       ``(namespace, flavor)`` and letting small jobs overtake the large job
+       gap filling exists to protect. ``unschedulable_count`` distinguishes
+       these from the short-lived ``RETRY`` / ``DEFERRED`` backoffs, which are
+       not resource stalls.
+    """
     result = session.execute(
         text(
             "SELECT namespace, job_id FROM jobs "
-            "WHERE status = 'DISPATCHED' "
-            "  AND dispatched_at <= NOW() - MAKE_INTERVAL(secs => :threshold)"
+            "WHERE (status = 'DISPATCHED' "
+            "       AND dispatched_at <= NOW() "
+            "           - MAKE_INTERVAL(secs => :threshold)) "
+            "   OR (status = 'QUEUED' "
+            "       AND unschedulable_count > 0 "
+            "       AND retry_after > NOW())"
         ),
         {"threshold": threshold_sec},
     )

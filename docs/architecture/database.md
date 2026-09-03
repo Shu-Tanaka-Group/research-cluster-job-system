@@ -21,7 +21,8 @@ CREATE TABLE jobs (
     time_limit_seconds INTEGER NOT NULL,   -- 実行時間上限（秒）。Watcher が started_at 起点で強制する
     status        TEXT NOT NULL,
     retry_count   INTEGER NOT NULL DEFAULT 0,
-    retry_after   TIMESTAMPTZ,              -- K8s 一時障害時の再試行解禁時刻（NULL = 即時対象）
+    retry_after   TIMESTAMPTZ,              -- 次回 dispatch 解禁時刻（NULL = 即時対象）
+    unschedulable_count INTEGER NOT NULL DEFAULT 0,  -- DISPATCHED 滞留ガードによる差し戻し回数（Watcher が記録）
     k8s_job_name  TEXT,
     log_dir       TEXT,          -- /home/jovyan/.cjob/logs/<job_id>
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -50,6 +51,21 @@ CREATE INDEX idx_jobs_namespace_status ON jobs (namespace, status);
 ```
 
 `completions IS NULL` で通常ジョブと sweep ジョブを判別する。sweep ジョブの場合、`completed_indexes` / `failed_indexes` は K8s API の `status.completedIndexes` / `status.failedIndexes`（圧縮表記文字列）を Watcher が書き込む。`succeeded_count` / `failed_count` は `completed_indexes` のパースなしに集計値を参照するためのキャッシュカラムである。
+
+`retry_after` は「このジョブを次に dispatch してよい時刻」であり、Dispatcher の候補取得クエリが `retry_after IS NULL OR retry_after <= NOW()` で参照する（[dispatcher.md](dispatcher.md) §1.2 参照）。設定されるのは以下の 3 経路である。
+
+| 経路 | 設定者 | 間隔 | `retry_count` | `unschedulable_count` |
+|---|---|---|---|---|
+| K8s API 一時障害の再試行（`RETRY`） | Dispatcher | `DISPATCH_RETRY_INTERVAL_SEC` | +1 | 変化なし |
+| ResourceQuota race の差し戻し（`DEFERRED`） | Dispatcher | `RESOURCE_QUOTA_SYNC_INTERVAL_SEC` | 変化なし | 変化なし |
+| DISPATCHED 滞留ガードの差し戻し（`UNSCHEDULABLE`） | Watcher | `min(WATCHER_DISPATCH_TIMEOUT_SEC × 2^(n-1), WATCHER_DISPATCH_BACKOFF_MAX_SEC)` | 変化なし | +1 |
+
+`unschedulable_count` は DISPATCHED 滞留ガード（[watcher.md](watcher.md) §3 ステップ 10 参照）がジョブを `QUEUED` に差し戻した累積回数である。用途は 2 つある。
+
+- 指数バックオフの指数（上表の `n`）として `retry_after` の算出に使う
+- Dispatcher の滞留ジョブ検知が「差し戻されてバックオフ待機中のジョブ」を識別するために使う（`status = 'QUEUED'` かつ `unschedulable_count > 0` かつ `retry_after > NOW()`、[dispatcher.md](dispatcher.md) §2.4.2 参照）
+
+`retry_count` と分離しているのは、滞留がジョブ自身の失敗ではなくクラスタ側の空き不足に起因するため、`DISPATCH_MAX_RETRIES` の retry budget を消費させないためである。ジョブが実行を開始（`RUNNING` 遷移）しても値はリセットしない。差し戻しの履歴として残し、`job_events` の `UNSCHEDULABLE` 件数と一致させる。
 
 `cpu_millicores` / `memory_mib` は `cpu` / `memory` 文字列カラムの非正規化数値表現であり、Submit API がジョブ作成時に `parse_cpu_millicores()` / `parse_memory_mib()` で設定する。Dispatcher の DRF クエリで DISPATCHING/DISPATCHED ジョブの予測消費量を SQL 内で集計するために使用する（[dispatcher.md](dispatcher.md) §1.2 参照）。
 
@@ -100,6 +116,7 @@ CREATE TABLE job_events (
 | `DISPATCHED` | Dispatcher が K8s Job を作成し `DISPATCHING` → `DISPATCHED` に遷移した直後 | Dispatcher | `{}` |
 | `RETRY`      | Dispatcher が K8s API 一時障害で `DISPATCHING` → `QUEUED` に戻した（`retry_count` が増える） | Dispatcher | `{}` |
 | `DEFERRED`   | Dispatcher が ResourceQuota race で `DISPATCHING` → `QUEUED` に戻した（`retry_count` は増えない、[dispatcher.md](dispatcher.md) §2.5 参照） | Dispatcher | `{}` |
+| `UNSCHEDULABLE` | Watcher が DISPATCHED 滞留ガードで `DISPATCHED` → `QUEUED` に戻した（`retry_count` は増えず `unschedulable_count` が増える、[watcher.md](watcher.md) §3 ステップ 10 参照） | Watcher | `{"waited_sec": 1834, "attempt": 1, "backoff_sec": 1800}` |
 | `RUNNING`    | Watcher が Pod の RUNNING 遷移を検知し DB status を `RUNNING` に更新した | Watcher | `{}` |
 | `SUCCEEDED`  | Watcher が K8s Job の complete を検知 | Watcher | `{}` |
 | `FAILED`     | Watcher / Dispatcher がジョブを FAILED に遷移させた（permanent error、retry 上限到達、K8s Job 消失など） | Dispatcher / Watcher | `{"error": "..."}`（Dispatcher の mark_failed 経由時） |
@@ -479,11 +496,12 @@ QUEUED
        ├─ CANCELLED（ユーザーがキャンセル → CAS 前ならスキップ、CAS 後なら Watcher が K8s Job 削除）
        ├─ DISPATCHED（Kubernetes Job 作成成功）
        │    ├─ CANCELLED（ユーザーがキャンセル → Watcher が K8s Job を削除）
+       │    ├─ QUEUED（滞留ガード：Watcher が配置不能を検知し K8s Job 削除後に retry_after バックオフ付きで差し戻し）
        │    └─ RUNNING（Watcher が Pod 実行中を検知）
        │         ├─ SUCCEEDED
        │         ├─ FAILED
        │         └─ CANCELLED（ユーザーがキャンセル → Watcher が K8s Job を削除）
-       ├─ QUEUED（再試行時：Dispatcher 再起動・K8s 一時障害後の retry_after 差し戻し）
+       ├─ QUEUED（再試行時：Dispatcher 再起動・K8s 一時障害・ResourceQuota race 後の retry_after 差し戻し）
        └─ FAILED（バリデーションエラー・最大 retry 超過）
 CANCELLED（QUEUED / DISPATCHING / DISPATCHED / RUNNING の任意タイミングでユーザーがキャンセル）
 CANCELLED / SUCCEEDED / FAILED

@@ -433,6 +433,8 @@ last_error:    K8s API permanent error 403: admission webhook "validate-image.ky
 
 `events` displays the most recent job_events in ascending chronological order, up to 10 entries (see [api.md](api.md) §4). When there are no events at all, the section is omitted entirely. When older events beyond the display limit exist, a `... N earlier events` marker is emitted at the top of the list.
 
+For a QUEUED job whose `retry_after` is in the future, the most recent events reveal why. `UNSCHEDULABLE` means the Watcher requeued the job because it stalled without being placed on any node (see [watcher.md](watcher.md) §3 Step 10), and `retry_after` is when that backoff expires. `RETRY` / `DEFERRED` are transient requeues that clear within tens of seconds. The CLI display logic prints the event_type string verbatim, so adding an event type requires no CLI change.
+
 ```
 $ cjob status 7
 job_id:        7
