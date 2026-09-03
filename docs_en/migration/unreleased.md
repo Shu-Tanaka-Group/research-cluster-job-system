@@ -72,3 +72,23 @@ An "Awaiting Placement (Backoff)" panel was added to Row 3 of `k8s/base/grafana/
 2. Overwrite the existing dashboard (same UID)
 3. Select the data source variables (`${DS_PROMETHEUS}` / `${DS_CJOB_DB}`) to match your environment
 
+## Prior Verification of `RESOURCE_FLAVORS` (Rejection of Unknown Fields)
+
+> Related: issue #209
+
+`extra="forbid"` has been introduced on the server-side `FlavorDefinition`, so if a flavor definition in `RESOURCE_FLAVORS` contains an unknown field, **Submit API / Dispatcher / Watcher fail to start** (previously such a field was silently ignored). Only three fields are allowed: `name` / `label_selector` / `gpu_resource_name` (see "Schema Constraints for `RESOURCE_FLAVORS`" in [resources.md](../architecture/resources.md)).
+
+**Before Step 4 (applying K8s resources)**, verify that no unknown field has crept into the current configuration.
+
+```bash
+cjobctl config show | grep -A 20 RESOURCE_FLAVORS
+```
+
+If a definition containing a typo such as `gpu_resouce_name` is found, fix it before applying.
+
+```bash
+# After preparing the corrected JSON in a file
+cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+```
+
+Note that the new `cjobctl config set RESOURCE_FLAVORS` performs a structural check (unknown fields, duplicate `name`, `key=value` form of `label_selector`, consistency with `DEFAULT_FLAVOR`), so any error is rejected on the spot. Since `cjobctl` is built in Step 3 of the standard migration procedures, this correction can be made between Step 3 and Step 4.

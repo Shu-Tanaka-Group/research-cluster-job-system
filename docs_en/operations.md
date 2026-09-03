@@ -406,6 +406,8 @@ Add the new flavor definition to the `RESOURCE_FLAVORS` JSON array. For flavors 
 ]
 ```
 
+`cjobctl config set` performs a structural check (required fields, unknown fields, duplicate `name`, `label_selector` form, consistency with `DEFAULT_FLAVOR`), so typos are detected before they are applied. For the list of checks, see "Schema Constraints for `RESOURCE_FLAVORS`" in [resources.md](architecture/resources.md).
+
 ### 8.5 Restart Components
 
 ```bash

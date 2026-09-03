@@ -388,6 +388,45 @@ CLI 側で以下のバリデーションを行う:
   - 真偽値型キー: `true` または `false`（大文字小文字不問、保存時は小文字に正規化）
   - JSON 型キー: 有効な JSON であること
   - 文字列型キー: 常に有効
+- キー固有の構造チェック（下記）
+
+**キー固有の構造チェック:**
+
+型チェックを通過した後、キーによっては値の構造を検証する。検証は ConfigMap を取得した後・確認プロンプトの前に行うため、他キーの現在値と突き合わせた整合チェックも可能である。
+
+`RESOURCE_FLAVORS` は [resources.md](resources.md) の「`RESOURCE_FLAVORS` のスキーマ制約」に従って検証する。同節がスキーマの正本であり、検証項目を変更する場合は同節を先に更新する。
+
+- トップレベルが JSON 配列であり、1 つ以上の要素を持つこと
+- 各要素が JSON オブジェクトであること
+- 必須フィールド `name` / `label_selector` が存在し、文字列かつ空文字でないこと
+- `gpu_resource_name` を指定する場合、文字列かつ空文字でないこと（`null` は省略と同義）
+- 未知フィールドを含まないこと（`gpu_resouce_name` のようなタイポの検出）
+- `name` が重複していないこと
+- `label_selector` が `key=value` 形式であること（`=` はちょうど 1 個、両辺が非空）
+
+違反は最初の 1 件で打ち切らず、全件を収集してまとめて表示する。要素の位置は 0 起点のインデックスで示す。
+
+```bash
+$ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+Error: 'RESOURCE_FLAVORS' has invalid flavor definitions:
+  - flavors[1]: unknown field 'gpu_resouce_name' (allowed: name, label_selector, gpu_resource_name)
+  - flavors[2]: 'label_selector' must be in 'key=value' form, got 'cjob.io/flavor'
+  - flavors[2]: duplicate 'name' value 'gpu'
+```
+
+**`DEFAULT_FLAVOR` との整合:**
+
+[resources.md](resources.md) は `DEFAULT_FLAVOR` が `RESOURCE_FLAVORS` のいずれかの `name` と一致することを要求する。この整合は `config set RESOURCE_FLAVORS` と `config set DEFAULT_FLAVOR` の**両方**で、更新後の組み合わせに対して検証する。片方だけでは、後から他方を変更したときに不整合を作れてしまう。
+
+突き合わせ相手のキーが ConfigMap に未設定、または `RESOURCE_FLAVORS` がパース不能で突き合わせられない場合は、警告を標準エラー出力に表示したうえで整合チェックのみスキップし、更新自体は続行する。これは `RESOURCE_FLAVORS` が壊れている状態で `DEFAULT_FLAVOR` も更新できなくなる（相互に修正をブロックし合う）状況を避けるためである。
+
+```bash
+$ cjobctl config set DEFAULT_FLAVOR gpu-a100
+Error: 'DEFAULT_FLAVOR' value 'gpu-a100' does not match any flavor name in RESOURCE_FLAVORS (available: cpu, gpu)
+
+$ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+Warning: 'DEFAULT_FLAVOR' is not set in the ConfigMap; skipping the consistency check.
+```
 
 **`value` と `--from-file` の排他:**
 

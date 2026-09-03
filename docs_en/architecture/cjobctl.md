@@ -390,6 +390,45 @@ The CLI performs the following validation:
   - Boolean-type key: `true` or `false` (case-insensitive, normalized to lowercase when saved)
   - JSON-type key: must be valid JSON
   - String-type key: always valid
+- Key-specific structural check (see below)
+
+**Key-specific structural check:**
+
+After the type check passes, the structure of the value is validated for certain keys. The check runs after the ConfigMap has been fetched and before the confirmation prompt, so it can also cross-check the value against the current values of other keys.
+
+`RESOURCE_FLAVORS` is validated according to "Schema Constraints for `RESOURCE_FLAVORS`" in [resources.md](resources.md). That section is authoritative for the schema; when changing the checks, update that section first.
+
+- The top level must be a JSON array with at least one element
+- Each element must be a JSON object
+- The required fields `name` / `label_selector` must be present, be strings, and not be empty
+- If `gpu_resource_name` is specified, it must be a string and not be empty (`null` is equivalent to omission)
+- No unknown field may be present (detects typos such as `gpu_resouce_name`)
+- `name` must not be duplicated
+- `label_selector` must be in `key=value` form (exactly one `=`, both sides non-empty)
+
+Validation does not stop at the first violation; all violations are collected and reported together. Element positions are given as 0-based indices.
+
+```bash
+$ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+Error: 'RESOURCE_FLAVORS' has invalid flavor definitions:
+  - flavors[1]: unknown field 'gpu_resouce_name' (allowed: name, label_selector, gpu_resource_name)
+  - flavors[2]: 'label_selector' must be in 'key=value' form, got 'cjob.io/flavor'
+  - flavors[2]: duplicate 'name' value 'gpu'
+```
+
+**Consistency with `DEFAULT_FLAVOR`:**
+
+[resources.md](resources.md) requires that `DEFAULT_FLAVOR` match one of the `name` values in `RESOURCE_FLAVORS`. This consistency is verified against the post-update combination in **both** `config set RESOURCE_FLAVORS` and `config set DEFAULT_FLAVOR`. Checking only one side would allow an inconsistency to be created by changing the other side afterwards.
+
+If the counterpart key is not set in the ConfigMap, or if `RESOURCE_FLAVORS` cannot be parsed and therefore cannot be cross-checked, a warning is printed to standard error and only the consistency check is skipped; the update itself proceeds. This avoids the situation where a broken `RESOURCE_FLAVORS` also makes `DEFAULT_FLAVOR` unupdatable (the two blocking each other's repair).
+
+```bash
+$ cjobctl config set DEFAULT_FLAVOR gpu-a100
+Error: 'DEFAULT_FLAVOR' value 'gpu-a100' does not match any flavor name in RESOURCE_FLAVORS (available: cpu, gpu)
+
+$ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+Warning: 'DEFAULT_FLAVOR' is not set in the ConfigMap; skipping the consistency check.
+```
 
 **Exclusivity of `value` and `--from-file`:**
 

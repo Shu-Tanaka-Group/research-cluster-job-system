@@ -70,3 +70,24 @@ cjobctl db migrate
 2. 既存ダッシュボードを上書きする（同一 UID）
 3. データソース変数（`${DS_PROMETHEUS}` / `${DS_CJOB_DB}`）を環境に合わせて選択する
 
+
+## `RESOURCE_FLAVORS` の事前確認（未知フィールドの拒否）
+
+> 関連: issue #209
+
+サーバ側の `FlavorDefinition` に `extra="forbid"` が導入され、`RESOURCE_FLAVORS` の flavor 定義に未知フィールドが含まれていると **Submit API / Dispatcher / Watcher が起動に失敗する**（従来は黙って無視されていた）。許可されるフィールドは `name` / `label_selector` / `gpu_resource_name` の 3 つのみである（[resources.md](../architecture/resources.md) の「`RESOURCE_FLAVORS` のスキーマ制約」参照）。
+
+**Step 4（K8s リソースの適用）より前に**、現在の設定に未知フィールドが混入していないか確認すること。
+
+```bash
+cjobctl config show | grep -A 20 RESOURCE_FLAVORS
+```
+
+`gpu_resouce_name` のようなタイポを含む定義が見つかった場合は、修正してから適用する。
+
+```bash
+# 修正した JSON をファイルに用意してから
+cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
+```
+
+なお、新しい `cjobctl config set RESOURCE_FLAVORS` は構造チェック（未知フィールド・`name` の重複・`label_selector` の `key=value` 形式・`DEFAULT_FLAVOR` との整合）を行うため、修正時点で誤りがあればその場で拒否される。`cjobctl` のビルドは標準移行手順の Step 3 で完了しているため、この修正は Step 3 と Step 4 の間で実施できる。

@@ -147,6 +147,25 @@ Meaning of each field:
 
 The `name` of a flavor must match the `metadata.name` of the Kueue ResourceFlavor. This unifies the name specified with `cjobctl cluster set-quota --flavor <name>` and the flavor value in the DB, eliminating the need for conversion.
 
+#### Schema Constraints for `RESOURCE_FLAVORS`
+
+The table in this section is authoritative for the `RESOURCE_FLAVORS` schema. Both `cjobctl config set` (Rust, [cjobctl.md](cjobctl.md) §5.5) and the server-side `FlavorDefinition` (Python) follow this definition. When changing the schema, update this section first and keep both implementations in sync.
+
+| # | Constraint | Verified by |
+|---|---|---|
+| 1 | The top level must be a JSON array with at least one element | `cjobctl config set` / server startup (array only) |
+| 2 | Each element must be a JSON object | `cjobctl config set` / server startup |
+| 3 | `name` / `label_selector` must be present, be strings, and not be empty | `cjobctl config set` / server startup (presence and type only) |
+| 4 | If `gpu_resource_name` is specified, it must be a string and not be empty (`null` is equivalent to omission) | `cjobctl config set` / server startup (type only) |
+| 5 | No field outside the table above may be present | `cjobctl config set` / server startup |
+| 6 | `name` must not be duplicated | `cjobctl config set` |
+| 7 | `label_selector` must be in `key=value` form (exactly one `=`, both sides non-empty) | `cjobctl config set` |
+| 8 | `DEFAULT_FLAVOR` must match one of the `name` values | `cjobctl config set` (both when setting `RESOURCE_FLAVORS` and when setting `DEFAULT_FLAVOR`) |
+
+**Rejection of unknown fields**: The server-side `FlavorDefinition` sets `extra="forbid"`, so a definition containing a field outside the table above makes Submit API / Dispatcher / Watcher fail to start. This prevents the accident where a typo in an optional field such as `gpu_resouce_name` is silently ignored and a GPU flavor is treated as a non-GPU flavor.
+
+Constraints 6, 7, and 8 are not detected at startup (they cannot be expressed by the pydantic model alone), so validation in `cjobctl config set` is the only line of defense. Note that editing the ConfigMap directly with `kubectl` instead of going through `cjobctl` bypasses these checks.
+
 For details on node resource synchronization, see [watcher.md](watcher.md) §1.1; for DB table definitions, see [database.md](database.md) §6.
 
 ### Limits Related to Sweep

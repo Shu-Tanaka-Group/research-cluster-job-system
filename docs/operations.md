@@ -404,6 +404,8 @@ cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
 ]
 ```
 
+`cjobctl config set` は構造チェック（必須フィールド・未知フィールド・`name` の重複・`label_selector` の形式・`DEFAULT_FLAVOR` との整合）を行うため、タイポは適用前に検出される。検証項目は [resources.md](architecture/resources.md) の「`RESOURCE_FLAVORS` のスキーマ制約」を参照。
+
 ### 8.5 コンポーネントを再起動する
 
 ```bash
