@@ -9,6 +9,8 @@ Standard procedures for updating a running CJob system to a new version. Skip un
 > - Build and push images → Update and apply Kustomize tags (do not reference tags that do not exist yet)
 > - Build cjobctl → Run DB migration (execute with the new migration logic)
 
+When deploying multiple PRs together, the `/deploy-runbook` skill can generate a runbook for the target range. It derives the required work from the actual `git diff`, cross-checks it against [unreleased.md](migration/unreleased.md) and the Post-apply actions of merged PRs to detect omissions, and outputs an execution order with conditional steps already resolved.
+
 ## Prerequisites
 
 - Repository has been cloned

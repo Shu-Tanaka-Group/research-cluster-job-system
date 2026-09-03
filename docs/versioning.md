@@ -57,6 +57,8 @@ cd server/ && uv lock && cd ..
 
 前バージョンのタグからの差分を確認し、`docs/migration/unreleased.md` に記載すべき移行手順が漏れていないか確認する。
 
+`/deploy-runbook` skill を使うと、以下の確認を自動化できる（差分からの導出と `unreleased.md` の突き合わせ、記載漏れの報告）。
+
 ```bash
 # 前バージョンのタグと現在の差分を確認
 git diff <old-tag>..HEAD --stat

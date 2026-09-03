@@ -59,6 +59,8 @@ cd server/ && uv lock && cd ..
 
 Review the diff from the previous version tag and verify that no migration steps are missing from `docs/migration/unreleased.md`.
 
+The `/deploy-runbook` skill automates these checks (deriving required work from the diff, cross-checking it against `unreleased.md`, and reporting omissions).
+
 ```bash
 # Check diff from previous version tag to current
 git diff <old-tag>..HEAD --stat
