@@ -1,6 +1,6 @@
 ---
 name: deploy-runbook
-description: 前回リリースからの変更を対象に、実環境へのデプロイ手順（runbook）を構築する。git diff から必要作業を導出し、docs/migration/unreleased.md とマージ済み PR の Post-apply actions と突き合わせて記載漏れを検出したうえで、実行順序を確定したチェックリストを出力する。複数 PR をまとめてデプロイするとき、リリース準備時の記載漏れ確認（versioning.md Step 4）に使う。
+description: 前回リリースからの変更を対象に、実環境へのデプロイ手順（runbook）を構築する。git diff から必要作業を導出し、移行手順書（docs/migration/unreleased.md またはリリース済みの vX.Y.Z.md）とマージ済み PR の Post-apply actions と突き合わせて記載漏れを検出したうえで、実行順序を確定したチェックリストを出力する。複数 PR をまとめてデプロイする直前、およびリリース準備時の記載漏れ確認（versioning.md Step 4）に使う。
 ---
 
 # デプロイ手順（runbook）の構築
@@ -20,21 +20,42 @@ description: 前回リリースからの変更を対象に、実環境へのデ�
 $ARGUMENTS
 ```
 
-- 引数なし: 直近のリリースタグ `..HEAD` を対象とする
+- 引数なし: 対象範囲を自動判定する（Step 1 参照）
 - `<tag>`: そのタグ `..HEAD` を対象とする
 - `<from>..<to>`: 指定した範囲を対象とする
 
 範囲を確定したら、対象範囲と含まれるコミット数・PR 数をユーザーに提示してから作業を進める。
+
+**2 つの使いどころ:**
+
+| 場面 | タイミング | 対象範囲 | 移行手順書 |
+|---|---|---|---|
+| リリース準備（記載漏れ確認） | タグ作成**前**（[versioning.md](../../../docs/versioning.md) Step 4） | 前バージョンのタグ `..HEAD` | `docs/migration/unreleased.md` |
+| デプロイ直前（runbook 生成） | タグ作成**後**（[migration.md](../../../docs/migration.md) Step 1 の前） | 前バージョンのタグ `..` 新バージョンのタグ | `docs/migration/v<新バージョン>.md` |
+
+リリース時に `unreleased.md` は `vX.Y.Z.md` にリネームされ、空テンプレートの `unreleased.md` が作り直される（versioning.md Step 5）。そのため**タグ作成後は移行手順書の読み先が変わる**。Step 1 と Step 3 でこの 2 つを区別する。
 
 ## Step 1: 対象範囲の確定
 
 ```bash
 git tag --sort=-creatordate | head -3   # 直近のリリースタグ
 cat VERSION                              # 現在のバージョン
-git log --oneline <range>                # 範囲内のコミット
+git rev-parse HEAD                       # HEAD がタグと同一コミットか判定するため
 ```
 
 タグは `v` 接頭辞なし（`1.15.0` 形式）である点に注意する。
+
+**引数なしのときの範囲判定:**
+
+1. 直近のリリースタグ `T1` と、その 1 つ前のタグ `T2` を取得する
+2. **`HEAD` が `T1` と同一コミットの場合**（タグ作成後 = デプロイ直前）: 範囲は `T2..T1` とする。`T1..HEAD` は空になるため、そのまま使うと runbook が空になる
+3. **`HEAD` が `T1` より進んでいる場合**（タグ作成前 = リリース準備中）: 範囲は `T1..HEAD` とする
+
+```bash
+git rev-list --count <T1>..HEAD   # 0 なら HEAD == T1（ケース 2）
+```
+
+確定した範囲と、どちらのケースと判定したかをユーザーに提示する。判定が意図と違う場合に引数で上書きできるようにするため。
 
 ## Step 2: 必要作業の導出（記録を読む前に実施する）
 
@@ -70,7 +91,15 @@ Kyverno ポリシーは Kustomize 管理外のため、変更があれば個別�
 
 導出が終わってから、記録側を読む。
 
-1. `docs/migration/unreleased.md` を読み、節ごとに「どの作業について書かれているか」を抽出する。各節の見出し直後には `> 関連: issue #<番号>` の 1 行がある（[versioning.md](../../../docs/versioning.md) Step 4 の書式。PR 番号が併記されている場合もある）。この行から節と issue の対応を機械的に取れるため、Step 4 の突き合わせではまずこれを使う。issue から PR への対応は、各 PR 本文の `Closes #<番号>` から辿る。`> 関連:` 行が無い節は書式違反として報告する（記録の出所が追えないため）
+1. 対象範囲に対応する移行手順書を読み、節ごとに「どの作業について書かれているか」を抽出する。
+
+   **読み先の決定:**
+
+   - 範囲の終端がリリースタグの場合（デプロイ直前）: `docs/migration/v<終端タグ>.md`。存在しなければ、そのリリースに固有の移行手順が無かったことを意味する（versioning.md Step 5 はリネームをスキップしてよいと規定している）
+   - 範囲の終端が `HEAD` の場合（リリース準備中）: `docs/migration/unreleased.md`
+   - `unreleased.md` を読んだ結果 `##` の節が 0 個（テンプレートのみ）だった場合は、リネーム済みの可能性がある。`docs/migration.md` 末尾のバージョン固有手順のリンク一覧を確認し、範囲に対応するファイルがあればそちらを読む
+
+   各節の見出し直後には `> 関連: issue #<番号>` の 1 行がある（[versioning.md](../../../docs/versioning.md) Step 4 の書式。PR 番号が併記されている場合もある）。この行から節と issue の対応を機械的に取れるため、Step 4 の突き合わせではまずこれを使う。issue から PR への対応は、各 PR 本文の `Closes #<番号>` から辿る。`> 関連:` 行が無い節は書式違反として報告する（記録の出所が追えないため）
 2. 範囲内にマージされた PR を列挙し、各本文の `## Post-apply actions` と `Closes #<issue>` を取得する
 
 ```bash
@@ -79,7 +108,7 @@ gh pr list --state merged --base main --limit 30 --json number,title,mergedAt,bo
 
 範囲の起点タグの日時より後にマージされた PR に絞る。マージコミットのメッセージ（`Merge pull request #N from ...`）から PR 番号を拾う方法でもよい。
 
-PR 本文は **起草時点の情報** であり、後続の PR が前提を覆している場合がある。記録同士や記録と diff が食い違うときは、`unreleased.md` と実 diff を優先する。
+PR 本文は **起草時点の情報** であり、後続の PR が前提を覆している場合がある。記録同士や記録と diff が食い違うときは、移行手順書と実 diff を優先する。
 
 ## Step 4: 突き合わせ（この skill の中核）
 
@@ -154,12 +183,12 @@ PR 本文は **起草時点の情報** であり、後続の PR が前提を覆�
 <unreleased.md に記載された、ロールアウト時の挙動やロールバック時の制約>
 ```
 
-各項目には必ず**根拠**（どの変更パス / `unreleased.md` のどの節 / どの PR）を併記する。管理者が判断を再現できるようにするため。
+各項目には必ず**根拠**（どの変更パス / 移行手順書のどの節 / どの PR）を併記する。管理者が判断を再現できるようにするため。
 
 ## 注意事項
 
-- この skill は runbook をリポジトリにコミットしない。移行手順の正本は `docs/migration/unreleased.md` である
-- `[GAP]` が見つかった場合、修正先は `docs/migration/unreleased.md`（および `docs_en/migration/unreleased.md`）である。PR 本文は過去の記録なので書き換えない
+- この skill は runbook をリポジトリにコミットしない。移行手順の正本は移行手順書（未リリースなら `docs/migration/unreleased.md`、リリース済みなら `docs/migration/vX.Y.Z.md`）である
+- `[GAP]` が見つかった場合、修正先は移行手順書（および `docs_en/` の対応ファイル）である。PR 本文は過去の記録なので書き換えない。ただしリリース済みの `vX.Y.Z.md` はリリース時点の記録でもあるため、追記する場合は「リリース後に判明した追加手順」であることが分かる形にする
 - リリース準備時は [versioning.md](../../../docs/versioning.md) Step 4「移行手順の記載漏れ確認」の実施手段としてこの skill を使える。両者は重複ではなく、versioning.md が「何を確認するか」、この skill が「どう確認するか」を担う
 - ファイル列挙・内容検索には Glob / Grep ツールを使う。bash の `find` / `grep` を使わない
 - 実環境への接続（`kubectl` / `cjobctl` の実行）は行わない。`gh` と `git` の読み取り操作のみを使う
