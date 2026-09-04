@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use k8s_openapi::api::core::v1::ConfigMap;
 use kube::api::{Api, ApiResource, DynamicObject, GroupVersionKind, PostParams};
 use serde_json::Value;
 use std::io::{self, Write};
@@ -6,7 +7,27 @@ use tokio_postgres::Client;
 
 use super::usage::ClusterTotals;
 
-const CLUSTER_QUEUE_NAME: &str = "cjob-cluster-queue";
+/// Fallback when the ConfigMap cannot be read or the key is absent. Matches the
+/// base ConfigMap and `Settings.CLUSTER_QUEUE_NAME` on the server side.
+const DEFAULT_CLUSTER_QUEUE_NAME: &str = "cjob-cluster-queue";
+
+/// Resolve the ClusterQueue name from the `cjob-config` ConfigMap.
+///
+/// ClusterQueue is cluster-scoped, so deployments that place several CJob
+/// instances on one cluster must give each a distinct name via
+/// `CLUSTER_QUEUE_NAME`. Hardcoding the name here would make cjobctl read a
+/// different ClusterQueue than the Watcher (cjobctl.md §5.5).
+async fn cluster_queue_name(k8s_client: &kube::Client, system_ns: &str) -> String {
+    let cms: Api<ConfigMap> = Api::namespaced(k8s_client.clone(), system_ns);
+    match cms.get("cjob-config").await {
+        Ok(cm) => cm
+            .data
+            .and_then(|d| d.get("CLUSTER_QUEUE_NAME").cloned())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| DEFAULT_CLUSTER_QUEUE_NAME.to_string()),
+        Err(_) => DEFAULT_CLUSTER_QUEUE_NAME.to_string(),
+    }
+}
 
 pub async fn resources(client: &Client) -> Result<()> {
     let rows = client
@@ -199,16 +220,17 @@ fn resource_display_name(name: &str) -> &str {
     }
 }
 
-pub async fn show_quota(k8s_client: &kube::Client) -> Result<()> {
+pub async fn show_quota(k8s_client: &kube::Client, system_ns: &str) -> Result<()> {
+    let queue_name = cluster_queue_name(k8s_client, system_ns).await;
     let api = cluster_queue_api(k8s_client);
     let cq = api
-        .get(CLUSTER_QUEUE_NAME)
+        .get(&queue_name)
         .await
         .context("Failed to get ClusterQueue")?;
 
     let flavors = extract_flavor_quotas(&cq);
 
-    println!("=== ClusterQueue nominalQuota ({}) ===", CLUSTER_QUEUE_NAME);
+    println!("=== ClusterQueue nominalQuota ({}) ===", queue_name);
 
     for flavor in &flavors {
         println!();
@@ -276,9 +298,13 @@ fn confirm(prompt: &str) -> bool {
     matches!(input.trim(), "y" | "Y" | "yes" | "Yes")
 }
 
+// The flavor and its three optional resource values are a flat CLI surface;
+// bundling them into a struct would only move the argument list elsewhere.
+#[allow(clippy::too_many_arguments)]
 pub async fn set_quota(
     db_client: &Client,
     k8s_client: &kube::Client,
+    system_ns: &str,
     flavor: &str,
     cpu: Option<u32>,
     memory: Option<&str>,
@@ -295,9 +321,10 @@ pub async fn set_quota(
     }
 
     // Verify flavor exists in ClusterQueue before proceeding
+    let queue_name = cluster_queue_name(k8s_client, system_ns).await;
     let api = cluster_queue_api(k8s_client);
     let cq = api
-        .get(CLUSTER_QUEUE_NAME)
+        .get(&queue_name)
         .await
         .context("Failed to get ClusterQueue")?;
 
@@ -515,13 +542,13 @@ pub async fn set_quota(
 
     // Apply update
     let pp = PostParams::default();
-    api.replace(CLUSTER_QUEUE_NAME, &pp, &cq)
+    api.replace(&queue_name, &pp, &cq)
         .await
         .context("Failed to update ClusterQueue")?;
 
     println!(
         "ClusterQueue '{}' flavor '{}' updated successfully.",
-        CLUSTER_QUEUE_NAME, flavor,
+        queue_name, flavor,
     );
 
     Ok(())
@@ -538,10 +565,11 @@ struct FlavorResource {
     reserved: String,
 }
 
-pub async fn flavor_usage(k8s_client: &kube::Client) -> Result<()> {
+pub async fn flavor_usage(k8s_client: &kube::Client, system_ns: &str) -> Result<()> {
+    let queue_name = cluster_queue_name(k8s_client, system_ns).await;
     let api = cluster_queue_api(k8s_client);
     let cq = api
-        .get(CLUSTER_QUEUE_NAME)
+        .get(&queue_name)
         .await
         .context("Failed to get ClusterQueue")?;
 
@@ -591,7 +619,7 @@ pub async fn flavor_usage(k8s_client: &kube::Client) -> Result<()> {
         }
     }
 
-    println!("=== ResourceFlavor Usage ({}) ===", CLUSTER_QUEUE_NAME);
+    println!("=== ResourceFlavor Usage ({}) ===", queue_name);
     println!(
         "{:<16} {:<18} {:>10} {:>10} {:>8}",
         "FLAVOR", "RESOURCE", "RESERVED", "NOMINAL", "USAGE"

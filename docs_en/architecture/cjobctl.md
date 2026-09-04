@@ -243,6 +243,10 @@ user-charlie   -                 -                    -                 -       
 | `cjobctl cluster set-quota --flavor <name> [--cpu <n>] [--memory <s>] [--gpu <n>] [--force]` | Update nominalQuota of the specified ResourceFlavor | DB + K8s: ClusterQueue |
 | `cjobctl cluster set-drf-weight <flavor> <weight>` | Set DRF weight of the specified flavor | DB: `flavor_quotas` |
 
+The three commands that reference the ClusterQueue (`flavor-usage` / `show-quota` / `set-quota`) obtain the target ClusterQueue name from `CLUSTER_QUEUE_NAME` in the `cjob-config` ConfigMap. If the ConfigMap cannot be read, or the key is absent, they fall back to the default `cjob-cluster-queue` (they read the same ConfigMap as `cjobctl config show`).
+
+ClusterQueue is cluster-scoped and cannot be separated by namespace, so deployments that place several CJob instances on one cluster must give each a distinct name via `CLUSTER_QUEUE_NAME`. If cjobctl fixed the name, it would read a different ClusterQueue than the Watcher in such an environment.
+
 #### `cjobctl cluster resources`
 
 Output example:

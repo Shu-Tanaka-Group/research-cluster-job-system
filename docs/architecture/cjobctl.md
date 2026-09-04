@@ -241,6 +241,10 @@ user-charlie   -                 -                    -                 -       
 | `cjobctl cluster set-quota --flavor <name> [--cpu <n>] [--memory <s>] [--gpu <n>] [--force]` | 指定 ResourceFlavor の nominalQuota を更新 | DB + K8s: ClusterQueue |
 | `cjobctl cluster set-drf-weight <flavor> <weight>` | 指定 flavor の DRF weight を設定 | DB: `flavor_quotas` |
 
+ClusterQueue を参照する 3 コマンド（`flavor-usage` / `show-quota` / `set-quota`）は、対象の ClusterQueue 名を `cjob-config` ConfigMap の `CLUSTER_QUEUE_NAME` から取得する。ConfigMap の取得に失敗した場合、およびキーが存在しない場合は既定値 `cjob-cluster-queue` にフォールバックする（`cjobctl config show` と同じ ConfigMap を読む）。
+
+ClusterQueue は cluster-scoped リソースであり namespace で分離できないため、同一クラスタに複数の CJob インスタンスを配置する場合は `CLUSTER_QUEUE_NAME` で名前を分ける必要がある。cjobctl 側が名前を固定していると、そのような環境で Watcher が参照する ClusterQueue と cjobctl が参照する ClusterQueue が食い違う。
+
 #### `cjobctl cluster resources`
 
 出力例:
