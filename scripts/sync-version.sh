@@ -85,7 +85,9 @@ if [ -f "$CARGO_CTL" ]; then
     fi
 fi
 
-# Update k8s/overlay-example/kustomization.yaml (newTag fields)
+# Update k8s/overlay-example/kustomization.yaml (newTag fields and base ?ref=)
+# Both must move together: a newTag without a matching ?ref= would pair new
+# images with the previous version's Deployment / ConfigMap.
 KUSTOMIZATION="$REPO_ROOT/k8s/overlay-example/kustomization.yaml"
 if [ -f "$KUSTOMIZATION" ]; then
     current=$(grep -m1 'newTag:' "$KUSTOMIZATION" | sed 's/.*newTag: *"\(.*\)"/\1/')
@@ -93,6 +95,14 @@ if [ -f "$KUSTOMIZATION" ]; then
         sed -i.bak "s/newTag: \".*\"/newTag: \"$VERSION\"/g" "$KUSTOMIZATION"
         rm -f "$KUSTOMIZATION.bak"
         echo "Updated $KUSTOMIZATION: $current -> $VERSION"
+        changed=1
+    fi
+    # Restrict to the remote base URLs; the header comment also mentions ?ref=
+    current_ref=$(grep -m1 '\.git//.*?ref=' "$KUSTOMIZATION" | sed 's/.*?ref=//')
+    if [ -n "$current_ref" ] && [ "$current_ref" != "$VERSION" ]; then
+        sed -i.bak "/\.git\/\//s|?ref=.*\$|?ref=$VERSION|g" "$KUSTOMIZATION"
+        rm -f "$KUSTOMIZATION.bak"
+        echo "Updated $KUSTOMIZATION (?ref=): $current_ref -> $VERSION"
         changed=1
     fi
 fi

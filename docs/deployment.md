@@ -22,7 +22,16 @@ K8s マニフェストは Kustomize の base / overlay 構成で管理する。
 
 base にはデフォルト値を含む全マニフェストが入っており、環境固有の値は**リポジトリ外に配置した overlay** で上書きする。overlay のサンプルは `k8s/overlay-example/` を参照。
 
-デプロイはリポジトリを clone し、overlay を指定して行う。
+overlay の `resources` は base を Git URL で参照する。overlay を置くマシンにリポジトリを clone しておく必要がなく、`?ref=<タグ>` で base のバージョンを固定できる。
+
+```yaml
+resources:
+  - https://github.com/Shu-Tanaka-Group/research-cluster-job-system.git//k8s/base?ref=1.16.0
+```
+
+GitHub に到達できない環境、または base をローカルで改変して試す場合は、相対パス（`../stg-cluster-job-system/k8s/base`）でも参照できる。この場合は `git checkout <VERSION>` で base のバージョンを揃える。
+
+デプロイは overlay を指定して行う。
 
 ```bash
 kubectl apply -k /path/to/my-overlay
@@ -815,11 +824,10 @@ kubectl create secret generic postgres-secret -n cjob-system \
 
 # 2. overlay の準備
 # k8s/overlay-example/ をリポジトリ外にコピーし、環境に合わせて編集する
-# - kustomization.yaml: resources の base パス、image 名・タグ、StorageClass
+# - kustomization.yaml: base の ?ref=（バージョン）、image 名・タグ、StorageClass
 # - configmap-cjob-config.yaml: チューニングしたい ConfigMap の値
 cp -r k8s/overlay-example /path/to/my-overlay
-# kustomization.yaml の resources パスを編集する
-# 例: resources: [../stg-cluster-job-system/k8s/base]
+# resources の ?ref= と images の newTag は同じバージョンに揃える
 
 # 3. システムコンポーネント image のビルドと push
 read -r VERSION < VERSION

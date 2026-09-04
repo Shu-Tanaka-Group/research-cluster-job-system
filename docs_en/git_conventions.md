@@ -4,13 +4,21 @@
 
 ## 1. Branch Naming Rules
 
+For changes tied to an issue:
+
 ```
 <change-type>/#<issue-number>_<title>
 ```
 
+For changes not tied to an issue:
+
+```
+<change-type>/<title>
+```
+
 - The title should be written in kebab-case (lowercase, words separated by hyphens)
-- Minor changes not tied to an issue may be committed directly to main
-- The `release` type is not tied to an issue, so it uses the exceptional form `release/v<version>` (e.g., `release/v1.15.0`). See [versioning.md](versioning.md) §Step 7 for the procedure
+- Minor changes not tied to an issue may be committed directly to main. They may also go through a branch and a PR, in which case use the form above with the issue number omitted
+- The `release` type uses the exceptional form `release/v<version>` (e.g., `release/v1.15.0`). See [versioning.md](versioning.md) §Step 7 for the procedure
 
 ### Change Types
 
@@ -29,6 +37,7 @@
 feature/#2_gap-filling-dispatch-for-large-jobs
 fix/#15_cancel-race-condition
 docs/#8_update-deployment-guide
+docs/overlay-remote-base          # not tied to an issue
 release/v1.15.0
 ```
 

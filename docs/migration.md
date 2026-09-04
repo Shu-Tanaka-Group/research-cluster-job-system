@@ -23,6 +23,8 @@ cd /path/to/stg-cluster-job-system
 git fetch && git checkout <VERSION>
 ```
 
+overlay が base を Git URL で参照している場合、apply 自体にリポジトリの clone は不要だが、Step 2 のイメージビルドと Step 3 の CLI ビルドで必要になる。
+
 base の ConfigMap にキーが追加されていないか確認する。追加がある場合は overlay の `configmap-cjob-config.yaml` にチューニング値を反映するか、デフォルト値のままでよいか判断する。
 
 ```bash
@@ -78,7 +80,21 @@ cargo build --release --target x86_64-unknown-linux-musl
 
 ## Step 4: K8s リソースの適用
 
-overlay の `kustomization.yaml` の `newTag` を新バージョンに更新する（Step 2 でイメージが push 済みであることを確認してから行う）。
+overlay の `kustomization.yaml` を新バージョンに更新する（Step 2 でイメージが push 済みであることを確認してから行う）。**更新箇所は 2 つあり、必ず同じバージョンに揃える。**
+
+| 箇所 | 内容 |
+|---|---|
+| `resources` の `?ref=` | base（Deployment / ConfigMap / RBAC 等）のバージョン |
+| `images` の `newTag` | コンテナイメージのタグ |
+
+`newTag` だけを更新すると「新しいイメージ + 旧バージョンの Deployment / ConfigMap」の組み合わせになる。新しい ConfigMap キーを必要とする機能が黙って無効化されるため、障害としては現れない。
+
+```bash
+# 更新後、両者が一致していることを確認する
+grep -E '\?ref=|newTag:' /path/to/my-overlay/kustomization.yaml
+```
+
+base を相対パスで参照している overlay では `?ref=` の代わりに、Step 1 の `git checkout <VERSION>` で base のバージョンが切り替わる。
 
 ```bash
 kubectl apply -k /path/to/my-overlay

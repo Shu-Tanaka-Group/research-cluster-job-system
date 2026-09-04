@@ -20,7 +20,7 @@ CJob は単一の `VERSION` ファイルでプロジェクト全体のバージ�
 | `server/pyproject.toml` | Submit API / Dispatcher / Watcher |
 | `cli/Cargo.toml` | cjob CLI |
 | `ctl/Cargo.toml` | cjobctl |
-| `k8s/overlay-example/kustomization.yaml` | overlay サンプルのイメージタグ |
+| `k8s/overlay-example/kustomization.yaml` | overlay サンプルのイメージタグ（`newTag`）と base の参照バージョン（`?ref=`） |
 
 ## バージョン更新手順
 

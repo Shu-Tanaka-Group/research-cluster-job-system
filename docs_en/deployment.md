@@ -24,7 +24,16 @@ Outside the repository (created by administrators):
 
 The base contains all manifests with default values, and environment-specific values are overridden by **overlays placed outside the repository**. See `k8s/overlay-example/` for a sample overlay.
 
-Deployment is done by cloning the repository and specifying the overlay.
+The overlay's `resources` references base by Git URL. This removes the need to clone the repository on the machine that holds the overlay, and `?ref=<tag>` pins the base version.
+
+```yaml
+resources:
+  - https://github.com/Shu-Tanaka-Group/research-cluster-job-system.git//k8s/base?ref=1.16.0
+```
+
+In environments that cannot reach GitHub, or when trying out local modifications to base, a relative path (`../stg-cluster-job-system/k8s/base`) works as well. In that case, align the base version with `git checkout <VERSION>`.
+
+Deployment is done by specifying the overlay.
 
 ```bash
 kubectl apply -k /path/to/my-overlay

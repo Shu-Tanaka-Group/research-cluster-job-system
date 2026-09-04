@@ -5,30 +5,37 @@
 # 使用方法:
 #   1. このディレクトリを任意の場所にコピーする
 #      cp -r k8s/overlay-example /path/to/my-overlay
-#   2. kustomization.yaml の resources パスをリポジトリ内の base に合わせて修正する
-#   3. 環境に合わせて images / patches / configmap-cjob-config.yaml を編集する
-#   4. デプロイする
+#   2. 環境に合わせて images / patches / configmap-cjob-config.yaml を編集する
+#   3. デプロイする
 #      kubectl apply -k /path/to/my-overlay
 #
 # バージョンアップ時:
-#   1. リポジトリを git pull して新しいバージョンに checkout する
-#   2. overlay の newTag を新バージョンに更新する
-#   3. kubectl apply -k /path/to/my-overlay を再実行する
-#   4. base の configmap-cjob-config.yaml に新しいキーが追加されていないか確認する
+#   1. resources の ?ref= と images の newTag を新バージョンに更新する
+#      ★ 両方を同じバージョンに揃えること。newTag だけ更新すると
+#        「新しいイメージ + 旧バージョンの Deployment / ConfigMap」の組み合わせになり、
+#        新しい ConfigMap キーを必要とする機能が黙って無効化される
+#   2. kubectl apply -k /path/to/my-overlay を再実行する
+#   3. base の configmap-cjob-config.yaml に新しいキーが追加されていないか確認する
 #      git diff <old-tag>...<new-tag> -- k8s/base/configmap-cjob-config.yaml
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-# リポジトリ内の base へのパスを指定する
-# 例: リポジトリが /opt/cjob/stg-cluster-job-system にある場合
-#     overlay が /opt/cjob/my-overlay にある場合
-#     → ../stg-cluster-job-system/k8s/base
+# base はリポジトリの Git URL で参照する。overlay を置くマシンにリポジトリを
+# clone しておく必要がなく、?ref= のタグで base のバージョンを固定できる。
 resources:
-  - ../stg-cluster-job-system/k8s/base
+  - https://github.com/Shu-Tanaka-Group/research-cluster-job-system.git//k8s/base?ref=1.16.0
   # Prometheus Operator を使用している場合は以下を追加する
-  # （ServiceMonitor / PodMonitor の CRD が必要）
-  - ../stg-cluster-job-system/k8s/base/prometheus-operator
+  # （ServiceMonitor / PodMonitor の CRD が必要）。
+  # CRD を作り直すと ServiceMonitor / PodMonitor も道連れで消えるため、
+  # その場合はこの overlay を再 apply する。
+  - https://github.com/Shu-Tanaka-Group/research-cluster-job-system.git//k8s/base/prometheus-operator?ref=1.16.0
+
+  # GitHub に到達できない環境、または base をローカルで改変して試す場合は
+  # 相対パスで参照する。この場合は git checkout <VERSION> で base のバージョンを揃える。
+  # 例: リポジトリが /opt/cjob/stg-cluster-job-system、overlay が /opt/cjob/my-overlay にある場合
+  # - ../stg-cluster-job-system/k8s/base
+  # - ../stg-cluster-job-system/k8s/base/prometheus-operator
 
 images:
   - name: cjob-submit-api
