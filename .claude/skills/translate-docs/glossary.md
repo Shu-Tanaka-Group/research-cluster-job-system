@@ -99,6 +99,9 @@
 | 事前確認 | pre-check（作業）/ prior verification（文脈次第） | 設計上の「プレチェック」と区別が必要な場合は後者 |
 | 移行手順 | migration procedures | **`migration steps` は使わない**。ファイルのタイトルも `... Migration Procedures` |
 | 標準移行手順 | standard migration procedures | |
+| 初期セットアップ手順 | Initial Setup Procedure | 見出し。「移行手順」（既存クラスタの更新）と対になる、新規クラスタ向けの手順 |
+| 読み取り専用 | read-only | **`readonly` と綴らない**（YAML の `readOnly:` は原文のまま） |
+| データソース（Grafana の） | data source | **`datasource` と綴らない**（JSON のキー名・変数名 `${DS_*}` は原文のまま） |
 | 前提条件 | Prerequisites | 見出し。文中の「前提」は `assumption` / `premise` |
 | 運用 | operation(s) | |
 | 記載漏れ | omission | |

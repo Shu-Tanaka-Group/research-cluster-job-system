@@ -741,3 +741,125 @@ cjobctl cluster show-quota
 # Verify job submission
 cjob add --flavor <flavor-name> -- echo hello
 ```
+
+---
+
+## 17. Setting Up the Grafana Dashboard
+
+Deploy the Grafana dashboard that lets users check cluster status. See [monitoring.md](architecture/monitoring.md) for the detailed design.
+
+### 17.1 Prerequisites
+
+- Prometheus scraping of Kueue metrics is configured (see §15.1)
+- Kueue ClusterQueue resource metrics are enabled (see §15.2)
+
+### 17.2 Creating a Read-Only PostgreSQL User
+
+Create a read-only user for Grafana to connect to the CJob PostgreSQL database.
+
+```bash
+kubectl exec -it postgres-0 -n cjob-system -- psql -U cjob -d cjob
+```
+
+```sql
+CREATE ROLE grafana_reader LOGIN PASSWORD '<secure-password>';
+GRANT CONNECT ON DATABASE cjob TO grafana_reader;
+GRANT USAGE ON SCHEMA public TO grafana_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO grafana_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO grafana_reader;
+```
+
+### 17.3 Adding the Grafana Data Sources
+
+Add a PostgreSQL data source to Grafana (also add Prometheus if it is not registered yet).
+
+1. Open `Connections` > `Data sources` in the Grafana UI
+2. Click `Add data source` and select `PostgreSQL`
+3. Enter the following values:
+
+| Item | Value |
+|---|---|
+| Name | `CJob DB` |
+| Host URL | `postgres.cjob-system.svc.cluster.local:5432` |
+| Database name | `cjob` |
+| Username | `grafana_reader` |
+| Password | The password set in §17.2 |
+| TLS/SSL Mode | `disable` (in-cluster communication) |
+
+4. Click `Save & test` and confirm that `Database Connection OK` is displayed
+
+**Note:** Even when Grafana runs outside the `cjob-system` namespace, the Host URL above can be used as long as it is reachable via in-cluster DNS (`<service>.<namespace>.svc.cluster.local`). To connect from a Grafana instance outside the cluster, set up a route to PostgreSQL via NodePort, Ingress, or similar.
+
+### 17.4 Restricting Grafana User Roles
+
+Because `grafana_reader` has `SELECT` permission on all tables, any user who can run arbitrary SQL in Grafana can directly read the `env_json` column of the `jobs` table (the environment variables captured at job submission). Other users' environment variables may contain secrets, so grant general users only the Grafana **Viewer** role and restrict access to dashboard editing and Explore (arbitrary SQL execution).
+
+### 17.5 Importing the Dashboard
+
+Import `k8s/base/grafana/dashboard-user.json` from the Grafana UI.
+
+1. Open `Dashboards` > `Import` in the Grafana UI
+2. Select `dashboard-user.json` under `Upload dashboard JSON file`
+3. On the data source selection screen, map `Prometheus` and `CJob DB` to the data sources in your environment
+4. Run `Import`
+
+---
+
+## 18. Initial Setup Procedure
+
+Initial setup procedure for a new cluster. Assumes the compute node preparation in §16 is complete.
+
+```bash
+# 1. Create the Secret (not managed by Kustomize, so create it manually)
+kubectl create namespace cjob-system
+kubectl create secret generic postgres-secret -n cjob-system \
+  --from-literal=POSTGRES_USER=cjob \
+  --from-literal=POSTGRES_PASSWORD='<password>' \
+  --from-literal=POSTGRES_DB=cjob
+
+# 2. Prepare the overlay
+# Copy k8s/overlay-example/ outside the repository and edit it for your environment
+# - kustomization.yaml: base ?ref= (version), image names and tags, StorageClass
+# - configmap-cjob-config.yaml: ConfigMap values you want to tune
+cp -r k8s/overlay-example /path/to/my-overlay
+# Set ?ref= in resources and newTag in images to the same version
+
+# 3. Build and push the system component images
+read -r VERSION < VERSION
+docker build -t your-registry/cjob-submit-api:${VERSION} -f server/Dockerfile.api server/
+docker build -t your-registry/cjob-dispatcher:${VERSION} -f server/Dockerfile.dispatcher server/
+docker build -t your-registry/cjob-watcher:${VERSION} -f server/Dockerfile.watcher server/
+docker push your-registry/cjob-submit-api:${VERSION}
+docker push your-registry/cjob-dispatcher:${VERSION}
+docker push your-registry/cjob-watcher:${VERSION}
+# The Job Pod (runtime image) uses your-registry/cjob-jupyter:2.1.0 (managed separately)
+
+# 4. Deploy all resources with Kustomize
+kubectl apply -k /path/to/my-overlay
+
+# Initializing the DB schema:
+# schema.sql in the postgres-schema ConfigMap is mounted at /docker-entrypoint-initdb.d/
+# and runs automatically on the first PostgreSQL startup.
+# It uses IF NOT EXISTS, so it is safe to re-run on redeployment.
+
+# 5. Create the Kueue resources
+#    The ResourceFlavor / ClusterQueue YAML is environment-specific, so the administrator creates it.
+#    See §15.3 and the templates in architecture/kueue.md.
+kubectl apply -f <path-to-resource-flavor.yaml>
+kubectl apply -f <path-to-cluster-queue.yaml>
+
+# 6. Install Kyverno and apply the image restriction policy
+helm repo add kyverno https://kyverno.github.io/kyverno/
+helm repo update
+helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --version 3.7.1
+kubectl apply -f policies/restrict-job-image.yaml
+
+# 7. Create each user's namespace (arguments: <namespace-name> <username>)
+./scripts/create-user-namespace.sh user-alice alice
+./scripts/create-user-namespace.sh user-bob bob
+
+# 8. Deploy the CLI binary (see §4.1)
+# For building cjobctl, see "Building the Admin CLI (cjobctl)" in build.md
+cargo build --release --target x86_64-unknown-linux-musl --manifest-path cli/Cargo.toml
+cjobctl cli deploy --binary ./cli/target/x86_64-unknown-linux-musl/release/cjob --version ${VERSION}
+```
