@@ -303,7 +303,11 @@ Submit API のエンドポイントは環境変数 `CJOB_API_URL` で設定す�
 
 ## 11. namespace 作成スクリプト（完成版）
 
-新規ユーザーの namespace を作成する際に実行するスクリプト。
+新規ユーザーの namespace を作成する際に実行するスクリプト。**このスクリプトはリポジトリに含まれていない。** 以下の内容を `create-user-namespace.sh` として任意の場所に保存し、実行権限を付与して使う。
+
+```bash
+chmod +x create-user-namespace.sh
+```
 
 ```bash
 #!/bin/bash
@@ -347,6 +351,7 @@ spec:
 EOF
 
 # ResourceQuota 作成
+# 以下の値はサンプルであり、クラスタの規模とユーザー数に合わせて調整すること。
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ResourceQuota
@@ -860,8 +865,9 @@ helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --v
 kubectl apply -f policies/restrict-job-image.yaml
 
 # 7. 各ユーザーの namespace 作成（引数: <namespace名> <ユーザー名>）
-./scripts/create-user-namespace.sh user-alice alice
-./scripts/create-user-namespace.sh user-bob bob
+#    スクリプトは §11 の内容を保存したもの（リポジトリには含まれていない）
+<path-to>/create-user-namespace.sh user-alice alice
+<path-to>/create-user-namespace.sh user-bob bob
 
 # 8. CLI バイナリの配置（§4.1 参照）
 # cjobctl のビルドは build.md「管理 CLI（cjobctl）のビルド」を参照
