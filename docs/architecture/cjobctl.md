@@ -42,6 +42,26 @@ cjobctl → kubectl port-forward (自動起動、ランダムポート)
 
 `kube::Client::try_default()` により kubeconfig から自動的にクライアントを構成する。port-forward は不要。
 
+### 3.3 プロキシ経由のリモート実行
+
+クラスタ外のネットワークからでも、SOCKS5 プロキシ経由で cjobctl を実行できる。kubeconfig の cluster エントリに `proxy-url` を指定する（環境変数 `HTTPS_PROXY` / `https_proxy` でも同じ効果が得られる）。
+
+```yaml
+clusters:
+  - name: cjob-cluster
+    cluster:
+      server: https://<api-server>:6443
+      proxy-url: socks5://localhost:1080
+```
+
+- **K8s 接続（3.2）**: `kube` クレートの `socks5` feature を有効にしている（`ctl/Cargo.toml`）。この feature が無効だと、K8s API を使うコマンドは接続を試みる前に `configured proxy ... requires the disabled feature "kube/socks5"` で失敗する。依存整理の際に削除しないこと。
+- **DB 接続（3.1）**: `kubectl port-forward` の子プロセスが kubeconfig の設定に従うため、cjobctl 側の対応は不要。
+
+注意点:
+
+- kube クレートが読む環境変数は `HTTPS_PROXY` / `https_proxy` のみで、`ALL_PROXY` は読まない。kubectl は `ALL_PROXY` を読むため、`ALL_PROXY` のみを設定した環境では kubectl（および DB コマンド）は成功し K8s API を使うコマンドだけが失敗する、という切り分けにくい状態になる。kubeconfig の `proxy-url` で指定すればこの差異は生じない。
+- 受け付けるスキームは `socks5`（および `http`。ただし `http` は `http-proxy` feature が別途必要で、現在は無効）。`socks5h` は非対応で `ProxyProtocolUnsupported` となる。
+
 ## 4. 設定ファイル
 
 `~/.config/cjobctl/config.toml`:
@@ -57,6 +77,8 @@ namespace = "cjob-system"   # 省略時デフォルト
 ```
 
 `host` / `port` は自動 port-forward が管理するため設定不要。
+
+設定ファイルの探索先は `$XDG_CONFIG_HOME/cjobctl/config.toml`、`XDG_CONFIG_HOME` が未設定の場合は `~/.config/cjobctl/config.toml` をデフォルトとする（`cjob` CLI と同じ規則）。OS ごとの標準設定ディレクトリ（macOS の `~/Library/Application Support` 等）は使用せず、全プラットフォームで同一のパスとする。
 
 ## 5. コマンド一覧
 

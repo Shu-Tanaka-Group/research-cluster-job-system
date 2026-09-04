@@ -44,6 +44,26 @@ The prerequisites are that `kubectl` is in the PATH and that the cluster is acce
 
 `kube::Client::try_default()` automatically configures the client from kubeconfig. No port-forward is required.
 
+### 3.3 Remote Execution via a Proxy
+
+`cjobctl` can be executed from outside the cluster network through a SOCKS5 proxy. Specify `proxy-url` in the cluster entry of kubeconfig (the environment variables `HTTPS_PROXY` / `https_proxy` have the same effect).
+
+```yaml
+clusters:
+  - name: cjob-cluster
+    cluster:
+      server: https://<api-server>:6443
+      proxy-url: socks5://localhost:1080
+```
+
+- **K8s connection (3.2)**: the `socks5` feature of the `kube` crate is enabled (`ctl/Cargo.toml`). Without this feature, commands that use the K8s API fail with `configured proxy ... requires the disabled feature "kube/socks5"` before any connection is attempted. Do not remove it when cleaning up dependencies.
+- **DB connection (3.1)**: the `kubectl port-forward` child process follows the kubeconfig setting, so nothing is required on the cjobctl side.
+
+Notes:
+
+- The only environment variables the kube crate reads are `HTTPS_PROXY` / `https_proxy`; it does not read `ALL_PROXY`. Since kubectl does read `ALL_PROXY`, an environment that sets only `ALL_PROXY` ends up in a state that is hard to diagnose: kubectl (and therefore the DB commands) succeed while only the commands that use the K8s API fail. Specifying `proxy-url` in kubeconfig avoids this discrepancy.
+- The accepted schemes are `socks5` (and `http`, which additionally requires the `http-proxy` feature and is currently disabled). `socks5h` is not supported and results in `ProxyProtocolUnsupported`.
+
 ## 4. Configuration File
 
 `~/.config/cjobctl/config.toml`:
@@ -59,6 +79,8 @@ namespace = "cjob-system"   # default when omitted
 ```
 
 `host` / `port` are managed by automatic port-forward, so no configuration is needed.
+
+The configuration file is looked up at `$XDG_CONFIG_HOME/cjobctl/config.toml`, defaulting to `~/.config/cjobctl/config.toml` when `XDG_CONFIG_HOME` is not set (the same rule as the `cjob` CLI). The OS-specific standard configuration directory (such as `~/Library/Application Support` on macOS) is not used; the path is identical on all platforms.
 
 ## 5. Command List
 

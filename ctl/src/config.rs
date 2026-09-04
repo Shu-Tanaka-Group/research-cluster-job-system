@@ -45,9 +45,15 @@ impl Config {
             .unwrap_or("cjob.io/user-namespace=true")
     }
 
+    /// Returns the path to the admin config file.
+    /// Uses $XDG_CONFIG_HOME/cjobctl/config.toml, defaulting to ~/.config/cjobctl/config.toml.
     fn config_path() -> Result<PathBuf> {
-        let config_dir = dirs::config_dir()
-            .context("Could not determine config directory")?;
+        let config_dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            PathBuf::from(xdg)
+        } else {
+            let home = std::env::var("HOME").context("HOME environment variable is not set")?;
+            PathBuf::from(home).join(".config")
+        };
         Ok(config_dir.join("cjobctl").join("config.toml"))
     }
 }
