@@ -180,7 +180,8 @@ IMAGE 列については 3.6 を参照してください。
 ```
 $ cjob flavor info gpu
 name:   gpu
-GPU:    対応
+GPU:    yes
+image:  your-registry/cjob-cuda:2.1.0
 
 RESOURCE        QUOTA   TASK LIMIT
 CPU                32           32
@@ -226,7 +227,7 @@ flavor:        gpu
 cpu:           1
 memory:        1Gi
 gpu:           1
-time_limit:    24h (残り 23h 50m)
+time_limit:    24h (23h 50m remaining)
 ...
 ```
 

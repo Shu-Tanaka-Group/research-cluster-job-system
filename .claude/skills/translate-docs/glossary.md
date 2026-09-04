@@ -18,6 +18,7 @@
 | 設定キー・カラム名・ステータス値は翻訳しない | `WATCHER_DISPATCH_TIMEOUT_SEC`、`unschedulable_count`、`DISPATCHED` |
 | Kubernetes / Kueue の用語は原語のまま | `Pod`、`Job`、`namespace`、`admit`、`nominalQuota`、`ResourceQuota` |
 | 疑似コード・SQL・コマンドの中身は翻訳しない（コメントのみ英訳する） | |
+| CLI の出力例は翻訳せず、実装の出力文字列をそのまま転記する | `GPU:    no`（`GPU: 非対応` を `Not supported` と訳さない）、`(Resource information is not available yet)` |
 
 ## ジョブとライフサイクル
 

@@ -273,11 +273,11 @@ Behavior varies by job state:
 | State | Behavior |
 |---|---|
 | QUEUED / DISPATCHING / DISPATCHED | Without `--follow`: Displays "not yet started" and suggests using `--follow`, then exits. With `--follow`: Waits up to 5 minutes (displays state and elapsed time during wait) |
-| HELD | No logs because the job is held. Displays "Job is held" and suggests releasing with `cjob release` |
+| HELD | No logs because the job is held. Displays `Job {job_id} is held. (HELD)` and suggests releasing with `cjob release` |
 | RUNNING | Follows with tail -f after file is created (when `--follow` is specified) |
 | SUCCEEDED / FAILED | Displays the entire file and exits |
 | CANCELLED | Displays file if available, otherwise "No logs available" |
-| DELETING | Reset in progress. Displays file if available, otherwise "No logs available (reset in progress)" and exits |
+| DELETING | Reset in progress. Displays file if available, otherwise `No logs available (reset in progress)` and exits |
 
 Log files are on PVC and read directly by the CLI. The log directory path uses `log_dir` obtained from `GET /v1/jobs/{job_id}`.
 
@@ -988,12 +988,12 @@ Directly installs the specified version. After the confirmation prompt, download
 ```bash
 # Update to latest stable (default)
 $ cjob update
-Update? 1.2.0 → 1.3.0 [y/N] y
+Update? 1.2.0 -> 1.3.0 [y/N] y
 Update complete. (1.3.0)
 
 # Update to latest including beta
 $ cjob update --pre
-Update? 1.2.0 → 1.3.1-beta.2 [y/N] y
+Update? 1.2.0 -> 1.3.1-beta.2 [y/N] y
 Update complete. (1.3.1-beta.2)
 
 # Skip confirmation
@@ -1020,7 +1020,7 @@ $ cjob update --list --pre
 
 # Install specific version
 $ cjob update --version 1.3.1-beta.1
-Update? 1.2.0 → 1.3.1-beta.1 [y/N] y
+Update? 1.2.0 -> 1.3.1-beta.1 [y/N] y
 Update complete. (1.3.1-beta.1)
 ```
 
@@ -1050,7 +1050,7 @@ QUOTA is the ClusterQueue's nominalQuota (total resource amount shared across th
 ```
 $ cjob flavor info cpu
 name:   cpu
-GPU:    Not supported
+GPU:    no
 image:  -
 
 RESOURCE      QUOTA    TASK LIMIT
@@ -1063,7 +1063,7 @@ For GPU-capable flavors, the GPU row is also displayed.
 ```
 $ cjob flavor info gpu-a100
 name:   gpu-a100
-GPU:    Supported
+GPU:    yes
 image:  your-registry/cjob-cuda:2.1.0
 
 RESOURCE      QUOTA    TASK LIMIT
@@ -1079,10 +1079,10 @@ When quota information is not available because the Watcher has not yet synced, 
 ```
 $ cjob flavor info cpu
 name:   cpu
-GPU:    Not supported
+GPU:    no
 image:  -
 
-(Resource information has not been retrieved yet)
+(Resource information is not available yet)
 ```
 
 When a nonexistent flavor is specified, an error is displayed.
