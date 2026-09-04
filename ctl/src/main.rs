@@ -427,11 +427,11 @@ async fn main() -> Result<()> {
                 }
                 ClusterCommands::FlavorUsage => {
                     let k8s_client = k8s::client().await?;
-                    cmd::cluster::flavor_usage(&k8s_client).await
+                    cmd::cluster::flavor_usage(&k8s_client, config.system_namespace()).await
                 }
                 ClusterCommands::ShowQuota => {
                     let k8s_client = k8s::client().await?;
-                    cmd::cluster::show_quota(&k8s_client).await
+                    cmd::cluster::show_quota(&k8s_client, config.system_namespace()).await
                 }
                 ClusterCommands::SetQuota { flavor, cpu, memory, gpu, force } => {
                     let conn =
@@ -440,6 +440,7 @@ async fn main() -> Result<()> {
                     cmd::cluster::set_quota(
                         &conn.client,
                         &k8s_client,
+                        config.system_namespace(),
                         &flavor,
                         cpu,
                         memory.as_deref(),
