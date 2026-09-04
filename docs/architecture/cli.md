@@ -270,12 +270,12 @@ cjob add --time-limit 3d -- python main.py       # 3日
 
 | 状態 | 動作 |
 |---|---|
-| QUEUED / DISPATCHING / DISPATCHED | `--follow` なし: 「まだ開始されていません」と表示し `--follow` の使用を促して終了。`--follow` あり: 最大 5分待機（待機中は状態と経過時間を表示） |
-| HELD | 保留中のためログなし。「ジョブは保留中です」と表示し、`cjob release` で解除を促す |
+| QUEUED / DISPATCHING / DISPATCHED | `--follow` なし: `Job {job_id} has not started yet. ({status})` と表示し `--follow` の使用を促して終了。`--follow` あり: 最大 5分待機（待機中は状態と経過時間を表示） |
+| HELD | 保留中のためログなし。`Job {job_id} is held. (HELD)` と表示し、`cjob release` で解除を促す |
 | RUNNING | ファイル生成後に tail -f で追跡（`--follow` 時） |
 | SUCCEEDED / FAILED | ファイルを全量表示して終了 |
 | CANCELLED | ファイルがあれば表示、なければ "No logs available" |
-| DELETING | reset 処理中。ファイルがあれば表示、なければ "No logs available（reset 処理中）" を表示して終了 |
+| DELETING | reset 処理中。ファイルがあれば表示、なければ `No logs available (reset in progress)` を表示して終了 |
 
 ログファイルは PVC 上にあり、CLI が直接読む。ログディレクトリのパスは `GET /v1/jobs/{job_id}` で取得した `log_dir` を使用する。
 
@@ -986,21 +986,21 @@ CLI バイナリのバージョン管理と更新を行う。バイナリは Sub
 ```bash
 # 安定版の最新に更新（デフォルト）
 $ cjob update
-更新しますか？ 1.2.0 → 1.3.0 [y/N] y
-更新が完了しました。(1.3.0)
+Update? 1.2.0 -> 1.3.0 [y/N] y
+Update complete. (1.3.0)
 
 # ベータ版を含む最新に更新
 $ cjob update --pre
-更新しますか？ 1.2.0 → 1.3.1-beta.2 [y/N] y
-更新が完了しました。(1.3.1-beta.2)
+Update? 1.2.0 -> 1.3.1-beta.2 [y/N] y
+Update complete. (1.3.1-beta.2)
 
 # 確認をスキップ
 $ cjob update -y
-更新が完了しました。(1.3.0)
+Update complete. (1.3.0)
 
 # すでに最新の場合
 $ cjob update
-すでに最新バージョンです (1.3.0)
+Already up to date (1.3.0)
 
 # 利用可能なバージョン一覧（安定版のみ）
 $ cjob update --list
@@ -1018,8 +1018,8 @@ $ cjob update --list --pre
 
 # バージョン指定でインストール
 $ cjob update --version 1.3.1-beta.1
-更新しますか？ 1.2.0 → 1.3.1-beta.1 [y/N] y
-更新が完了しました。(1.3.1-beta.1)
+Update? 1.2.0 -> 1.3.1-beta.1 [y/N] y
+Update complete. (1.3.1-beta.1)
 ```
 
 ## 17. `cjob flavor` の動作
@@ -1048,7 +1048,7 @@ QUOTA は ClusterQueue の nominalQuota（flavor 全体で共有するリソー�
 ```
 $ cjob flavor info cpu
 name:   cpu
-GPU:    非対応
+GPU:    no
 image:  -
 
 RESOURCE      QUOTA    TASK LIMIT
@@ -1061,7 +1061,7 @@ GPU 対応 flavor の場合は GPU 行も表示する。
 ```
 $ cjob flavor info gpu-a100
 name:   gpu-a100
-GPU:    対応
+GPU:    yes
 image:  your-registry/cjob-cuda:2.1.0
 
 RESOURCE      QUOTA    TASK LIMIT
@@ -1077,15 +1077,15 @@ Watcher 未同期で quota 情報がない場合はメッセージを表示す�
 ```
 $ cjob flavor info cpu
 name:   cpu
-GPU:    非対応
+GPU:    no
 image:  -
 
-（リソース情報がまだ取得されていません）
+(Resource information is not available yet)
 ```
 
 存在しない flavor を指定した場合はエラーを表示する。
 
 ```
 $ cjob flavor info xxx
-Error: flavor 'xxx' は存在しません。利用可能な flavor: cpu, gpu-a100
+Error: flavor 'xxx' does not exist. Available flavors: cpu, gpu-a100
 ```

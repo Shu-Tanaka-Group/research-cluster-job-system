@@ -386,7 +386,7 @@ UPDATE flavor_quotas SET drf_weight = :weight WHERE flavor = :flavor;
 ### 7.3 設計判断
 
 - **TEXT 保存**: nominalQuota を K8s リソース量文字列のまま保存する。CLI の表示で "1000Gi" をそのまま使用でき、数値パース→復元の情報損失（例: 1000Gi → 1024000 MiB → 復元不可）を回避する。DB 上でのリソース量演算は不要
-- **テーブルが空の場合のフォールバック**: Watcher 未同期時は `flavor_quotas` が空となる。Submit API のリソースバリデーションは `node_resources` の allocatable のみで判定する。`GET /v1/flavors` は `quota: null` を返し、CLI は「リソース情報がまだ取得されていません」と表示する
+- **テーブルが空の場合のフォールバック**: Watcher 未同期時は `flavor_quotas` が空となる。Submit API のリソースバリデーションは `node_resources` の allocatable のみで判定する。`GET /v1/flavors` は `quota: null` を返し、CLI は `(Resource information is not available yet)` と表示する
 - **drf_weight の分離**: `drf_weight` は Kueue から取得する値ではなく管理者が設定する値であるため、Watcher の sync 対象外とし、`cjobctl cluster set-drf-weight` で個別に設定する。Watcher が flavor を DELETE した場合は `drf_weight` も削除され、INSERT した場合はデフォルト 1.0 が適用される
 - **行数の見積もり**: flavor 数と同数。2〜5 flavor 程度を想定しており、クエリのコストは無視できる
 
