@@ -65,10 +65,12 @@ bash scripts/sync-version.sh
 続いてロックファイルを更新する。
 
 ```bash
-cd cli && cargo generate-lockfile && cd ..
-cd ctl && cargo generate-lockfile && cd ..
+cd cli && cargo update -p cjob && cd ..
+cd ctl && cargo update -p cjobctl && cd ..
 cd server && uv lock && cd ..
 ```
+
+いずれも自パッケージのバージョン行のみが変わる。差分が 1 行を超える場合は依存の更新が混ざっているので、`git checkout` で戻してやり直すこと（`cargo generate-lockfile` は全依存を最新化するため使わない）。
 
 ## Step 4: 移行手順の記載漏れ確認
 

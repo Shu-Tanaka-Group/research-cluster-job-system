@@ -132,6 +132,7 @@ cjob list
 
 標準手順に加えて追加の作業が必要なバージョンでは、`docs/migration/` ディレクトリにバージョン固有の移行手順を用意している。該当バージョンへの更新時は標準手順と合わせて参照すること。大きな変更がないバージョンではファイルが存在しない場合がある。
 
+- [v1.16.0](migration/v1.16.0.md) — DB スキーマを Step 4 より先に適用、`WATCHER_DISPATCH_TIMEOUT_SEC` / `WATCHER_DISPATCH_BACKOFF_MAX_SEC` 追加、`RESOURCE_FLAVORS` の事前確認、cjob CLI 再配布必須、Grafana 再インポート
 - [v1.15.0](migration/v1.15.0.md) — Grafana ダッシュボード再インポート、`NODE_BIN_PACKING_ENABLED` 追加、K8s 最低バージョン v1.26 明文化
 - [v1.14.0](migration/v1.14.0.md) — Watcher memory limit 引き上げ、`WATCHER_K8S_LIST_PAGE_SIZE` / `WATCHER_DISPATCH_GRACE_SEC` 追加
 - [v1.13.0](migration/v1.13.0.md) — `cjobctl counters list` 廃止、ClusterQueue cohortName/lendingLimit 削除、`DISPATCHER_METRICS_PORT` 追加

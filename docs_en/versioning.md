@@ -48,14 +48,16 @@ Reflect the version number change in the lock files.
 
 ```bash
 # CLI
-cd cli/ && cargo generate-lockfile && cd ..
+cd cli/ && cargo update -p cjob && cd ..
 
 # Admin CLI
-cd ctl/ && cargo generate-lockfile && cd ..
+cd ctl/ && cargo update -p cjobctl && cd ..
 
 # Server
 cd server/ && uv lock && cd ..
 ```
+
+Each of these rewrites only the version line of its own package. Do not use `cargo generate-lockfile`: it regenerates the entire lock file and updates every dependency to the latest compatible version. Update dependencies in a separate PR so they are not mixed into the release commit.
 
 ### Step 4: Check for Missing Migration Procedures
 
