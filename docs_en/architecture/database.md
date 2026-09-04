@@ -388,7 +388,7 @@ UPDATE flavor_quotas SET drf_weight = :weight WHERE flavor = :flavor;
 ### 7.3 Design Decisions
 
 - **TEXT storage**: nominalQuota is stored as K8s resource quantity strings as-is. "1000Gi" can be displayed directly in the CLI, avoiding information loss from numeric parse→restore (e.g., 1000Gi → 1024000 MiB → unrestorable). No resource quantity arithmetic in the DB is needed
-- **Fallback when table is empty**: When the Watcher has not synced, `flavor_quotas` is empty. Submit API resource validation uses only `node_resources` allocatable for judgment. `GET /v1/flavors` returns `quota: null`, and the CLI displays "Resource information has not been retrieved yet"
+- **Fallback when table is empty**: When the Watcher has not synced, `flavor_quotas` is empty. Submit API resource validation uses only `node_resources` allocatable for judgment. `GET /v1/flavors` returns `quota: null`, and the CLI displays `(Resource information is not available yet)`
 - **drf_weight separation**: `drf_weight` is a value set by administrators, not fetched from Kueue, so it is excluded from Watcher sync and set individually via `cjobctl cluster set-drf-weight`. If the Watcher DELETEs a flavor, its `drf_weight` is also deleted; if INSERTed, the default 1.0 is applied
 - **Row count estimate**: Same as the number of flavors. Approximately 2-5 flavors are assumed, making query cost negligible
 

@@ -182,7 +182,8 @@ To check resource limits for each type, use `cjob flavor info`.
 ```
 $ cjob flavor info gpu
 name:   gpu
-GPU:    Supported
+GPU:    yes
+image:  your-registry/cjob-cuda:2.1.0
 
 RESOURCE        QUOTA   TASK LIMIT
 CPU                32           32
