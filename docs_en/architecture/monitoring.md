@@ -122,7 +122,7 @@ A summary row placed at the top of the dashboard. Allows understanding cluster s
 | Job Status Breakdown | Pie chart | PostgreSQL | Job status breakdown for the last 24 hours (excluding DISPATCHING) |
 | Running Jobs | Stat | PostgreSQL | Total number of running jobs across all users |
 | Success Rate (Last 24 hours) | Stat | Prometheus | SUCCEEDED / (SUCCEEDED + FAILED) |
-| Active Users | Stat | PostgreSQL | Number of users (namespaces) with RUNNING jobs |
+| Awaiting Placement (Backoff) | Stat | PostgreSQL | Number of jobs requeued by the DISPATCHED stall guard whose `retry_after` is in the future |
 | Cluster Node Count | Stat | PostgreSQL | Number of records in the node_resources table |
 
 #### Row 3: Queue Status
@@ -130,7 +130,6 @@ A summary row placed at the top of the dashboard. Allows understanding cluster s
 | Panel | Type | DataSource | Content |
 |---|---|---|---|
 | Queue Usage by Flavor | Table | PostgreSQL | Number of running, awaiting resource allocation, submitted, and held jobs per flavor |
-| Awaiting Placement (Backoff) | Stat | PostgreSQL | Number of jobs requeued by the DISPATCHED stall guard whose `retry_after` is in the future |
 | Queue Job Count Over Time | Time series | Prometheus | Trend of running (admitted_active) and awaiting-resource-allocation (pending) jobs |
 | Job Submission and Completion Over Time | Time series (line) | Prometheus | Submission and completion counts by time period |
 
@@ -200,9 +199,9 @@ Statuses counted by each panel:
 |---|---|---|
 | Jobs Awaiting Resource Allocation (Row 1) | DISPATCHED only | Immediate indicator of resource contention |
 | Job Status Breakdown pie chart (Row 2) | QUEUED / DISPATCHED / RUNNING / HELD / terminal states | 24-hour overview (only DISPATCHING is excluded) |
+| Awaiting Placement (Backoff) (Row 2) | QUEUED with `unschedulable_count > 0` and `retry_after > NOW()` | Visibility into jobs requeued because they could not be placed |
 | Queue Usage by Flavor (Row 3) | QUEUED / DISPATCHED / RUNNING / HELD | Breakdown of queue state per flavor |
 | Queue Job Count Over Time (Row 3) | `kueue_admitted_active_workloads` and `kueue_pending_workloads` (≒ DISPATCHED) | Trend of resource contention |
-| Awaiting Placement (Backoff) (Row 3) | QUEUED with `unschedulable_count > 0` and `retry_after > NOW()` | Visibility into jobs requeued because they could not be placed |
 
 **Reason for excluding QUEUED from resource-contention indicators (Row 1 / Row 3 time series)**:
 
@@ -329,9 +328,6 @@ ORDER BY
 
 -- Number of running jobs
 SELECT COUNT(*) AS "Running" FROM jobs WHERE status = 'RUNNING';
-
--- Number of active users
-SELECT COUNT(DISTINCT namespace) AS "User count" FROM jobs WHERE status = 'RUNNING';
 
 -- Queue usage by flavor (no query changes needed when adding flavors)
 SELECT

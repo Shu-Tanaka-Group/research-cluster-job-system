@@ -120,7 +120,7 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | ジョブ状態の内訳 | Pie chart | PostgreSQL | 直近 24 時間のジョブ状態内訳（DISPATCHING を除く） |
 | 実行中ジョブ数 | Stat | PostgreSQL | 全ユーザー合計の実行中ジョブ数 |
 | 成功率（直近 24 時間） | Stat | Prometheus | SUCCEEDED / (SUCCEEDED + FAILED) |
-| アクティブユーザー数 | Stat | PostgreSQL | RUNNING ジョブを持つユーザー（namespace）数 |
+| 配置待ちバックオフ中 | Stat | PostgreSQL | DISPATCHED 滞留ガードで差し戻され `retry_after` が未来のジョブ数 |
 | クラスタノード数 | Stat | PostgreSQL | node_resources テーブルのレコード数 |
 
 #### Row 3: キューの状態
@@ -128,7 +128,6 @@ kubectl apply --server-side -f https://github.com/kubernetes-sigs/kueue/releases
 | Panel | Type | DataSource | 内容 |
 |---|---|---|---|
 | Flavor 別キュー使用状況 | Table | PostgreSQL | flavor ごとの実行中・リソース割当待ち・投入済み・保留中ジョブ数 |
-| 配置待ちバックオフ中 | Stat | PostgreSQL | DISPATCHED 滞留ガードで差し戻され `retry_after` が未来のジョブ数 |
 | キュー内ジョブ数の推移 | Time series | Prometheus | 実行中（admitted_active）とリソース割当待ち（pending）の推移 |
 | ジョブ投入・完了の推移 | Time series (line) | Prometheus | 時間帯別の投入数と完了数 |
 
@@ -198,9 +197,9 @@ Kueue v0.16.4 では `resource.Quantity.AsApproximateFloat64()` で変換され�
 |---|---|---|
 | リソース割当待ちジョブ数（Row 1） | DISPATCHED のみ | リソース競合の即時指標 |
 | ジョブ状態の内訳 piechart（Row 2） | QUEUED / DISPATCHED / RUNNING / HELD / 終了系 | 直近 24 時間の全体俯瞰（DISPATCHING のみ除外） |
+| 配置待ちバックオフ中（Row 2） | QUEUED かつ `unschedulable_count > 0` かつ `retry_after > NOW()` | 配置不能で差し戻されたジョブの滞留把握 |
 | Flavor 別キュー使用状況（Row 3） | QUEUED / DISPATCHED / RUNNING / HELD | Flavor ごとのキュー状態の内訳 |
 | キュー内ジョブ数の推移（Row 3） | `kueue_admitted_active_workloads` と `kueue_pending_workloads`（≒ DISPATCHED） | リソース競合の推移 |
-| 配置待ちバックオフ中（Row 3） | QUEUED かつ `unschedulable_count > 0` かつ `retry_after > NOW()` | 配置不能で差し戻されたジョブの滞留把握 |
 
 **リソース競合指標（Row 1 / Row 3 時系列）で QUEUED を除外する理由**:
 
@@ -327,9 +326,6 @@ ORDER BY
 
 -- 実行中ジョブ数
 SELECT COUNT(*) AS "実行中" FROM jobs WHERE status = 'RUNNING';
-
--- アクティブユーザー数
-SELECT COUNT(DISTINCT namespace) AS "ユーザー数" FROM jobs WHERE status = 'RUNNING';
 
 -- Flavor 別キュー使用状況（flavor 追加時もクエリ変更不要）
 SELECT
