@@ -2,13 +2,21 @@
 
 ## 1. ブランチ命名規則
 
+issue に紐づく変更:
+
 ```
 <変更のタイプ>/#<issue番号>_<タイトル>
 ```
 
+issue に紐づかない変更:
+
+```
+<変更のタイプ>/<タイトル>
+```
+
 - タイトルはケバブケース（小文字、単語区切りはハイフン）で記述する
-- issue に紐づかない軽微な変更は main に直接コミットしてよい
-- `release` タイプは issue に紐づかないため例外的に `release/v<バージョン>` 形式とする（例: `release/v1.15.0`）。手順は [versioning.md](versioning.md) §Step 7 を参照
+- issue に紐づかない軽微な変更は main に直接コミットしてよい。ブランチを切って PR にしてもよく、その場合は issue 番号を省いた上記の形式を使う
+- `release` タイプは例外的に `release/v<バージョン>` 形式とする（例: `release/v1.15.0`）。手順は [versioning.md](versioning.md) §Step 7 を参照
 
 ### 変更のタイプ
 
@@ -27,6 +35,7 @@
 feature/#2_gap-filling-dispatch-for-large-jobs
 fix/#15_cancel-race-condition
 docs/#8_update-deployment-guide
+docs/overlay-remote-base          # issue に紐づかない変更
 release/v1.15.0
 ```
 
