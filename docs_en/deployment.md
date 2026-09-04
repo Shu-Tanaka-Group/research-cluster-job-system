@@ -353,6 +353,7 @@ spec:
 EOF
 
 # Create ResourceQuota
+# The values below are examples; adjust them to your cluster size and number of users.
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ResourceQuota

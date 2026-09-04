@@ -351,6 +351,7 @@ spec:
 EOF
 
 # ResourceQuota 作成
+# 以下の値はサンプルであり、クラスタの規模とユーザー数に合わせて調整すること。
 kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ResourceQuota
