@@ -152,6 +152,9 @@ kubectl port-forward svc/postgres 5432:5432 -n cjob-system
 ## Job Pod のランタイムイメージ
 
 Job Pod が使用するランタイムイメージ（`your-registry/cjob-jupyter:2.1.0` 等）は本リポジトリの管理対象外である。
-CLI が `CJOB_IMAGE` 環境変数からイメージ名を取得する。`CJOB_IMAGE` が未設定の場合は `JUPYTER_IMAGE` にフォールバックする。いずれも未設定の場合はエラーとなる。
 
-通常、JupyterHub の User Pod では `JUPYTER_IMAGE` が自動的に設定されるため、User Pod と同一イメージで Job Pod が実行される。User Pod とは異なるイメージで Job を実行したい場合は `CJOB_IMAGE` を明示的に設定する。
+Job Pod のイメージは Submit API が `--image` > flavor 既定イメージ > 投入 Pod のイメージ の順で解決する（[api.md](architecture/api.md) §2.2）。
+
+`CJOB_IMAGE` / `JUPYTER_IMAGE` は **投入 Pod のイメージ名を CLI に伝えるための環境変数** である。CLI は `CJOB_IMAGE` を優先し、未設定の場合は `JUPYTER_IMAGE` にフォールバックする。通常、JupyterHub の User Pod では `JUPYTER_IMAGE` が自動的に設定されるため、User Pod と同一イメージで Job Pod が実行される。JupyterHub 以外の環境ではこの動作のために `CJOB_IMAGE` を設定する。
+
+いずれも未設定でも、flavor 既定イメージまたは `cjob add --image` で解決できればジョブは投入できる。ユーザーが個別のジョブでイメージを変更する場合は `CJOB_IMAGE` ではなく `--image` を使う（`CJOB_IMAGE` は flavor 既定イメージより優先度が低いため、既定イメージを持つ flavor では上書きにならない）。

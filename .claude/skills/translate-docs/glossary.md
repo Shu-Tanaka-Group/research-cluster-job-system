@@ -78,6 +78,11 @@
 | ユーザー namespace | user namespace | 修飾語は `user-namespace` |
 | dispatch budget | dispatch budget | ハイフンなし |
 | 未知フィールド | unknown field | **`unrecognized field` は使わない** |
+| flavor 既定イメージ / 既定イメージ | flavor default image | **`default flavor image` と語順を入れ替えない** |
+| 解決順序（image の） | resolution order | 動詞は `resolve` |
+| 再解決 | re-resolution（名詞）/ re-resolve（動詞） | **`reresolution` と綴らない** |
+| 確定値 / 確定イメージ | resolved value / resolved image | `jobs.image` に保存される値 |
+| 許可パターン（Kyverno の） | allowed pattern | **`permitted pattern` は使わない** |
 | 構造バリデーション / 構造チェック | structural validation / structural check | 日本語側の使い分けに従う。`structure validation` とは綴らない |
 | 突き合わせる | cross-check | 他キーの現在値との照合 |
 | 整合（設定値どうしの） | consistency | 「整合チェック」は `consistency check` |

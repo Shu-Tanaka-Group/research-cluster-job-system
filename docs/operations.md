@@ -394,17 +394,38 @@ kubectl edit clusterqueue cjob-cluster-queue
 cjobctl config set RESOURCE_FLAVORS --from-file flavors.json
 ```
 
-`RESOURCE_FLAVORS` の JSON 配列に新しい flavor 定義を追加する。GPU を持つ flavor は `gpu_resource_name` を指定する。
+`RESOURCE_FLAVORS` の JSON 配列に新しい flavor 定義を追加する。GPU を持つ flavor は `gpu_resource_name` を指定する。その flavor のジョブを投入 Pod とは別のイメージで実行する場合は `image` を指定する（§8.4.1 参照）。
 
 ```json
 [
   {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
-  {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu"},
+  {"name": "gpu", "label_selector": "cjob.io/flavor=gpu", "gpu_resource_name": "nvidia.com/gpu", "image": "your-registry/cjob-cuda:2.1.0"},
   {"name": "<新flavor名>", "label_selector": "cjob.io/flavor=<新flavor名>"}
 ]
 ```
 
 `cjobctl config set` は構造チェック（必須フィールド・未知フィールド・`name` の重複・`label_selector` の形式・`DEFAULT_FLAVOR` との整合）を行うため、タイポは適用前に検出される。検証項目は [resources.md](architecture/resources.md) の「`RESOURCE_FLAVORS` のスキーマ制約」を参照。
+
+#### 8.4.1 flavor 既定イメージを設定する場合の確認事項
+
+`image` を省略した flavor では、ジョブは投入元 User Pod と同じイメージで実行される（従来どおりの動作）。`image` を指定すると、その flavor に投入されたジョブは指定イメージで実行される（ユーザーが `cjob add --image` で明示指定した場合を除く。[api.md](architecture/api.md) §2.2）。
+
+`image` を設定・変更する前に、次の 2 点を必ず確認する。**どちらも `cjobctl config set` の構造チェックでは検出できない。**
+
+1. **Kyverno の許可パターンに一致すること**（[deployment.md](deployment.md) §14）
+
+   ```bash
+   # 現在の許可パターンを確認する
+   kubectl get clusterpolicy restrict-job-image -o jsonpath='{.spec.rules[0].validate.pattern.spec.template.spec.containers[0].image}'
+   ```
+
+   許可パターン外のイメージを設定すると、その flavor へのジョブ投入は成功する一方、dispatch 時の admission で拒否されて FAILED になる。ユーザーからの報告があるまで管理者が気づけないため、設定前の確認が重要である。
+
+2. **投入 Pod のイメージと同じ base から派生し、Python のバージョンとインストールパスが一致していること**（[prerequisites.md](architecture/prerequisites.md) §2.1）
+
+   PVC 上の venv は投入元 User Pod でビルドされ、submit 時の `VIRTUAL_ENV` / `PATH` が Job Pod で再現される。base が異なると Job Pod 側で venv が壊れる。
+
+設定後は §8.5 の再起動を行い、`cjob flavor list` の IMAGE 列に反映されていることと、実際にジョブが起動することを確認する。
 
 ### 8.5 コンポーネントを再起動する
 

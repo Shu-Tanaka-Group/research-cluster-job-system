@@ -5,8 +5,8 @@
 ## 1. Basic Commands
 
 ```bash
-cjob add [--cpu <cpu>] [--memory <memory>] [--flavor <name>] [--gpu <N>] [--time-limit <duration>] -- <command...>
-cjob sweep -n <count> --parallel <n> [--flavor <name>] [--gpu <N>] [--time-limit <duration>] -- <command...>
+cjob add [--cpu <cpu>] [--memory <memory>] [--flavor <name>] [--gpu <N>] [--time-limit <duration>] [--image <image>] -- <command...>
+cjob sweep -n <count> --parallel <n> [--flavor <name>] [--gpu <N>] [--time-limit <duration>] [--image <image>] -- <command...>
 cjob list [--status <status>] [--flavor <name>] [--time-limit <range>] [--format ids] [--limit <n>] [--all] [--reverse]
 cjob status <job-id>
 cjob cancel <job-id>              # Single specification
@@ -28,7 +28,7 @@ cjob release <start>-<end>        # Range specification (e.g., 1-10)
 cjob release <id>,<id>,...        # Multiple specification (e.g., 1,3,5)
 cjob release <start>-<end>,<id>,.. # Combination (e.g., 1-5,8,10-12)
 cjob release --all                # Release all HELD jobs
-cjob set <job-ids> [--cpu <cpu>] [--memory <memory>] [--flavor <name>] [--gpu <N>] [--time-limit <duration>]
+cjob set <job-ids> [--cpu <cpu>] [--memory <memory>] [--flavor <name>] [--gpu <N>] [--time-limit <duration>] [--image <image>]
 cjob reset
 cjob logs <job-id>
 cjob logs --follow <job-id>
@@ -156,7 +156,7 @@ cjob delete --all
 
 ## 3. `cjob sweep` Behavior
 
-1. Like `cjob add`, collects `pwd`, exported environment variables, and `CJOB_IMAGE` / `JUPYTER_IMAGE` (exits with error if neither is set)
+1. Like `cjob add`, collects `pwd`, exported environment variables, and the submitting Pod's image name (`CJOB_IMAGE` → `JUPYTER_IMAGE`) (does not exit with an error when neither is set; see "How the Image Is Determined" in §4)
 2. Joins the argv after `--` in a shell-safe manner to generate the command
 3. Sends `-n` as `completions` and `--parallel` as `parallelism` to `POST /v1/sweep`
 4. Displays `job_id`, task count, and parallelism
@@ -172,6 +172,7 @@ cjob delete --all
 | `--memory <memory>` | Optional | Memory resource. Default "1Gi" |
 | `--gpu <N>` | Optional | Number of GPUs. Default 0 (no GPU) |
 | `--flavor <name>` | Optional | ResourceFlavor name (e.g., "cpu", "gpu-a100"). Server-side default when omitted |
+| `--image <image>` | Optional | Container image for the Job Pod. When omitted, the flavor default image or the submitting Pod's image is used (see "How the Image Is Determined" in §4) |
 | `-- <command>` | Required | Command to execute for each task |
 
 ### `_INDEX_` Placeholder
@@ -217,18 +218,37 @@ cjob sweep -n ${NUM_SEED} -- python train.py --seed _INDEX_       # OK
 | `--gpu <N>` | Optional | Number of GPUs. Default 0 (no GPU) |
 | `--flavor <name>` | Optional | ResourceFlavor name (e.g., "cpu", "gpu-a100"). Server-side default when omitted |
 | `--time-limit <duration>` | Optional | Execution time limit. Server-side default when omitted |
+| `--image <image>` | Optional | Container image for the Job Pod. When omitted, the flavor default image or the submitting Pod's image is used (see "How the Image Is Determined") |
 | `-- <command>` | Required | Command to execute |
 
 ### Behavior
 
 1. Get `pwd`
 2. Collect exported environment variables (including `PATH` / `VIRTUAL_ENV`)
-3. Get container image name from the `CJOB_IMAGE` environment variable (falls back to `JUPYTER_IMAGE` if not set; exits with error if neither is set)
+3. Get the submitting Pod's image name from the `CJOB_IMAGE` environment variable (falls back to `JUPYTER_IMAGE` if not set; does not exit with an error when neither is set, and simply does not send `fallback_image`)
 4. Join the argv after `--` in a shell-safe manner to generate the command
 5. If `--time-limit` is specified, convert to seconds (uses API default value when omitted)
 6. Read ServiceAccount JWT and namespace from fixed paths
-7. Submit job to the API (including `image` and `time_limit_seconds` fields)
+7. Submit job to the API (including `image` when `--image` was specified, `fallback_image` when step 3 obtained a value, and the `time_limit_seconds` field)
 8. Display `job_id`
+
+### How the Image Is Determined
+
+The Job Pod image is resolved by the Submit API in the following priority order ([api.md](api.md) §2.2). The CLI only distinguishes "the user's explicit specification" from "the submitting Pod's image" when sending; it performs no resolution itself.
+
+```
+--image  >  flavor image  >  CJOB_IMAGE / JUPYTER_IMAGE
+└ user explicit ┘  └ administrator ┘  └── submitting Pod's image ──┘
+```
+
+| Field the CLI sends | Source |
+|---|---|
+| `image` | `--image` |
+| `fallback_image` | `CJOB_IMAGE` → `JUPYTER_IMAGE` |
+
+The CLI does not exit with an error even when both `CJOB_IMAGE` and `JUPYTER_IMAGE` are unset, because the flavor default image may still resolve it. When resolution fails from every source, the Submit API returns 400 and the CLI displays that message.
+
+The image actually used can be checked in the `image` line of `cjob status <job-id>` (§7). Each flavor's default image can be checked in the IMAGE column of `cjob flavor list` (§17).
 
 ### `--time-limit` Option
 
@@ -358,6 +378,7 @@ type:         job
 status:       RUNNING
 command:      python main.py --alpha 0.2 --beta 16
 cwd:          /home/jovyan/project-a/exp1
+image:        your-registry/cjob-jupyter:2.1.0
 flavor:       cpu
 cpu:          2
 memory:       4Gi
@@ -372,6 +393,8 @@ node_name:    worker07
 log_dir:      /home/jovyan/.cjob/logs/2
 ```
 
+`image` is the resolved image the Submit API determined at submit time (`jobs.image`). Regardless of whether it was resolved from an explicit `--image`, the flavor default image, or the submitting Pod's image, the value actually used by the Job Pod is displayed (see "How the Image Is Determined" in §4).
+
 `time_limit` displays `time_limit_seconds` in a human-readable format. When the job is RUNNING, remaining time is also shown.
 
 For sweep jobs, additional fields are displayed.
@@ -383,6 +406,7 @@ type:           sweep
 status:         RUNNING
 command:        python main.py --trial $CJOB_INDEX
 cwd:            /home/jovyan/project-a
+image:          your-registry/cjob-jupyter:2.1.0
 flavor:         cpu
 cpu:            2
 memory:         4Gi
@@ -729,7 +753,7 @@ cjob release --all
 
 ## 13. `cjob set` Behavior
 
-For jobs in QUEUED or HELD state, overrides the resource request, flavor, and time limit that will be passed to the Dispatcher. Exits with an error if no field is specified.
+For jobs in QUEUED or HELD state, overrides the resource request, flavor, image, and time limit that will be passed to the Dispatcher. Exits with an error if no field is specified.
 
 The job_id specification format is the same as `cjob cancel`, supporting single, range, and combined formats. Single-id invocations call `POST /v1/jobs/{job_id}/set`; multi-id invocations call `POST /v1/jobs/set`.
 
@@ -741,9 +765,26 @@ The job_id specification format is the same as `cjob cancel`, supporting single,
 | `--memory <memory>` | string | Memory request (e.g., `16Gi`, `16384Mi`) |
 | `--gpu <N>` | integer | Number of GPUs |
 | `--flavor <name>` | string | ResourceFlavor name |
+| `--image <image>` | string | Container image for the Job Pod |
 | `--time-limit <duration>` | string | Execution time limit (e.g., `12h`, `30m`); converted to seconds before sending to the API |
 
 Fields not specified are left unchanged. Value parsing (e.g., `parse_duration`) reuses the same utilities as `cjob add`.
+
+The image is the one exception: it can change implicitly along with a `--flavor` change. See "Image Re-resolution" for details.
+
+### Image Re-resolution
+
+Because changing the flavor also changes which image is appropriate for execution, the Submit API re-resolves the image by the following rules ([api.md](api.md) §11.1).
+
+| `--image` | `--flavor` | Handling of image |
+|---|---|---|
+| Present | Present / absent | Updated to the specified value |
+| Absent | Present | Updated to the new flavor's default image if it has one; otherwise kept |
+| Absent | Absent | Kept |
+
+Changing the flavor of a job whose image was specified explicitly with `cjob add --image` loses that explicit specification. To keep it, specify `--image` at the same time.
+
+When the image changes, the CLI displays the new image on one line for both single-id and multi-id invocations. Even for multi-id invocations the same `--flavor` / `--image` is applied to every job, so the resulting image is a single value.
 
 ### Target Job Conditions
 
@@ -757,9 +798,9 @@ The API enforces the following state checks:
 ```
 # Note: The CLI is implemented in Rust. The following is pseudocode for conceptual explanation.
 
-fn cmd_set(expr, cpu, memory, gpu, flavor, time_limit):
+fn cmd_set(expr, cpu, memory, gpu, flavor, image, time_limit):
     if all parameters are None:
-        Error exit: "specify at least one parameter to modify (--cpu, --memory, --gpu, --flavor, --time-limit)"
+        Error exit: "specify at least one parameter to modify (--cpu, --memory, --gpu, --flavor, --image, --time-limit)"
 
     time_limit_seconds = convert time_limit to seconds (when specified)
 
@@ -767,12 +808,26 @@ fn cmd_set(expr, cpu, memory, gpu, flavor, time_limit):
     if len(job_ids) == 1:
         Send parameters to POST /v1/jobs/{job_id}/set
         Display "Job {job_id}: {status}"
+        If the response image is non-null: Display "image: {image}"
     else:
         Send job_ids and parameters to POST /v1/jobs/set
         Receive result:
             If modified: Display "Modified: [job_ids]"
             If skipped: Display "Skipped (not QUEUED / HELD): [job_ids]"
             If not_found: Display "Not found: [job_ids]"
+            If image is non-null: Display "image: {image}"
+```
+
+When the image did not change, the response's `image` is `null` and nothing is displayed.
+
+```
+$ cjob set 5 --flavor gpu
+Job 5: QUEUED
+image: your-registry/cjob-cuda:2.1.0
+
+$ cjob set 10-20 --flavor gpu
+Modified: [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+image: your-registry/cjob-cuda:2.1.0
 ```
 
 ### Usage Examples
@@ -789,6 +844,12 @@ cjob set 10-20,25,30 --cpu 8
 
 # Feed IDs from cjob list (switch flavor while keeping jobs QUEUED)
 cjob set $(cjob list --status QUEUED --flavor cpu --format ids) --flavor cpu-sub
+
+# Change the flavor while pinning the image to an explicitly specified one
+cjob set 5 --flavor gpu --image your-registry/cjob-cuda:2.1.0
+
+# Replace only the image
+cjob set 5 --image your-registry/cjob-cuda:2.2.0
 ```
 
 ## 14. `cjob reset` Behavior
@@ -973,10 +1034,12 @@ Displays the list of available flavors. The default flavor is marked with `*`.
 
 ```
 $ cjob flavor list
-NAME             GPU    NODES    DEFAULT
-cpu              -      2          *
-gpu-a100         yes    1
+NAME             GPU    NODES    IMAGE                              DEFAULT
+cpu              -      2        -                                    *
+gpu-a100         yes    1        your-registry/cjob-cuda:2.1.0
 ```
+
+The IMAGE column is that flavor's default image (`image` in `RESOURCE_FLAVORS`). Flavors where it is not set display `-`, and jobs on such a flavor use the submitting Pod's image at submission time (see "How the Image Is Determined" in §4).
 
 ### `cjob flavor info <name>`
 
@@ -988,6 +1051,7 @@ QUOTA is the ClusterQueue's nominalQuota (total resource amount shared across th
 $ cjob flavor info cpu
 name:   cpu
 GPU:    Not supported
+image:  -
 
 RESOURCE      QUOTA    TASK LIMIT
 CPU             256           128
@@ -1000,6 +1064,7 @@ For GPU-capable flavors, the GPU row is also displayed.
 $ cjob flavor info gpu-a100
 name:   gpu-a100
 GPU:    Supported
+image:  your-registry/cjob-cuda:2.1.0
 
 RESOURCE      QUOTA    TASK LIMIT
 CPU              64            64
@@ -1007,12 +1072,15 @@ Memory        500Gi         500Gi
 GPU               4             4
 ```
 
+The `image` line is that flavor's default image. Flavors where it is not set display `-`.
+
 When quota information is not available because the Watcher has not yet synced, a message is displayed.
 
 ```
 $ cjob flavor info cpu
 name:   cpu
 GPU:    Not supported
+image:  -
 
 (Resource information has not been retrieved yet)
 ```

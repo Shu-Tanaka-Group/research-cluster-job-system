@@ -154,6 +154,9 @@ kubectl port-forward svc/postgres 5432:5432 -n cjob-system
 ## Job Pod Runtime Image
 
 The runtime image used by Job Pods (e.g., `your-registry/cjob-jupyter:2.1.0`) is not managed by this repository.
-The CLI obtains the image name from the `CJOB_IMAGE` environment variable. If `CJOB_IMAGE` is not set, it falls back to `JUPYTER_IMAGE`. If neither is set, an error occurs.
 
-Normally, `JUPYTER_IMAGE` is automatically set in JupyterHub User Pods, so Job Pods run with the same image as the User Pod. To run Jobs with a different image from the User Pod, explicitly set `CJOB_IMAGE`.
+The Job Pod image is resolved by the Submit API in the order `--image` > flavor default image > submitting Pod's image ([api.md](architecture/api.md) section 2.2).
+
+`CJOB_IMAGE` / `JUPYTER_IMAGE` are **environment variables that tell the CLI the submitting Pod's image name**. The CLI prefers `CJOB_IMAGE` and falls back to `JUPYTER_IMAGE` if it is not set. Normally, `JUPYTER_IMAGE` is automatically set in JupyterHub User Pods, so Job Pods run with the same image as the User Pod. In non-JupyterHub environments, set `CJOB_IMAGE` to obtain this behavior.
+
+Even when neither is set, jobs can be submitted as long as the image can be resolved from the flavor default image or `cjob add --image`. To change the image for an individual job, use `--image` rather than `CJOB_IMAGE` (`CJOB_IMAGE` has lower priority than the flavor default image, so it does not act as an override for flavors that have a default image).

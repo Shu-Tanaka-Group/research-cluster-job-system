@@ -20,6 +20,24 @@ class TestFlavorDefinition:
         )
         assert f.gpu_resource_name == "nvidia.com/gpu"
 
+    def test_image_definition(self):
+        f = FlavorDefinition(
+            name="gpu",
+            label_selector="cjob.io/flavor=gpu",
+            image="registry/cuda:1.0",
+        )
+        assert f.image == "registry/cuda:1.0"
+
+    def test_image_defaults_to_none(self):
+        f = FlavorDefinition(name="cpu", label_selector="cjob.io/flavor=cpu")
+        assert f.image is None
+
+    def test_image_null_is_same_as_omitted(self):
+        f = FlavorDefinition(
+            name="cpu", label_selector="cjob.io/flavor=cpu", image=None
+        )
+        assert f.image is None
+
     def test_unknown_field_is_rejected(self):
         # A typo in an optional field must fail loudly instead of being
         # silently dropped (issue #209)

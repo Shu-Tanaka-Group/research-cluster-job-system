@@ -34,7 +34,8 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 ```json
 {
   "command": "python main.py --alpha 0.1 --beta 16",
-  "image": "your-registry/cjob-jupyter:2.1.0",
+  "image": "your-registry/cjob-cuda:2.1.0",
+  "fallback_image": "your-registry/cjob-jupyter:2.1.0",
   "cwd": "/home/jovyan/project-a/exp1",
   "env": {
     "OMP_NUM_THREADS": "4",
@@ -49,6 +50,13 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
   "time_limit_seconds": 3600
 }
 ```
+
+`image` と `fallback_image` はいずれも省略可能で、Job Pod のイメージはこの 2 つと flavor 定義から §2.2 の順序で解決される。
+
+| フィールド | 送信元 | 説明 |
+|---|---|---|
+| `image` | `cjob add --image` | ユーザーによる明示指定。最優先で採用される |
+| `fallback_image` | 投入 Pod の `CJOB_IMAGE` → `JUPYTER_IMAGE` | 投入元 User Pod のイメージ。flavor 既定イメージより優先度が低い |
 
 `resources` 内の各フィールドは省略可能。省略時のデフォルト値:
 
@@ -133,10 +141,10 @@ CLI はこの API を呼ぶ薄いクライアントとして実装する。
 { "detail": "command は空にできません" }
 ```
 
-`image` が空文字の場合は 400 を返す。
+`image` / flavor 既定イメージ / `fallback_image` のいずれからも Job Pod のイメージを解決できない場合は 400 を返す（§2.2 参照）。
 
 ```json
-{ "detail": "image は空にできません" }
+{ "detail": "image を解決できません。--image で指定するか、flavor 'cpu' に既定イメージを設定するか、CJOB_IMAGE / JUPYTER_IMAGE を設定してください" }
 ```
 
 namespace のジョブ総数（QUEUED / DISPATCHING / DISPATCHED / HELD / CANCELLED の合計）が
@@ -168,7 +176,8 @@ CLI が受け付ける `_INDEX_` プレースホルダーは CLI クライアン
 ```json
 {
   "command": "python main.py --trial $CJOB_INDEX",
-  "image": "your-registry/cjob-jupyter:2.1.0",
+  "image": "your-registry/cjob-cuda:2.1.0",
+  "fallback_image": "your-registry/cjob-jupyter:2.1.0",
   "cwd": "/home/jovyan/project-a",
   "env": {
     "OMP_NUM_THREADS": "4"
@@ -196,7 +205,7 @@ CLI が受け付ける `_INDEX_` プレースホルダーは CLI クライアン
 
 ### バリデーション
 
-`POST /v1/jobs` と共通のバリデーション（単一ノードリソース超過、GPU バリデーション、time_limit、ジョブ数上限、DELETING チェック）に加え、以下の sweep 固有バリデーションを行う。
+`POST /v1/jobs` と共通のバリデーション（単一ノードリソース超過、GPU バリデーション、time_limit、image 解決、ジョブ数上限、DELETING チェック）に加え、以下の sweep 固有バリデーションを行う。
 
 - `completions` が 1 未満 → 400
 - `completions` が `MAX_SWEEP_COMPLETIONS`（デフォルト 1000）を超える → 400
@@ -219,6 +228,33 @@ CLI が受け付ける `_INDEX_` プレースホルダーは CLI クライアン
 ```json
 { "detail": "parallelism × 要求 GPU (8) が flavor 'gpu-a100' の GPU 合計 (4) を超えています" }
 ```
+
+## 2.2 image の解決順序
+
+`POST /v1/jobs` と `POST /v1/sweep` は、Job Pod で使用するイメージを次の優先順位で解決し、確定値を `jobs.image` に保存する。
+
+```
+--image  >  flavor の image  >  fallback_image
+└ ユーザー明示 ┘  └ 管理者定義 ┘  └ 投入 Pod のイメージ ┘
+```
+
+| # | 解決元 | 内容 |
+|---|---|---|
+| 1 | リクエストの `image` | ユーザーが `cjob add --image` / `cjob sweep --image` で明示指定した値 |
+| 2 | flavor 定義の `image` | 解決済み flavor（`resources.flavor` 省略時は `DEFAULT_FLAVOR`）の既定イメージ（[resources.md](resources.md) の `RESOURCE_FLAVORS`） |
+| 3 | リクエストの `fallback_image` | 投入 Pod の `CJOB_IMAGE` → `JUPYTER_IMAGE` から CLI が取得した値 |
+
+いずれの段階でも解決できない場合は 400 を返す。空文字は「未指定」として扱い、次の候補にフォールバックする。
+
+解決を CLI ではなく Submit API で行うのは、次の理由による。
+
+- flavor の解決（`DEFAULT_FLAVOR` の適用）を CLI と Submit API で二重実装せずに済む
+- 確定値が `jobs.image` に保存されるため、`cjob status` に実際のイメージが表示され、リトライや再 dispatch でも値が揺れない
+- `RESOURCE_FLAVORS` の変更が投入済みジョブに遡及しない
+
+**後方互換**: 旧 CLI は `image` を必ず送るため、優先順位 1 で常に採用され従来どおりの動作となる。ただし旧 CLI では flavor 既定イメージが適用されないため、この機能を利用するには CLI の更新が必要である（[migration/unreleased.md](../migration/unreleased.md) 参照）。
+
+Submit API は許可イメージのリストを持たない。使用可能なイメージの制限は Kyverno の `restrict-job-image` ポリシー（[deployment.md](../deployment.md) §14）に委ね、enforcement のレイヤを二重に持たない。このため許可されないイメージや存在しないタグを指定してもジョブは受理され、dispatch 後の admission 拒否または `ImagePullBackOff` で失敗する。
 
 ## 3. GET /v1/jobs
 
@@ -291,6 +327,7 @@ GET /v1/jobs?time_limit_ge=21600&time_limit_lt=43200
   "namespace": "user-alice",
   "command": "python main.py --alpha 0.1 --beta 16",
   "cwd": "/home/jovyan/project-a/exp1",
+  "image": "your-registry/cjob-jupyter:2.1.0",
   "cpu": "2",
   "memory": "4Gi",
   "gpu": 0,
@@ -546,6 +583,7 @@ QUEUED / HELD ジョブのパラメータを変更する。指定されたフィ
 | `memory` | `string \| null` | メモリリソース（例: `"4Gi"`, `"500Mi"`） |
 | `gpu` | `int \| null` | GPU 数 |
 | `flavor` | `string \| null` | ResourceFlavor 名 |
+| `image` | `string \| null` | Job Pod のイメージ（§11.1 参照） |
 | `time_limit_seconds` | `int \| null` | 実行時間上限（秒） |
 
 ### response
@@ -553,11 +591,30 @@ QUEUED / HELD ジョブのパラメータを変更する。指定されたフィ
 ```json
 {
   "job_id": 1,
-  "status": "QUEUED"
+  "status": "QUEUED",
+  "image": "your-registry/cjob-cuda:2.1.0"
 }
 ```
 
 `status` はジョブの現在のステータス。変更成功時は `QUEUED` または `HELD`、`skipped` 時は実際のステータスを返す。
+
+`image` は image が変更された場合のみ変更後の値を返す。変更されなかった場合と `skipped` 時は `null` を返す。
+
+### 11.1 image の再解決規則
+
+`flavor` を変更すると Job Pod のイメージが暗黙に変わりうるため、次の規則で再解決する。
+
+| `image` | `flavor` | image の扱い |
+|---|---|---|
+| あり | あり / なし | 指定された値に更新する。自動再解決は行わない |
+| なし | あり | 変更後 flavor に既定イメージがあればそれに更新し、なければ据え置く |
+| なし | なし | 据え置く |
+
+「変更後 flavor に既定イメージがあれば無条件で再解決する」という単純な規則を採る。「現在の image が flavor 既定由来かユーザーの明示指定か」を推定する案もあるが、変更前 flavor に既定がない場合（既定なしの flavor から既定ありの flavor への変更）に判定材料がなく、flavor 既定イメージが最も必要とされるケースが漏れる。推定に必要な情報を持つには `jobs` への列追加が必要になる。
+
+このため `cjob add --image` で明示指定したジョブの flavor を変更すると明示指定が失われる。`--image` を同時に指定すれば回避できる。
+
+image が変更された場合、`SET` イベントの `payload_json` にも `image` の変更前後が記録される（[database.md](database.md) §3 参照）。
 
 ### バリデーション
 
@@ -593,15 +650,20 @@ Dispatcher の CAS（`UPDATE ... WHERE status = 'QUEUED'`）との競合を防�
 }
 ```
 
+指定可能なフィールドは §11 と同じ（`image` を含む）。image の再解決規則も §11.1 と同じ。
+
 ### response
 
 ```json
 {
   "modified":  [1, 2],
   "skipped":   [3],
-  "not_found": []
+  "not_found": [],
+  "image":     "your-registry/cjob-cuda:2.1.0"
 }
 ```
+
+`image` は image が変更された場合のみ変更後の値を返す。全ジョブに同じ `flavor` / `image` を適用するため、image が変更される場合その値は全ジョブで同一になる。変更が発生しなかった場合は `null` を返す。
 
 `skipped` は対象ジョブが QUEUED / HELD 以外の状態の場合。バリデーションエラーは各ジョブで独立して発生するため、一部のジョブが成功し一部が失敗する可能性がある。ただし、全ジョブに同じパラメータを適用するため、バリデーションエラーが発生する場合は通常すべてのジョブで発生する。
 
@@ -777,6 +839,7 @@ ResourceQuota が存在しない場合:
     {
       "name": "cpu",
       "has_gpu": false,
+      "image": null,
       "nodes": [
         {"node_name": "worker07", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0},
         {"node_name": "worker08", "cpu_millicores": 128000, "memory_mib": 515481, "gpu": 0}
@@ -786,6 +849,7 @@ ResourceQuota が存在しない場合:
     {
       "name": "gpu-a100",
       "has_gpu": true,
+      "image": "your-registry/cjob-cuda:2.1.0",
       "nodes": [
         {"node_name": "gworker02", "cpu_millicores": 128000, "memory_mib": 515686, "gpu": 4}
       ],
@@ -799,6 +863,8 @@ ResourceQuota が存在しない場合:
 各 flavor の `nodes` には `node_resources` テーブルからその flavor に属するノードの一覧が含まれる。Watcher 未起動でノード情報がない flavor は `nodes` が空配列となる。
 
 `quota` には `flavor_quotas` テーブルから取得した ClusterQueue の nominalQuota が含まれる。Watcher 未同期で quota 情報がない flavor は `quota` が `null` となる。
+
+`image` は `RESOURCE_FLAVORS` に定義された flavor 既定イメージ（[resources.md](resources.md) 参照）。設定されていない flavor では `null` となり、その flavor ではジョブ投入時に投入 Pod のイメージが使われる（§2.2 参照）。
 
 `default_flavor` は ConfigMap `DEFAULT_FLAVOR` の値。
 

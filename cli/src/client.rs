@@ -5,7 +5,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JobSubmitRequest {
     pub command: String,
-    pub image: String,
+    /// Explicit user override (--image). Wins over the flavor default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    /// The submitting pod's own image (CJOB_IMAGE / JUPYTER_IMAGE).
+    /// Loses to the flavor default. See docs/architecture/cli.md section 4.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_image: Option<String>,
     pub cwd: String,
     pub env: std::collections::HashMap<String, String>,
     pub resources: ResourceSpec,
@@ -16,7 +22,10 @@ pub struct JobSubmitRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SweepSubmitRequest {
     pub command: String,
-    pub image: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_image: Option<String>,
     pub cwd: String,
     pub env: std::collections::HashMap<String, String>,
     pub resources: ResourceSpec,
@@ -79,6 +88,7 @@ pub struct JobDetailResponse {
     pub namespace: String,
     pub command: String,
     pub cwd: String,
+    pub image: String,
     pub cpu: String,
     pub memory: String,
     pub gpu: u32,
@@ -157,6 +167,8 @@ pub struct SetParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flavor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub time_limit_seconds: Option<u32>,
 }
 
@@ -172,6 +184,8 @@ pub struct SetRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub flavor: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub time_limit_seconds: Option<u32>,
 }
 
@@ -180,6 +194,9 @@ pub struct SetResponse {
     pub modified: Vec<u32>,
     pub skipped: Vec<u32>,
     pub not_found: Vec<u32>,
+    /// New image, present only when the image actually changed.
+    #[serde(default)]
+    pub image: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -260,6 +277,8 @@ pub struct FlavorQuotaInfo {
 pub struct FlavorInfo {
     pub name: String,
     pub has_gpu: bool,
+    #[serde(default)]
+    pub image: Option<String>,
     pub nodes: Vec<FlavorNodeInfo>,
     pub quota: Option<FlavorQuotaInfo>,
 }

@@ -117,7 +117,7 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 
 | 設定 | 設定箇所 | 値 | 管理主体 | 適用単位 | 説明 |
 |---|---|---|---|---|---|
-| `RESOURCE_FLAVORS` | ConfigMap | JSON 配列 | Watcher / Submit API | 全体 | ResourceFlavor の定義リスト。各要素は `name`（flavor 名）、`label_selector`（K8s ノード取得用ラベルセレクタ）、`gpu_resource_name`（GPU リソース名、省略可）を持つ。Watcher がノード同期時に使用し、Submit API が flavor バリデーションに使用する |
+| `RESOURCE_FLAVORS` | ConfigMap | JSON 配列 | Watcher / Submit API | 全体 | ResourceFlavor の定義リスト。各要素は `name`（flavor 名）、`label_selector`（K8s ノード取得用ラベルセレクタ）、`gpu_resource_name`（GPU リソース名、省略可）、`image`（既定コンテナイメージ、省略可）を持つ。Watcher がノード同期時に使用し、Submit API が flavor バリデーションと image 解決に使用する |
 | `DEFAULT_FLAVOR` | ConfigMap | `cpu` | Submit API | 全体 | ユーザーが `--flavor` を省略した場合に使用されるデフォルトの flavor 名。`RESOURCE_FLAVORS` 内のいずれかの flavor 名と一致している必要がある |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | ConfigMap | 300 (5分) | Watcher | 全体 | ノードリソース同期間隔（秒）。Watcher のメインループの N サイクルに 1 回実行する |
 | `CLUSTER_QUEUE_NAME` | ConfigMap | `cjob-cluster-queue` | Watcher | 全体 | ClusterQueue の名前。Watcher が nominalQuota 同期時に使用する |
@@ -130,8 +130,8 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 ```json
 [
   {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
-  {"name": "gpu-a100", "label_selector": "cjob.io/flavor=gpu-a100", "gpu_resource_name": "nvidia.com/gpu"},
-  {"name": "gpu-h100", "label_selector": "cjob.io/flavor=gpu-h100", "gpu_resource_name": "nvidia.com/gpu"}
+  {"name": "gpu-a100", "label_selector": "cjob.io/flavor=gpu-a100", "gpu_resource_name": "nvidia.com/gpu", "image": "your-registry/cjob-cuda:2.1.0"},
+  {"name": "gpu-h100", "label_selector": "cjob.io/flavor=gpu-h100", "gpu_resource_name": "nvidia.com/gpu", "image": "your-registry/cjob-cuda:2.1.0"}
 ]
 ```
 
@@ -142,6 +142,7 @@ DRF 正規化に使用するクラスタ全体のリソース容量は、`node_r
 | `name` | 必須 | flavor 名。Kueue ResourceFlavor 名・DB の `jobs.flavor` / `node_resources.flavor` と一致させる |
 | `label_selector` | 必須 | K8s ノードの label selector。全 flavor で共通キー `cjob.io/flavor` を使用し、値に flavor 名を設定する。Kueue ResourceFlavor の `nodeLabels` と一致させる |
 | `gpu_resource_name` | 任意 | GPU リソースの K8s リソース名（例: `nvidia.com/gpu`、`amd.com/gpu`）。省略時はその flavor を GPU なし flavor として扱い、`gpu > 0` のジョブ投入を拒否する |
+| `image` | 任意 | その flavor で実行するジョブの既定コンテナイメージ。省略時は投入元 User Pod のイメージを使用する（[api.md](api.md) §2.2 の image 解決順序を参照）。設定する場合は前提条件（[prerequisites.md](prerequisites.md) §2.1）と Kyverno の許可パターン（[deployment.md](../deployment.md) §14）を満たす必要がある |
 
 flavor の `name` は Kueue ResourceFlavor の `metadata.name` と一致させる。これにより `cjobctl cluster set-quota --flavor <name>` で指定する名前と DB の flavor 値が統一され、変換処理が不要になる。
 
@@ -155,14 +156,15 @@ flavor の `name` は Kueue ResourceFlavor の `metadata.name` と一致させ�
 | 2 | 各要素が JSON オブジェクトであること | `cjobctl config set` / サーバ起動時 |
 | 3 | `name` / `label_selector` が存在し、文字列かつ空文字でないこと | `cjobctl config set` / サーバ起動時（存在と型のみ） |
 | 4 | `gpu_resource_name` を指定する場合、文字列かつ空文字でないこと（`null` は省略と同義） | `cjobctl config set` / サーバ起動時（型のみ） |
-| 5 | 上表にないフィールドを含まないこと | `cjobctl config set` / サーバ起動時 |
-| 6 | `name` が重複していないこと | `cjobctl config set` |
-| 7 | `label_selector` が `key=value` 形式であること（`=` はちょうど 1 個、両辺が非空） | `cjobctl config set` |
-| 8 | `DEFAULT_FLAVOR` がいずれかの `name` と一致すること | `cjobctl config set`（`RESOURCE_FLAVORS` 設定時・`DEFAULT_FLAVOR` 設定時の両方） |
+| 5 | `image` を指定する場合、文字列かつ空文字でないこと（`null` は省略と同義） | `cjobctl config set` / サーバ起動時（型のみ） |
+| 6 | 上表にないフィールドを含まないこと | `cjobctl config set` / サーバ起動時 |
+| 7 | `name` が重複していないこと | `cjobctl config set` |
+| 8 | `label_selector` が `key=value` 形式であること（`=` はちょうど 1 個、両辺が非空） | `cjobctl config set` |
+| 9 | `DEFAULT_FLAVOR` がいずれかの `name` と一致すること | `cjobctl config set`（`RESOURCE_FLAVORS` 設定時・`DEFAULT_FLAVOR` 設定時の両方） |
 
 **未知フィールドの拒否**: サーバ側の `FlavorDefinition` は `extra="forbid"` を設定しており、上表にないフィールドを含む定義では Submit API / Dispatcher / Watcher が起動に失敗する。これは `gpu_resouce_name` のような任意フィールドのタイポが黙って無視され、GPU flavor が GPU 非対応として扱われる事故を防ぐためである。
 
-制約 6・7・8 は起動時に検出されない（pydantic のモデル単体では表現できない）ため、`cjobctl config set` 側での検証が唯一の防御線となる。ConfigMap を `cjobctl` を経由せず `kubectl` で直接編集した場合はこれらの検証を通らない点に注意する。
+制約 7・8・9 は起動時に検出されない（pydantic のモデル単体では表現できない）ため、`cjobctl config set` 側での検証が唯一の防御線となる。ConfigMap を `cjobctl` を経由せず `kubectl` で直接編集した場合はこれらの検証を通らない点に注意する。
 
 ノードリソース同期の詳細は [watcher.md](watcher.md) §1.1、DB テーブル定義は [database.md](database.md) §6 を参照。
 

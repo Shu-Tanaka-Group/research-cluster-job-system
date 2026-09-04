@@ -26,7 +26,7 @@
 
 - 現在の作業ディレクトリ取得
 - export 済み環境変数取得（ユーザー設定ファイルの `env.exclude` で指定された変数を除外）
-- コンテナイメージ名取得（`CJOB_IMAGE` 環境変数から取得、未設定時は `JUPYTER_IMAGE` にフォールバック）
+- コンテナイメージの解決（`--image` > flavor 既定イメージ > 投入 Pod のイメージ（`CJOB_IMAGE` → `JUPYTER_IMAGE`）の順。解決は Submit API 側で行い、確定値を `jobs.image` に保存する。[api.md](api.md) §2.2 参照）
 - コマンド文字列の保存
 - ユーザー namespace 解決（ServiceAccount の namespace ファイルから取得）
 - namespace ごとのジョブ総数上限チェック（QUEUED / DISPATCHING / DISPATCHED / HELD / CANCELLED の合計。RUNNING は `DISPATCH_BUDGET_PER_NAMESPACE` で制限されるためカウント対象外）
@@ -47,7 +47,7 @@
 
 ### 1.4 Kubernetes 実行機能
 
-- submit 時に取得した image（`CJOB_IMAGE` → `JUPYTER_IMAGE`）で Job を作成
+- submit 時に Submit API が解決した image（`jobs.image`）で Job を作成
 - PVC を `${WORKSPACE_MOUNT_PATH}`（デフォルト `/home/jovyan`）に mount
 - `workingDir` に submit 時の cwd を設定
 - `env` に submit 時の環境変数を注入
@@ -205,7 +205,7 @@ Watcher / Reconciler (namespace: cjob-system)
   └─ PostgreSQL
 
 Kubernetes Job Pod (namespace: user-alice)
-  ├─ image = User Pod と同一（CJOB_IMAGE → JUPYTER_IMAGE の順で取得）
+  ├─ image = jobs.image（--image > flavor 既定 > User Pod と同一 の順で解決）
   ├─ PVC mounted at ${WORKSPACE_MOUNT_PATH}（デフォルト /home/jovyan）
   ├─ workingDir = cwd
   ├─ env = submit-time env

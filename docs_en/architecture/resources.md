@@ -119,7 +119,7 @@ For details on per-day resource consumption, see [database.md](database.md) §5;
 
 | Setting | Location | Value | Manager | Scope | Description |
 |---|---|---|---|---|---|
-| `RESOURCE_FLAVORS` | ConfigMap | JSON array | Watcher / Submit API | Global | List of ResourceFlavor definitions. Each element has `name` (flavor name), `label_selector` (K8s node label selector), and `gpu_resource_name` (GPU resource name, optional). Used by Watcher during node synchronization and by Submit API for flavor validation. |
+| `RESOURCE_FLAVORS` | ConfigMap | JSON array | Watcher / Submit API | Global | List of ResourceFlavor definitions. Each element has `name` (flavor name), `label_selector` (K8s node label selector), `gpu_resource_name` (GPU resource name, optional), and `image` (default container image, optional). Used by Watcher during node synchronization and by Submit API for flavor validation and image resolution. |
 | `DEFAULT_FLAVOR` | ConfigMap | `cpu` | Submit API | Global | The default flavor name used when the user omits `--flavor`. Must match one of the flavor names in `RESOURCE_FLAVORS`. |
 | `NODE_RESOURCE_SYNC_INTERVAL_SEC` | ConfigMap | 300 (5 min) | Watcher | Global | Node resource synchronization interval (in seconds). Executed once every N cycles of the Watcher's main loop. |
 | `CLUSTER_QUEUE_NAME` | ConfigMap | `cjob-cluster-queue` | Watcher | Global | Name of the ClusterQueue. Used by Watcher during nominalQuota synchronization. |
@@ -132,8 +132,8 @@ For details on per-day resource consumption, see [database.md](database.md) §5;
 ```json
 [
   {"name": "cpu", "label_selector": "cjob.io/flavor=cpu"},
-  {"name": "gpu-a100", "label_selector": "cjob.io/flavor=gpu-a100", "gpu_resource_name": "nvidia.com/gpu"},
-  {"name": "gpu-h100", "label_selector": "cjob.io/flavor=gpu-h100", "gpu_resource_name": "nvidia.com/gpu"}
+  {"name": "gpu-a100", "label_selector": "cjob.io/flavor=gpu-a100", "gpu_resource_name": "nvidia.com/gpu", "image": "your-registry/cjob-cuda:2.1.0"},
+  {"name": "gpu-h100", "label_selector": "cjob.io/flavor=gpu-h100", "gpu_resource_name": "nvidia.com/gpu", "image": "your-registry/cjob-cuda:2.1.0"}
 ]
 ```
 
@@ -144,6 +144,7 @@ Meaning of each field:
 | `name` | Required | Flavor name. Must match the Kueue ResourceFlavor name and the `jobs.flavor` / `node_resources.flavor` values in the DB. |
 | `label_selector` | Required | K8s node label selector. Uses the common key `cjob.io/flavor` across all flavors, with the flavor name as the value. Must match the `nodeLabels` of the Kueue ResourceFlavor. |
 | `gpu_resource_name` | Optional | K8s resource name for the GPU resource (e.g., `nvidia.com/gpu`, `amd.com/gpu`). If omitted, the flavor is treated as a non-GPU flavor and jobs with `gpu > 0` are rejected. |
+| `image` | Optional | Default container image for jobs run on that flavor. If omitted, the submitting User Pod's image is used (see the image resolution order in [api.md](api.md) §2.2). When specified, it must satisfy the prerequisites ([prerequisites.md](prerequisites.md) §2.1) and the Kyverno allowed pattern ([deployment.md](../deployment.md) §14). |
 
 The `name` of a flavor must match the `metadata.name` of the Kueue ResourceFlavor. This unifies the name specified with `cjobctl cluster set-quota --flavor <name>` and the flavor value in the DB, eliminating the need for conversion.
 
@@ -157,14 +158,15 @@ The table in this section is authoritative for the `RESOURCE_FLAVORS` schema. Bo
 | 2 | Each element must be a JSON object | `cjobctl config set` / server startup |
 | 3 | `name` / `label_selector` must be present, be strings, and not be empty | `cjobctl config set` / server startup (presence and type only) |
 | 4 | If `gpu_resource_name` is specified, it must be a string and not be empty (`null` is equivalent to omission) | `cjobctl config set` / server startup (type only) |
-| 5 | No field outside the table above may be present | `cjobctl config set` / server startup |
-| 6 | `name` must not be duplicated | `cjobctl config set` |
-| 7 | `label_selector` must be in `key=value` form (exactly one `=`, both sides non-empty) | `cjobctl config set` |
-| 8 | `DEFAULT_FLAVOR` must match one of the `name` values | `cjobctl config set` (both when setting `RESOURCE_FLAVORS` and when setting `DEFAULT_FLAVOR`) |
+| 5 | If `image` is specified, it must be a string and not be empty (`null` is equivalent to omission) | `cjobctl config set` / server startup (type only) |
+| 6 | No field outside the table above may be present | `cjobctl config set` / server startup |
+| 7 | `name` must not be duplicated | `cjobctl config set` |
+| 8 | `label_selector` must be in `key=value` form (exactly one `=`, both sides non-empty) | `cjobctl config set` |
+| 9 | `DEFAULT_FLAVOR` must match one of the `name` values | `cjobctl config set` (both when setting `RESOURCE_FLAVORS` and when setting `DEFAULT_FLAVOR`) |
 
 **Rejection of unknown fields**: The server-side `FlavorDefinition` sets `extra="forbid"`, so a definition containing a field outside the table above makes Submit API / Dispatcher / Watcher fail to start. This prevents the accident where a typo in an optional field such as `gpu_resouce_name` is silently ignored and a GPU flavor is treated as a non-GPU flavor.
 
-Constraints 6, 7, and 8 are not detected at startup (they cannot be expressed by the pydantic model alone), so validation in `cjobctl config set` is the only line of defense. Note that editing the ConfigMap directly with `kubectl` instead of going through `cjobctl` bypasses these checks.
+Constraints 7, 8, and 9 are not detected at startup (they cannot be expressed by the pydantic model alone), so validation in `cjobctl config set` is the only line of defense. Note that editing the ConfigMap directly with `kubectl` instead of going through `cjobctl` bypasses these checks.
 
 For details on node resource synchronization, see [watcher.md](watcher.md) §1.1; for DB table definitions, see [database.md](database.md) §6.
 
