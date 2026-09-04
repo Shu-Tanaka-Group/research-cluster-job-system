@@ -305,7 +305,11 @@ Key design points:
 
 ## 11. Namespace Creation Script (Complete Version)
 
-Script to run when creating a namespace for a new user.
+Script to run when creating a namespace for a new user. **This script is not included in the repository.** Save the content below as `create-user-namespace.sh` anywhere you like, make it executable, and use it from there.
+
+```bash
+chmod +x create-user-namespace.sh
+```
 
 ```bash
 #!/bin/bash
@@ -855,8 +859,9 @@ helm upgrade kyverno kyverno/kyverno -n kyverno --install --create-namespace --v
 kubectl apply -f policies/restrict-job-image.yaml
 
 # 7. Create each user's namespace (arguments: <namespace-name> <username>)
-./scripts/create-user-namespace.sh user-alice alice
-./scripts/create-user-namespace.sh user-bob bob
+#    The script is the content of §11 saved to a file (not included in the repository)
+<path-to>/create-user-namespace.sh user-alice alice
+<path-to>/create-user-namespace.sh user-bob bob
 
 # 8. Deploy the CLI binary (see §4.1)
 # For building cjobctl, see "Building the Admin CLI (cjobctl)" in build.md
