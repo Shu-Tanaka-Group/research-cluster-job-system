@@ -22,7 +22,7 @@ CJob manages the entire project version with a single `VERSION` file. By updatin
 | `server/pyproject.toml` | Submit API / Dispatcher / Watcher |
 | `cli/Cargo.toml` | cjob CLI |
 | `ctl/Cargo.toml` | cjobctl |
-| `k8s/overlay-example/kustomization.yaml` | Image tag in the overlay example |
+| `k8s/overlay-example/kustomization.yaml` | Image tag (`newTag`) and base reference version (`?ref=`) in the overlay example |
 
 ## Version Update Procedure
 

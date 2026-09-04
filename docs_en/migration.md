@@ -25,6 +25,8 @@ cd /path/to/stg-cluster-job-system
 git fetch && git checkout <VERSION>
 ```
 
+If your overlay references base by Git URL, cloning the repository is not required for the apply itself, but it is still needed for the image build in Step 2 and the CLI build in Step 3.
+
 Check whether any keys have been added to the base ConfigMap. If there are additions, decide whether to reflect tuned values in the overlay's `configmap-cjob-config.yaml` or leave them at their default values.
 
 ```bash
@@ -80,7 +82,21 @@ cargo build --release --target x86_64-unknown-linux-musl
 
 ## Step 4: Apply K8s Resources
 
-Update `newTag` in the overlay's `kustomization.yaml` to the new version (confirm that the image has been pushed in Step 2 before doing this).
+Update the overlay's `kustomization.yaml` to the new version (confirm that the image has been pushed in Step 2 before doing this). **There are two places to update, and they must be set to the same version.**
+
+| Location | Content |
+|---|---|
+| `?ref=` in `resources` | Version of base (Deployment / ConfigMap / RBAC, etc.) |
+| `newTag` in `images` | Container image tag |
+
+Updating only `newTag` pairs the new images with the previous version's Deployment / ConfigMap. Features that require a new ConfigMap key are then silently disabled, so this does not surface as a failure.
+
+```bash
+# After updating, confirm that the two match
+grep -E '\?ref=|newTag:' /path/to/my-overlay/kustomization.yaml
+```
+
+For an overlay that references base by relative path, the `git checkout <VERSION>` in Step 1 switches the base version instead of `?ref=`.
 
 ```bash
 kubectl apply -k /path/to/my-overlay
