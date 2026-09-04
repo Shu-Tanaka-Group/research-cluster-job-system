@@ -134,6 +134,7 @@ If there are version-specific verification items, refer to the PR's Test plan or
 
 For versions that require additional work beyond the standard procedure, version-specific migration procedures are provided in the `docs_en/migration/` directory. When updating to such a version, refer to these alongside the standard procedures. Files may not exist for versions with minor changes.
 
+- [v1.16.0](migration/v1.16.0.md) — Apply the DB schema before Step 4, add `WATCHER_DISPATCH_TIMEOUT_SEC` / `WATCHER_DISPATCH_BACKOFF_MAX_SEC`, verify `RESOURCE_FLAVORS` beforehand, mandatory cjob CLI redistribution, Grafana re-import
 - [v1.15.0](migration/v1.15.0.md) — Re-import Grafana dashboards, add `NODE_BIN_PACKING_ENABLED`, formalize K8s minimum version v1.26
 - [v1.14.0](migration/v1.14.0.md) — Raise Watcher memory limit, add `WATCHER_K8S_LIST_PAGE_SIZE` / `WATCHER_DISPATCH_GRACE_SEC`
 - [v1.13.0](migration/v1.13.0.md) — Retire `cjobctl counters list`, remove ClusterQueue cohortName/lendingLimit, add `DISPATCHER_METRICS_PORT`

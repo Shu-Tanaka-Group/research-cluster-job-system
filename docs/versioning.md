@@ -46,14 +46,16 @@ bash scripts/sync-version.sh
 
 ```bash
 # CLI
-cd cli/ && cargo generate-lockfile && cd ..
+cd cli/ && cargo update -p cjob && cd ..
 
 # 管理 CLI
-cd ctl/ && cargo generate-lockfile && cd ..
+cd ctl/ && cargo update -p cjobctl && cd ..
 
 # Server
 cd server/ && uv lock && cd ..
 ```
+
+いずれも自パッケージのバージョン行だけを書き換える。`cargo generate-lockfile` はロックファイルを全体再生成し、全依存を最新互換版へ更新してしまうため使わない。依存の更新はリリースとは別の PR で行い、リリースコミットに混ぜない。
 
 ### Step 4: 移行手順の記載漏れ確認
 
